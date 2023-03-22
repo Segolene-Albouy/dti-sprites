@@ -32,3 +32,5 @@ jz_*
 /visdom
 /notebook
 report.sh
+evaluate.sh
+recluster.sh
