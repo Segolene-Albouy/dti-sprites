@@ -12,6 +12,7 @@ from torchvision.models import vgg16_bn
 from .mini_resnet import get_resnet_model as get_mini_resnet_model
 from .resnet import get_resnet_model
 from .tools import copy_with_noise, get_output_size, TPSGrid, create_mlp, get_clamp_func
+from utils.logger import print_info, print_warning
 
 
 N_HIDDEN_UNITS = 128
@@ -40,7 +41,7 @@ class PrototypeTransformationNetwork(nn.Module):
             'in_channels': self.enc_out_channels,
             'img_size': img_size,
             'sequence_name': self.sequence_name,
-            'color_channels': in_channels,
+            #'color_channels': in_channels,
             'grid_size': kwargs.get('grid_size', 4),
             'kernel_size': kwargs.get('kernel_size', 3),
             'padding_mode': kwargs.get('padding_mode', 'zeros'),
@@ -67,6 +68,16 @@ class PrototypeTransformationNetwork(nn.Module):
             target = torch.stack(target, dim=1)
         return inp, target
 
+    @torch.no_grad()
+    def inverse_transform(self, x, features=None):
+        """Apply inverse transformation to the inputs (for visual purposes)"""
+        if self.is_identity:
+            return x.unsqueeze(1).expand(-1, self.n_prototypes, -1, -1, -1)
+        else:
+            features = self.encoder(x[:,:3,...]) if features is None else features
+            y = torch.stack([tsf_seq(x, features, inverse=True) for tsf_seq in self.tsf_sequences], 1)
+            return y
+    
     def predict_parameters(self, x=None, features=None):
         features = self.encoder(x) if features is None else features
         return torch.stack([tsf_seq.predict_parameters(features) for tsf_seq in self.tsf_sequences], dim=0)
@@ -194,10 +205,10 @@ class TransformationSequence(nn.Module):
             'morpho': MorphologicalModule, 'morphological': MorphologicalModule,
         }[name]
 
-    def forward(self, x, features):
+    def forward(self, x, features, inverse=False):
         for module, activated in zip(self.tsf_modules, self.activations):
             if activated:
-                x = module(x, features)
+                x = module(x, features, inverse)
         return x
 
     def predict_parameters(self, features):
@@ -241,15 +252,15 @@ class TransformationSequence(nn.Module):
 class _AbstractTransformationModule(nn.Module):
     __metaclass__ = ABCMeta
 
-    def forward(self, x, features):
+    def forward(self, x, features, inverse=False):
         beta = self.regressor(features)
-        return self.transform(x, beta)
+        return self.transform(x, beta, inverse)
 
-    def transform(self, x, beta):
-        return self._transform(x, beta)
+    def transform(self, x, beta, inverse=False):
+        return self._transform(x, beta, inverse)
 
     @abstractmethod
-    def _transform(self, x, beta):
+    def _transform(self, x, beta, inverse=False):
         pass
 
     def load_with_noise(self, module, noise_scale):
@@ -295,20 +306,23 @@ class ColorModule(_AbstractTransformationModule):
         self.regressor[-1].weight.data.zero_()
         self.regressor[-1].bias.data.zero_()
 
-    def _transform(self, x, beta):
-        if x.size(1) == 2 or x.size(1) > 3:
-            x, mask = torch.split(x, [self.color_ch, x.size(1) - self.color_ch], dim=1)
+    def _transform(self, x, beta, inverse=False):
+        if inverse:
+            return x
         else:
-            mask = None
-        if x.size(1) == 1:
-            x = x.expand(-1, 3, -1, -1)
+            if x.size(1) == 2 or x.size(1) > 3:
+                x, mask = torch.split(x, [self.color_ch, x.size(1) - self.color_ch], dim=1)
+            else:
+                mask = None
+            if x.size(1) == 1:
+                x = x.expand(-1, 3, -1, -1)
 
-        weight, bias = torch.split(beta.view(-1, self.color_ch, 2), [1, 1], dim=2)
-        weight = weight.expand(-1, -1, self.color_ch) * self.identity + self.identity
-        bias = bias.unsqueeze(-1).expand(-1, -1, x.size(2), x.size(3))
+            weight, bias = torch.split(beta.view(-1, self.color_ch, 2), [1, 1], dim=2)
+            weight = weight.expand(-1, -1, self.color_ch) * self.identity + self.identity
+            bias = bias.unsqueeze(-1).expand(-1, -1, x.size(2), x.size(3))
 
-        output = torch.einsum('bij, bjkl -> bikl', weight, x) + bias
-        output = self.clamp_func(output)
+            output = torch.einsum('bij, bjkl -> bikl', weight, x) + bias
+            output = self.clamp_func(output)
         if mask is not None:
             output = torch.cat([output, mask], dim=1)
         return output
@@ -331,9 +345,15 @@ class AffineModule(_AbstractTransformationModule):
         self.regressor[-1].weight.data.zero_()
         self.regressor[-1].bias.data.zero_()
 
-    def _transform(self, x, beta):
+    def _transform(self, x, beta, inverse=False):
         beta = beta.view(-1, 2, 3) + self.identity
-        grid = F.affine_grid(beta, (x.size(0), x.size(1), self.img_size[0], self.img_size[1]), align_corners=False)
+        if inverse:
+            row = torch.tensor([[[0, 0, 1]]] * x.size(0), dtype=torch.float, device=beta.device)
+            beta = torch.cat([beta, row], dim=1)
+            beta = torch.inverse(beta)[:, :2, :]
+            grid = F.affine_grid(beta, x.size(), align_corners=False)
+        else:
+            grid = F.affine_grid(beta, (x.size(0), x.size(1), self.img_size[0], self.img_size[1]), align_corners=False)
         return F.grid_sample(x, grid, mode='bilinear', padding_mode=self.padding_mode, align_corners=False)
 
 
@@ -350,7 +370,10 @@ class PositionModule(_AbstractTransformationModule):
         self.regressor[-1].weight.data.zero_()
         self.regressor[-1].bias.data.zero_()
 
-    def _transform(self, x, beta):
+    def _transform(self, x, beta, inverse=False):
+        if inverse:
+            print_warning("Inverse transform for PositionModule is not implemented.")
+            return x
         s, t = beta.split([1, 2], dim=1)
         s = torch.exp(s)
         scale = s[..., None].expand(-1, 2, 2) * torch.eye(2, 2).to(s.device)
@@ -372,7 +395,10 @@ class SimilarityModule(_AbstractTransformationModule):
         self.regressor[-1].weight.data.zero_()
         self.regressor[-1].bias.data.zero_()
 
-    def _transform(self, x, beta):
+    def _transform(self, x, beta, inverse=False):
+        if inverse:
+            print_warning("Inverse transform for SimilarityModule is not implemented.")
+            return x
         a, b, t = beta.split([1, 1, 2], dim=1)
         a_eye = torch.eye(2, 2).to(a.device)
         b_eye = torch.Tensor([[0, -1], [1, 0]]).to(b.device)
@@ -394,8 +420,10 @@ class ProjectiveModule(_AbstractTransformationModule):
         self.regressor[-1].weight.data.zero_()
         self.regressor[-1].bias.data.zero_()
 
-    def _transform(self, x, beta):
+    def _transform(self, x, beta, inverse=False):
         beta = beta.view(-1, 3, 3) + self.identity
+        if inverse:
+            beta = torch.inverse(beta)
         return homography_warp(x, beta, dsize=(x.size(2), x.size(3)), mode='bilinear', padding_mode=self.padding_mode)
 
 
@@ -416,7 +444,10 @@ class TPSModule(_AbstractTransformationModule):
         self.regressor[-1].weight.data.zero_()
         self.regressor[-1].bias.data.zero_()
 
-    def _transform(self, x, beta):
+    def _transform(self, x, beta, inverse=False):
+        if inverse:
+            print_warning("Inverse transform for TPSModule is not implemented.")
+            return x
         source_control_points = self.identity + beta.view(x.size(0), -1, 2)
         grid = self.tps_grid(source_control_points).view(x.size(0), *self.img_size, 2)
         return F.grid_sample(x, grid, mode='bilinear', padding_mode=self.padding_mode, align_corners=False)
@@ -443,10 +474,14 @@ class MorphologicalModule(_AbstractTransformationModule):
         self.regressor[-1].weight.data.zero_()
         self.regressor[-1].bias.data.zero_()
 
-    def _transform(self, x, beta):
+    def _transform(self, x, beta, inverse=False):
+        if inverse:
+            print_warning("Inverse transform for MorphologicalModule is not implemented.")
+            return x
         beta = beta + self.identity
         alpha, weights = torch.split(beta, [1, self.kernel_size ** 2], dim=1)
-        return self.smoothmax_kernel(x, alpha, torch.sigmoid(weights))
+        out = self.smoothmax_kernel(x[:,-1,...].unsqueeze(1), alpha, torch.sigmoid(weights))
+        return torch.cat([x[:,:3,...],out], dim=1)
 
     def smoothmax_kernel(self, x, alpha, kernel):
         if isinstance(alpha, torch.Tensor):

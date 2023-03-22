@@ -381,51 +381,57 @@ class DTISprites(nn.Module):
 
     @torch.no_grad()
     def transform(self, x, with_composition=False, pred_semantic_labels=False, pred_instance_labels=False,
-                  with_bkg=True, hard_occ_grid=False):
+                  with_bkg=True, hard_occ_grid=False, inverse=False):
         B, C, H, W = x.size()
         L, K = self.n_objects, self.n_sprites
-        tsf_layers, tsf_masks, tsf_bkgs, occ_grid, class_prob = self.predict(x)
-        if class_prob is not None:
-            class_oh = torch.zeros(class_prob.shape, device=x.device).scatter_(1, class_prob.argmax(1, keepdim=True), 1)
+        if inverse:
+            inv_tsf = self.sprite_transformers[0].inverse_transform(x)
+            # TODO: Inverse transform sprites
+            return inv_tsf[:,:,3,:,:].unsqueeze(2)
+        
         else:
-            class_oh = None
-
-        if pred_semantic_labels:
-            label_layers = torch.arange(1, K+1, device=x.device)[(None,)*4].transpose(0, 4).expand(L, -1, B, 1, H, W)
-            true_occ_grid = (occ_grid > 0.5).float()
-            target = self.compose(label_layers, (tsf_masks > 0.5).long(), true_occ_grid, class_prob=class_oh).squeeze(1)
-            return target.clamp(0, self.n_sprites).long()
-
-        elif pred_instance_labels:
-            label_layers = torch.arange(1, L+1, device=x.device)[(None,)*5].transpose(0, 5).expand(-1, K, B, 1, H, W)
-            true_occ_grid = (occ_grid > 0.5).float()
-            target = self.compose(label_layers, (tsf_masks > 0.5).long(), true_occ_grid, class_prob=class_oh).squeeze(1)
-            target = target.clamp(0, L).long()
-            if not with_bkg and class_oh is not None:
-                bkg_idx = target == 0
-                tsf_layers = (tsf_layers * class_oh[..., None, None, None]).sum(axis=1)
-                new_target = ((tsf_layers - x)**2).sum(2).argmin(0).long() + 1
-                target[bkg_idx] = new_target[bkg_idx]
-            return target
-
-        else:
-            occ_grid = (occ_grid > 0.5).float() if hard_occ_grid else occ_grid
-            tsf_layers, tsf_masks = tsf_layers.clamp(0, 1), tsf_masks.clamp(0, 1)
-            if tsf_bkgs is not None:
-                tsf_bkgs = tsf_bkgs.clamp(0, 1)
-            target = self.compose(tsf_layers, tsf_masks, occ_grid, tsf_bkgs, class_prob)
+            tsf_layers, tsf_masks, tsf_bkgs, occ_grid, class_prob = self.predict(x)
             if class_prob is not None:
-                target = target.unsqueeze(1)
-
-            if with_composition:
-                compo = []
-                for k in range(L):
-                    compo += [tsf_layers[k].transpose(0, 1), tsf_masks[k].transpose(0, 1)]
-                if self.learn_backgrounds:
-                    compo.insert(2, tsf_bkgs.transpose(0, 1))
-                return target, compo
+                class_oh = torch.zeros(class_prob.shape, device=x.device).scatter_(1, class_prob.argmax(1, keepdim=True), 1)
             else:
+                class_oh = None
+
+            if pred_semantic_labels:
+                label_layers = torch.arange(1, K+1, device=x.device)[(None,)*4].transpose(0, 4).expand(L, -1, B, 1, H, W)
+                true_occ_grid = (occ_grid > 0.5).float()
+                target = self.compose(label_layers, (tsf_masks > 0.5).long(), true_occ_grid, class_prob=class_oh).squeeze(1)
+                return target.clamp(0, self.n_sprites).long()
+
+            elif pred_instance_labels:
+                label_layers = torch.arange(1, L+1, device=x.device)[(None,)*5].transpose(0, 5).expand(-1, K, B, 1, H, W)
+                true_occ_grid = (occ_grid > 0.5).float()
+                target = self.compose(label_layers, (tsf_masks > 0.5).long(), true_occ_grid, class_prob=class_oh).squeeze(1)
+                target = target.clamp(0, L).long()
+                if not with_bkg and class_oh is not None:
+                    bkg_idx = target == 0
+                    tsf_layers = (tsf_layers * class_oh[..., None, None, None]).sum(axis=1)
+                    new_target = ((tsf_layers - x)**2).sum(2).argmin(0).long() + 1
+                    target[bkg_idx] = new_target[bkg_idx]
                 return target
+
+            else:
+                occ_grid = (occ_grid > 0.5).float() if hard_occ_grid else occ_grid
+                tsf_layers, tsf_masks = tsf_layers.clamp(0, 1), tsf_masks.clamp(0, 1)
+                if tsf_bkgs is not None:
+                    tsf_bkgs = tsf_bkgs.clamp(0, 1)
+                target = self.compose(tsf_layers, tsf_masks, occ_grid, tsf_bkgs, class_prob)
+                if class_prob is not None:
+                    target = target.unsqueeze(1)
+
+                if with_composition:
+                    compo = []
+                    for k in range(L):
+                        compo += [tsf_layers[k].transpose(0, 1), tsf_masks[k].transpose(0, 1)]
+                    if self.learn_backgrounds:
+                        compo.insert(2, tsf_bkgs.transpose(0, 1))
+                    return target, compo
+                else:
+                    return target
 
     def step(self):
         self.cur_epoch += 1
