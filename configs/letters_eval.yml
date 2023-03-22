@@ -37,4 +37,5 @@ training:
   check_cluster_interval: 100
   seed: 2971
   n_dup: 0
+  resume: 0315_letters_tps_0
   visualizer_port:
