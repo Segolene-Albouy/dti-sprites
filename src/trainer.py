@@ -862,29 +862,33 @@ class Trainer:
 
                     prt_transformed_c0 = prt_transformed_imgs[argmin_idx==0, int(str(self.run_dir).split('_')[-1][-1]),...]
                     prt_transformed_c1 = prt_transformed_imgs[argmin_idx==1, int(str(self.run_dir).split('_')[-1][-1]),...]
-                    prt_transform_diff_c0 = torch.where(prt_transformed_c0-transformed_c0_p0>=0, prt_transformed_c0-transformed_c0_p0,0)
-                    prt_transform_diff_c1 = torch.where(prt_transformed_c1-transformed_c1_p1>=0, prt_transformed_c1-transformed_c1_p1,0)
+                    prt_transform_diff_c0 = torch.where(transformed_c0_p0-prt_transformed_c0>=0,transformed_c0_p0-prt_transformed_c0,0)
+                    prt_transform_diff_c1 = torch.where(transformed_c1_p1-prt_transformed_c1>=0,transformed_c1_p1-prt_transformed_c1,0)
                     if prt_transform_diff_c0.shape[0]:
-                        prt_proto_diff_c0 = parent_model.transform(prt_transform_diff_c0, inverse=True)
+                        features = self.model.encoder(images[argmin_idx==0])
+                        prt_proto_diff_c0 = self.model.transform(prt_transform_diff_c0, inverse=True, features=features)[:,0,...]
                         prt_proto_averages[0].update(prt_proto_diff_c0.cpu())
                     if prt_transform_diff_c1.shape[0]:
-                        prt_proto_diff_c1 = parent_model.transform(prt_transform_diff_c1, inverse=True)
+                        features = self.model.encoder(images[argmin_idx==1])
+                        prt_proto_diff_c1 = self.model.transform(prt_transform_diff_c1, inverse=True, features=features)[:,1,...]
                         prt_proto_averages[1].update(prt_proto_diff_c1.cpu())
-                transform_diff_c0 = torch.where(transformed_c0_p1-transformed_c0_p0>=0, transformed_c0_p1-transformed_c0_p0,0)
-                transform_diff_c1 = torch.where(transformed_c1_p0-transformed_c1_p1>=0, transformed_c1_p0-transformed_c1_p1,0)
+                transform_diff_c0 = torch.where(transformed_c0_p0-transformed_c0_p1>=0,transformed_c0_p0-transformed_c0_p1,0)
+                transform_diff_c1 = torch.where(transformed_c1_p1-transformed_c1_p0>=0,transformed_c1_p1-transformed_c1_p0,0)
 
                 if transform_diff_c0.shape[0]:
-                    proto_diff_c0 = self.model.transform(transform_diff_c0, inverse=True)
+                    features = self.model.encoder(images[argmin_idx==0])
+                    proto_diff_c0 = self.model.transform(transform_diff_c0, inverse=True, features=features)
                     proto_averages[0].update(proto_diff_c0.cpu())
                 if transform_diff_c1.shape[0]:
-                    proto_diff_c1 = self.model.transform(transform_diff_c1, inverse=True)
+                    features = self.model.encoder(images[argmin_idx==1])
+                    proto_diff_c1 = self.model.transform(transform_diff_c1, inverse=True, features=features)
                     proto_averages[1].update(proto_diff_c1.cpu())
 
             for k in range(2):
                 convert_to_img(proto_averages[k].avg[0,...]).save(self.run_dir/'rec_diff_tr0_{:d}.png'.format(k))
                 convert_to_img(proto_averages[k].avg[1,...]).save(self.run_dir/'rec_diff_tr1_{:d}.png'.format(k))
                 if self.parent_model:
-                    convert_to_img(prt_proto_averages[k].avg[int(str(self.run_dir).split('_')[-1][-1]),...]).save(self.run_dir/'prt_rec_diff_{:d}.png'.format(k))
+                    convert_to_img(prt_proto_averages[k].avg).save(self.run_dir/'prt_rec_diff_{:d}.png'.format(k))
 
 
             leaf_id = str(self.run_dir).split('_')[-1]

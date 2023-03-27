@@ -381,11 +381,11 @@ class DTISprites(nn.Module):
 
     @torch.no_grad()
     def transform(self, x, with_composition=False, pred_semantic_labels=False, pred_instance_labels=False,
-                  with_bkg=True, hard_occ_grid=False, inverse=False):
+                  with_bkg=True, hard_occ_grid=False, inverse=False, features=None):
         B, C, H, W = x.size()
         L, K = self.n_objects, self.n_sprites
         if inverse:
-            inv_tsf = self.sprite_transformers[0].inverse_transform(x)
+            inv_tsf = self.sprite_transformers[0].inverse_transform(x, features=features)
             # TODO: Inverse transform sprites
             return inv_tsf[:,:,3,:,:].unsqueeze(2)
         

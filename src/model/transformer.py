@@ -13,7 +13,7 @@ from .mini_resnet import get_resnet_model as get_mini_resnet_model
 from .resnet import get_resnet_model
 from .tools import copy_with_noise, get_output_size, TPSGrid, create_mlp, get_clamp_func
 from utils.logger import print_info, print_warning
-
+from utils.image import convert_to_img
 
 N_HIDDEN_UNITS = 128
 N_LAYERS = 2
@@ -74,7 +74,7 @@ class PrototypeTransformationNetwork(nn.Module):
         if self.is_identity:
             return x.unsqueeze(1).expand(-1, self.n_prototypes, -1, -1, -1)
         else:
-            features = self.encoder(x[:,:3,...]) if features is None else features
+            features = self.encoder(x[:,:3,:,:]) if features is None else features
             y = torch.stack([tsf_seq(x, features, inverse=True) for tsf_seq in self.tsf_sequences], 1)
             return y
     
@@ -351,10 +351,12 @@ class AffineModule(_AbstractTransformationModule):
             row = torch.tensor([[[0, 0, 1]]] * x.size(0), dtype=torch.float, device=beta.device)
             beta = torch.cat([beta, row], dim=1)
             beta = torch.inverse(beta)[:, :2, :]
-            grid = F.affine_grid(beta, x.size(), align_corners=False)
+            grid = F.affine_grid(beta, (x.size(0), 1, self.img_size[0], self.img_size[1]), align_corners=False)
+            out = F.grid_sample(x[:,-1,:,:].unsqueeze(1), grid, mode='bilinear', padding_mode=self.padding_mode, align_corners=False)
+            return torch.cat([x[:,:3,...],out], dim=1)
         else:
             grid = F.affine_grid(beta, (x.size(0), x.size(1), self.img_size[0], self.img_size[1]), align_corners=False)
-        return F.grid_sample(x, grid, mode='bilinear', padding_mode=self.padding_mode, align_corners=False)
+            return F.grid_sample(x, grid, mode='bilinear', padding_mode=self.padding_mode, align_corners=False)
 
 
 class PositionModule(_AbstractTransformationModule):
