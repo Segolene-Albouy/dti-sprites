@@ -187,7 +187,7 @@ class DTISprites(nn.Module):
         elif mask_init == "random":
             masks = torch.rand(K, *size)
         else:
-            raise NotImplementedError(f"unkwon mask_init: {mask_init}")
+            raise NotImplementedError(f"unknown mask_init: {mask_init}")
         return masks
 
     @property
