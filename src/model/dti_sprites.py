@@ -72,21 +72,6 @@ class DTISprites(nn.Module):
 
         assert isinstance(self.freeze_milestone, (int,))
 
-        # LTR adaptation
-        self.gen_name = kwargs.get("generator", "unet")
-        latent_size = (
-            (128,) if self.gen_name == "marionette" else (1, self.size[0], self.size[1])
-        )
-        self.mask_params = nn.Parameter(
-            torch.stack(
-                [
-                    torch.normal(mean=0.0, std=1.0, size=latent_size)
-                    for k in range(n_sprites)
-                ]
-            )
-        )
-        self.generator = self.init_generator(self.gen_name, latent_dim=128)
-
         # Sprite transformers
         L = n_objects
         self.n_objects = n_objects
@@ -142,6 +127,23 @@ class DTISprites(nn.Module):
                 n_ch, img_size, M, encoder=self.encoder, **bkg_kwargs
             )
 
+        # LTR adaptation
+        self.gen_name = kwargs.get("generator", "unet")
+        latent_size = (
+            (128,) if self.gen_name == "marionette" else (1, self.size[0], self.size[1])
+        )
+        self.mask_params = nn.Parameter(
+            torch.stack(
+                [
+                    torch.normal(mean=0.0, std=1.0, size=latent_size)
+                    for k in range(n_sprites)
+                ]
+            )
+        )
+        self.generator = self.init_generator(self.gen_name, latent_dim=128)
+        self.projector = self.init_projector()
+        self.proba_estimator = self.init_proba()
+
         # Image composition and aux
         self.pred_occlusion = kwargs.get("pred_occlusion", False)
         if self.pred_occlusion:
@@ -176,6 +178,18 @@ class DTISprites(nn.Module):
         else:
             NotImplementedError("Generator not implemented.")
 
+    def init_proba(self):
+        return nn.Sequential(
+            nn.Linear(self.mask_params.shape[1], N_HIDDEN_UNITS),
+            nn.LayerNorm(N_HIDDEN_UNITS),
+        )
+
+    def init_projector(self):
+        return nn.Sequential(
+            nn.Linear(self.encoder.out_ch, N_HIDDEN_UNITS),
+            nn.LayerNorm(N_HIDDEN_UNITS),
+        )
+
     @staticmethod
     def init_masks(K, mask_init, size, std=None):
         if mask_init == "constant":
@@ -196,9 +210,26 @@ class DTISprites(nn.Module):
 
     @property
     def masks(self):
-        masks = self.generator(self.mask_params)
+        gen_theta = self.generator(self.mask_params)
         if self.gen_name == "marionette":
-            masks = masks.reshape(-1, 1, self.size[0], self.size[1])
+            gen_theta = gen_theta.reshape(-1, 1, self.size[0], self.size[1])
+        if self.inject_noise and self.training:
+            return gen_theta
+        else:
+            return self.clamp_func(gen_theta)
+
+    def proba_masks(self, features):
+        gen_theta = self.generator(self.mask_params)
+        if self.gen_name == "marionette":
+            gen_theta = gen_theta.reshape(-1, 1, self.size[0], self.size[1])
+        proba_theta = self.proba_estimator(self.mask_params)
+        probas = (1.0 / np.sqrt(self.encoder.out_ch)) * torch.matmul(
+            proba_theta, self.projector(features).T
+        )
+
+        masks = gen_theta.unsqueeze(1).expand(
+            -1, probas.shape[1], -1, -1, -1
+        ) * probas.reshape(probas.shape[0], probas.shape[1], 1, 1, 1)
         if self.add_empty_sprite:
             masks = torch.cat(
                 [masks, torch.zeros(1, *masks[0].shape, device=masks.device)]
@@ -296,9 +327,10 @@ class DTISprites(nn.Module):
         h, w = self.prototypes.shape[2:]
         L, K, M = self.n_objects, self.n_sprites, self.n_backgrounds or 1
         prototypes = self.prototypes.unsqueeze(1).expand(K, B, C, -1, -1)
+        features = self.encoder(x)
         if self.are_frg_frozen:
             prototypes = prototypes.detach()
-        masks = self.masks.unsqueeze(1).expand(K, B, 1, -1, -1)
+        masks = self.proba_masks(features)  # .unsqueeze(1).expand(K, B, 1, -1, -1)
         sprites = torch.cat([prototypes, masks], dim=2)
         if self.inject_noise and self.training:
             # XXX we use a canva to inject noise after transformations to avoid gridding artefacts
@@ -312,7 +344,6 @@ class DTISprites(nn.Module):
         if self.are_sprite_frozen:
             sprites = sprites.detach()
 
-        features = self.encoder(x)
         tsf_sprites = torch.stack(
             [self.sprite_transformers[k](x, sprites, features)[1] for k in range(L)],
             dim=0,

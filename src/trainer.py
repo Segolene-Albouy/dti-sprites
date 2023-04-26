@@ -258,10 +258,10 @@ class Trainer:
             if not checkpoint_path_resume:
                 if ss_id == "0":
                     self.model.prototypes[1].data.copy_(self.model.prototypes[0])
-                    self.model.masks[1].data.copy_(self.model.masks[0])
+                    self.model.mask_params[1].data.copy_(self.model.mask_params[0])
                 elif ss_id == "1":
                     self.model.prototypes[0].data.copy_(self.model.prototypes[1])
-                    self.model.masks[0].data.copy_(self.model.masks[1])
+                    self.model.mask_params[0].data.copy_(self.model.mask_params[1])
                 else:
                     ValueError("Invalid subset id")
         # Train metrics
