@@ -13,22 +13,25 @@ from pathlib import Path
 
 class _AbstractCollectionDataset(TorchDataset):
     """Abstract torch dataset from raw files collections associated to tags."""
+
     __metaclass__ = ABCMeta
     root = DATASETS_PATH
     name = NotImplementedError
     n_channels = 3
 
     def __init__(self, split, subset, img_size, **kwargs):
-        self.data_path = coerce_to_path_and_check_exist(self.root / self.name ) / split
+        self.data_path = coerce_to_path_and_check_exist(self.root / self.name) / split
         self.split = split
         if not isinstance(subset, type(None)):
             input_files = [Path(p) for p in sorted(subset)]
         else:
             try:
-                input_files = get_files_from_dir(self.data_path, IMG_EXTENSIONS, sort=True)
+                input_files = get_files_from_dir(
+                    self.data_path, IMG_EXTENSIONS, sort=True
+                )
             except FileNotFoundError:
                 input_files = []
-        
+
         self.input_files = input_files
         self.labels = [-1] * len(input_files)
         self.n_classes = 0
@@ -42,16 +45,16 @@ class _AbstractCollectionDataset(TorchDataset):
             self.img_size = img_size
             self.crop = False
 
-        if self.size > 0:
-            sample_size = Image.open(self.input_files[0]).size
-            if min(self.img_size) > min(sample_size):
-                raise ValueError("img_size too big compared to a sampled image size, adjust it or upscale dataset")
+        # if self.size > 0:
+        #    sample_size = Image.open(self.input_files[0]).size
+        #    if min(self.img_size) > min(sample_size):
+        #        raise ValueError("img_size too big compared to a sampled image size, adjust it or upscale dataset")
 
     def __len__(self):
         return self.size
 
     def __getitem__(self, idx):
-        inp = self.transform(Image.open(self.input_files[idx]).convert('RGB'))
+        inp = self.transform(Image.open(self.input_files[idx]).convert("RGB"))
         return inp, self.labels[idx], str(self.input_files[idx])
 
     @property
@@ -66,15 +69,28 @@ class _AbstractCollectionDataset(TorchDataset):
 
 
 class InstagramDataset(_AbstractCollectionDataset):
-    name = 'instagram'
+    name = "instagram"
 
 
 class MegaDepthDataset(_AbstractCollectionDataset):
-    name = 'megadepth'
+    name = "megadepth"
 
 
 class FleuronsDataset(_AbstractCollectionDataset):
-    name = 'fleurons'
+    name = "fleurons"
+
 
 class LettersDataset(_AbstractCollectionDataset):
-    name = 'letters'
+    name = "letters"
+
+
+class SimpleLionDataset(_AbstractCollectionDataset):
+    name = "simple-lion-edited"
+
+
+class SimpleCrossDataset(_AbstractCollectionDataset):
+    name = "simple-cross-edited"
+
+
+class SimpleEagleDataset(_AbstractCollectionDataset):
+    name = "simple-eagle-edited"
