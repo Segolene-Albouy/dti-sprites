@@ -3,7 +3,7 @@ from .gtsrb import GTSRB8Dataset
 from .multi_object import DSpritesGrayDataset, TetrominoesDataset, CLEVR6Dataset
 from .instagram import InstagramDataset
 from .torchvision import SVHNDataset
-from .raw import FleuronsDataset, LettersDataset
+from .raw import FleuronsDataset, LettersDataset, SimpleLionDataset, SimpleEagleDataset, SimpleCrossDataset
 
 def get_dataset(dataset_name):
     return {
@@ -27,6 +27,13 @@ def get_dataset(dataset_name):
         
         # Letters
         'letters': LettersDataset,
+        
+        # Simple Lion
+        'simple-lion-edited': SimpleLionDataset,
+        # Simple Eagle
+        'simple-eagle-edited': SimpleEagleDataset,
+        # Simple Lion
+        'simple-cross-edited': SimpleCrossDataset,
     }[dataset_name]
 
 def get_subset(dataset_name):
