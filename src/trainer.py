@@ -1369,11 +1369,13 @@ class Trainer:
                 )
                 average_ctr_losses[k].update(avg_ctr_clus, n_ctr_clus)
 
-        self.print_and_log_info("final_loss: {:.5}".format(loss.avg))
+        self.print_and_log_info("final_loss: {:.5}".format(float(loss.avg)))
         self.print_and_log_info(
             "".join(
                 [
-                    "final_clus_loss{:d}: {:.5} ".format(k, average_losses[k].avg)
+                    "final_clus_loss{:d}: {:.5} ".format(
+                        k, float(average_losses[k].avg)
+                    )
                     if average_losses[k].avg
                     else "final_clus_loss{:d}: 0. ".format(k)
                     for k in range(self.n_prototypes)
@@ -1381,14 +1383,14 @@ class Trainer:
             )
         )
         with open(scores_path, mode="a") as f:
-            f.write("{:.5}\n".format(loss.avg))
-            for k in range(self.n_prototypes):
-                f.write("{:.5}\n".format(average_losses[k].avg)) if average_losses[
-                    k
-                ].avg else f.write("0.\n")
+            f.write("{:.5}\n".format(float(loss.avg)))
             for k in range(self.n_prototypes):
                 f.write(
-                    "{:.5}\n".format(average_ctr_losses[k].avg)
+                    "{:.5}\n".format(float(average_losses[k].avg))
+                ) if average_losses[k].avg else f.write("0.\n")
+            for k in range(self.n_prototypes):
+                f.write(
+                    "{:.5}\n".format(float(average_ctr_losses[k].avg))
                 ) if average_ctr_losses[k].avg else f.write("0.\n")
         # Save results
         with open(cluster_path / "cluster_counts.tsv", mode="w") as f:
@@ -1455,8 +1457,10 @@ class Trainer:
                         loss.update(
                             dist_min_by_sample.mean(), n=len(dist_min_by_sample)
                         )
-                    self.print_and_log_info("parent_loss: {:.5}".format(loss.avg))
-                    f.write("{:.5}\n".format(loss.avg))
+                    self.print_and_log_info(
+                        "parent_loss: {:.5}".format(float(loss.avg))
+                    )
+                    f.write("{:.5}\n".format(float(loss.avg)))
 
         return subset_img
 
@@ -1521,14 +1525,14 @@ class Trainer:
             loss.update(loss_val.item(), n=images.size(0))
 
         scores = scores.compute()
-        self.print_and_log_info("final_loss: {:.4f}".format(loss.avg))
+        self.print_and_log_info("final_loss: {:.4f}".format(float(loss.avg)))
         self.print_and_log_info(
             "final_scores: "
             + ", ".join(["{}={:.4f}".format(k, v) for k, v in scores.items()])
         )
         with open(scores_path, mode="a") as f:
             f.write(
-                "{:.6}\t".format(loss.avg)
+                "{:.6}\t".format(float(loss.avg))
                 + "\t".join(map("{:.6f}".format, scores.values()))
                 + "\n"
             )
@@ -1679,7 +1683,7 @@ class Trainer:
             loss.update(loss_val.item(), n=images.size(0))
 
         scores = scores.compute()
-        self.print_and_log_info("final_loss: {:.4f}".format(loss.avg))
+        self.print_and_log_info("final_loss: {:.4f}".format(float(loss.avg)))
         self.print_and_log_info(
             "final_scores: "
             + ", ".join(["{}={:.4f}".format(k, v) for k, v in scores.items()])
@@ -1808,14 +1812,14 @@ class Trainer:
             scores.update(labels.long().numpy(), argmin_idx.cpu().numpy())
 
         scores = scores.compute()
-        self.print_and_log_info("final_loss: {:.4f}".format(loss.avg))
+        self.print_and_log_info("final_loss: {:.4f}".format(float(loss.avg)))
         self.print_and_log_info(
             "final_scores: "
             + ", ".join(["{}={:.4f}".format(k, v) for k, v in scores.items()])
         )
         with open(scores_path, mode="a") as f:
             f.write(
-                "{:.6}\t".format(loss.avg)
+                "{:.6}\t".format(float(loss.avg))
                 + "\t".join(map("{:.6f}".format, scores.values()))
                 + "\n"
             )
