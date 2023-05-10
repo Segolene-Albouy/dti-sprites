@@ -31,6 +31,7 @@ class PrototypeTransformationNetwork(nn.Module):
 
         encoder = kwargs.get("encoder", None)
         if encoder is not None:
+            self.exp_encoder = True
             self.encoder = encoder
             self.enc_out_channels = self.encoder.out_ch
         else:
@@ -61,6 +62,12 @@ class PrototypeTransformationNetwork(nn.Module):
                 for i in range(n_prototypes)
             ]
         )
+
+    def get_parameters(self):
+        if self.exp_encoder:
+            return self.tsf_sequences.parameters()
+        else:
+            return self.parameters()
 
     @property
     def is_identity(self):
