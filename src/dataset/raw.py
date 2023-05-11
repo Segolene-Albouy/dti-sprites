@@ -19,8 +19,10 @@ class _AbstractCollectionDataset(TorchDataset):
     name = NotImplementedError
     n_channels = 3
 
-    def __init__(self, split, subset, img_size, **kwargs):
-        self.data_path = coerce_to_path_and_check_exist(self.root / self.name) / split
+    def __init__(self, split, subset, img_size, tag, **kwargs):
+        self.data_path = (
+            coerce_to_path_and_check_exist(self.root / self.name / tag) / split
+        )
         self.split = split
         if not isinstance(subset, type(None)):
             input_files = [Path(p) for p in sorted(subset)]
@@ -84,13 +86,5 @@ class LettersDataset(_AbstractCollectionDataset):
     name = "letters"
 
 
-class SimpleLionDataset(_AbstractCollectionDataset):
-    name = "simple-lion-edited"
-
-
-class SimpleCrossDataset(_AbstractCollectionDataset):
-    name = "simple-cross-edited"
-
-
-class SimpleEagleDataset(_AbstractCollectionDataset):
-    name = "simple-eagle-edited"
+class CoADataset(_AbstractCollectionDataset):
+    name = "coa"
