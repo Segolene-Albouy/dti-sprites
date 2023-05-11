@@ -1,16 +1,17 @@
 dataset:
-  name: fleurons
+  name: coa
+  tag: simple-cross-edited
   img_size: 128
 model:
   name: dti_sprites
-  n_sprites: 2
+  n_sprites: 5
   n_backgrounds: 1
   n_objects: 1
   inject_noise: 0 
   encoder_name: resnet32
   transformation_sequence: color_affine_morpho_tps
   transformation_sequence_bkg: color
-  curriculum_learning: [100, 200, 225] 
+  curriculum_learning: [150,300,400]
   curriculum_learning_bkg: False
   proto_init: constant
   bkg_init: constant
@@ -21,7 +22,7 @@ model:
   freeze_frg: True
   generator: marionette
 training:
-  batch_size: 128
+  batch_size: 32
   n_workers: 4
   optimizer:
     name: adam
@@ -31,11 +32,11 @@ training:
   scheduler:
     name: multi_step
     gamma: 0.1
-    milestones: [250]
-  n_epoches: 300
+    milestones: [450]
+  n_epoches: 500
   train_stat_interval: 50
   val_stat_interval: 50
   check_cluster_interval: 50
   seed: 2971
-  n_dup: 4
+  n_dup: 0
   visualizer_port:
