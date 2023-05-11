@@ -57,14 +57,27 @@ class DTISprites(nn.Module):
             self.generator = self.init_generator(
                 gen_name, latent_dim=128, out_channel=self.size[0] * self.size[1]
             )
-            self.latent_params = nn.Parameter(
-                torch.stack(
-                    [
-                        torch.normal(mean=0.0, std=1.0, size=latent_size)
-                        for k in range(n_sprites)
-                    ]
+            self.latent_shared = proto_args.get("shared_latent", False)
+            if self.latent_shared:
+                assert proto_args.get("proba")
+                self.proba_latent_params = nn.Parameter(
+                    torch.stack(
+                        [
+                            torch.normal(mean=0.0, std=1.0, size=latent_size)
+                            for k in range(n_sprites)
+                        ]
+                    )
                 )
-            )
+            else:
+                self.latent_params = nn.Parameter(
+                    torch.stack(
+                        [
+                            torch.normal(mean=0.0, std=1.0, size=latent_size)
+                            for k in range(n_sprites)
+                        ]
+                    )
+                )
+                self.proba_latent_params = self.latent_params
             samples = torch.stack(
                 generate_data(
                     dataset, n_sprites, "constant", std=std, size=self.size, value=0.9
@@ -110,8 +123,9 @@ class DTISprites(nn.Module):
         self.add_empty_sprite = kwargs.get("add_empty_sprite", False)
         self.n_sprites = n_sprites + 1 if self.add_empty_sprite else n_sprites
 
-        self.projector = self.init_projector(self.encoder.out_ch)
-        self.proba_estimator = self.init_proba(self.mask_params.shape[1])
+        if proto_args.get("proba"):
+            self.projector = self.init_projector(self.encoder.out_ch)
+            self.proba_estimator = self.init_proba(self.proba_latent_params.shape[1])
         self.lambda_empty_sprite = kwargs.get("lambda_empty_sprite", 0)
 
         self.cur_epoch = 0
@@ -244,30 +258,16 @@ class DTISprites(nn.Module):
     def n_prototypes(self):
         return self.n_sprites
 
-    # TODO: Mask definition modularity
     @property
     def masks(self):
-        gen_theta = self.generator(self.mask_params)
-        if self.gen_name == "marionette":
-            gen_theta = gen_theta.reshape(-1, 1, self.size[0], self.size[1])
-        if self.inject_noise and self.training:
-            return gen_theta
+        if self.proto_source == "generator":
+            gen_theta = self.generator(self.latent_params)
+            if self.gen_name == "marionette":
+                masks = gen_theta.reshape(-1, 1, self.size[0], self.size[1])
         else:
-            return self.clamp_func(gen_theta)
+            masks = self.mask_params
 
-    def proba_masks(self, features):
-        gen_theta = self.generator(self.mask_params)
-        if self.gen_name == "marionette":
-            gen_theta = gen_theta.reshape(-1, 1, self.size[0], self.size[1])
-        proba_theta = self.proba_estimator(self.mask_params)
-        probas = (1.0 / np.sqrt(self.encoder.out_ch)) * torch.matmul(
-            proba_theta, self.projector(features).T
-        )
-
-        masks = gen_theta.unsqueeze(1).expand(
-            -1, probas.shape[1], -1, -1, -1
-        ) * probas.reshape(probas.shape[0], probas.shape[1], 1, 1, 1)
-        if self.add_empty_sprite:
+        if self.add_empty_sprite:  # TODO: Check here.
             masks = torch.cat(
                 [masks, torch.zeros(1, *masks[0].shape, device=masks.device)]
             )
@@ -320,14 +320,17 @@ class DTISprites(nn.Module):
             False
 
     def cluster_parameters(self):
-        params = [self.prototype_params, self.mask_params]
+        params = [self.prototype_params]
         if hasattr(self, "generator"):
-            params += list(chain(*[self.generator.parameters()]))
+            params += list(chain(*[self.generator.parameters()])) + [self.latent_params]
+        else:
+            params += [self.mask_params]
         if hasattr(self, "proba_estimator"):
             params += list(chain(*[self.proba_estimator.parameters()])) + list(
                 chain(*[self.projector.parameters()])
             )
-        params = params
+            if not self.latent_shared:
+                params += [self.proba_latent_params]
 
         if self.learn_backgrounds:
             params.append(self.bkg_params)
@@ -371,9 +374,22 @@ class DTISprites(nn.Module):
         L, K, M = self.n_objects, self.n_sprites, self.n_backgrounds or 1
         prototypes = self.prototypes.unsqueeze(1).expand(K, B, C, -1, -1)
         features = self.encoder(x)
+
+        if hasattr(self, "proba_estimator"):
+            proba_theta = self.proba_estimator(self.proba_latent_params)
+            probas = (1.0 / np.sqrt(self.encoder.out_ch)) * torch.matmul(
+                proba_theta, self.projector(features).T
+            )
+
+            masks = masks.unsqueeze(1).expand(
+                -1, probas.shape[1], -1, -1, -1
+            ) * probas.reshape(probas.shape[0], probas.shape[1], 1, 1, 1)
+        else:
+            masks = self.masks.unsqueeze(1).expand(K, B, 1, -1, -1)
+
         if self.are_frg_frozen:
             prototypes = prototypes.detach()
-        masks = self.proba_masks(features)  # .unsqueeze(1).expand(K, B, 1, -1, -1)
+
         sprites = torch.cat([prototypes, masks], dim=2)
         if self.inject_noise and self.training:
             # XXX we use a canva to inject noise after transformations to avoid gridding artefacts
