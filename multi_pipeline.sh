@@ -6,5 +6,5 @@ for i in {0..4}
 do
     seed=$(shuf -i 1-100000 -n 1)
     sed -i "s/seed:.*/seed: $seed/" configs/$config
-    CUDA_VISIBLE_DEVICES=$cuda python src/trainer.py --tag ${run_tag}_$i --config $config
+    CUDA_VISIBLE_DEVICES=$cuda python src/clustering_trainer.py --tag ${run_tag}_$i --config $config
 done
