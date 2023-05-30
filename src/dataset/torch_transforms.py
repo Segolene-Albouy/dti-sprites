@@ -1,5 +1,23 @@
 from torch.nn import functional as F
 
+class ColorAugment():
+    def __call__(self, img, seed=None):
+        self.apply(img)
+
+    @staticmethod
+    def apply(img, seed=None):
+        if seed is not None:
+            with use_seed(seed):
+                color = torch.rand(3, 1, 1) * 2 - 1
+                bias = torch.rand(3, 1, 1)
+        else:
+            color = torch.rand(3, 1, 1) * 2 - 1
+            bias = torch.rand(3, 1, 1)
+        img = torch.abs(color * img + bias)
+        return img / img.max()
+
+    def __repr__(self):
+        return self.__class__.__name__ + '()'
 
 class TensorResize():
     def __init__(self, img_size):

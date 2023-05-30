@@ -1,9 +1,19 @@
 from .cosegmentation import WeizmannHorseDataset
 from .gtsrb import GTSRB8Dataset
+from .affnist import AffNISTTestDataset
+from .coa import CoADataset
 from .multi_object import DSpritesGrayDataset, TetrominoesDataset, CLEVR6Dataset
 from .instagram import InstagramDataset
-from .torchvision import SVHNDataset
-from .raw import FleuronsDataset, LettersDataset, CoADataset
+from .torchvision import (
+    SVHNDataset,
+    FashionMNISTDataset,
+    MNISTDataset,
+    MNISTTestDataset,
+    MNISTColorDataset,
+    MNIST1kDataset,
+    USPSDataset,
+)
+from .raw import FleuronsDataset, LettersDataset
 
 
 def get_dataset(dataset_name):
@@ -11,6 +21,7 @@ def get_dataset(dataset_name):
         # Cosegmentation
         "weizmann_horse": WeizmannHorseDataset,
         # Custom
+        "affnist_test": AffNISTTestDataset,
         "gtsrb8": GTSRB8Dataset,
         "instagram": InstagramDataset,
         # MultiObject
@@ -18,7 +29,13 @@ def get_dataset(dataset_name):
         "dsprites_gray": DSpritesGrayDataset,
         "tetrominoes": TetrominoesDataset,
         # Torchvision
+        "fashion_mnist": FashionMNISTDataset,
+        "mnist": MNISTDataset,
+        "mnist_test": MNISTTestDataset,
+        "mnist_color": MNISTColorDataset,
+        "mnist_1k": MNIST1kDataset,
         "svhn": SVHNDataset,
+        "usps": USPSDataset,
         # Fleurons
         "fleurons": FleuronsDataset,
         # Letters

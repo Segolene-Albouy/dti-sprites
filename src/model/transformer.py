@@ -379,8 +379,8 @@ class _AbstractTransformationModule(nn.Module):
 class IdentityModule(_AbstractTransformationModule):
     def __init__(self, in_channels, *args, **kwargs):
         super().__init__()
-        self.regressor = nn.Sequential(nn.Linear(in_channels, 0))
-        self.register_buffer("identity", torch.zeros(0))
+        # self.regressor = nn.Sequential(nn.Linear(in_channels, 0))
+        # self.register_buffer("identity", torch.zeros(0))
 
     def forward(self, x, *args, **kwargs):
         return x
@@ -462,6 +462,7 @@ class AffineModule(_AbstractTransformationModule):
             )
             beta = torch.cat([beta, row], dim=1)
             beta = torch.inverse(beta)[:, :2, :]
+
             grid = F.affine_grid(
                 beta,
                 (x.size(0), 1, self.img_size[0], self.img_size[1]),
@@ -604,7 +605,9 @@ class TPSModule(_AbstractTransformationModule):
             in_channels, self.grid_size**2 * 2, N_HIDDEN_UNITS, n_layers
         )
         y, x = torch.meshgrid(
-            torch.linspace(-1, 1, self.grid_size), torch.linspace(-1, 1, self.grid_size)
+            torch.linspace(-1, 1, self.grid_size),
+            torch.linspace(-1, 1, self.grid_size),
+            indexing="ij",
         )
         target_control_points = torch.stack([x.flatten(), y.flatten()], dim=1)
         self.tps_grid = TPSGrid(img_size, target_control_points)
@@ -663,10 +666,11 @@ class MorphologicalModule(_AbstractTransformationModule):
             return x
         beta = beta + self.identity
         alpha, weights = torch.split(beta, [1, self.kernel_size**2], dim=1)
-        out = self.smoothmax_kernel(
-            x[:, -1, ...].unsqueeze(1), alpha, torch.sigmoid(weights)
-        )
-        return torch.cat([x[:, :3, ...], out], dim=1)
+        return self.smoothmax_kernel(x, alpha, torch.sigmoid(weights))
+        # out = self.smoothmax_kernel(
+        #    x[:, -1, ...].unsqueeze(1), alpha, torch.sigmoid(weights)
+        # )
+        # return torch.cat([x[:, :3, ...], out], dim=1)
 
     def smoothmax_kernel(self, x, alpha, kernel):
         if isinstance(alpha, torch.Tensor):

@@ -123,9 +123,6 @@ class DTISprites(nn.Module):
         self.add_empty_sprite = kwargs.get("add_empty_sprite", False)
         self.n_sprites = n_sprites + 1 if self.add_empty_sprite else n_sprites
 
-        if proto_args.get("proba"):
-            self.projector = self.init_projector(self.encoder.out_ch)
-            self.proba_estimator = self.init_proba(self.proba_latent_params.shape[1])
         self.lambda_empty_sprite = kwargs.get("lambda_empty_sprite", 0)
 
         self.cur_epoch = 0
@@ -210,6 +207,10 @@ class DTISprites(nn.Module):
         )
         self._reassign_cluster = kwargs.get("reassign_cluster", True)
         self.inject_noise = kwargs.get("inject_noise", 0)
+
+        if proto_args.get("proba"):
+            self.projector = self.init_projector(self.encoder.out_ch)
+            self.proba_estimator = self.init_proba(self.proba_latent_params.shape[1])
 
     @staticmethod
     def init_generator(name, latent_dim, out_channel):
@@ -381,7 +382,7 @@ class DTISprites(nn.Module):
                 proba_theta, self.projector(features).T
             )
 
-            masks = masks.unsqueeze(1).expand(
+            masks = self.masks.unsqueeze(1).expand(
                 -1, probas.shape[1], -1, -1, -1
             ) * probas.reshape(probas.shape[0], probas.shape[1], 1, 1, 1)
         else:

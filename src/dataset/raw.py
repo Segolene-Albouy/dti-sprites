@@ -19,7 +19,8 @@ class _AbstractCollectionDataset(TorchDataset):
     name = NotImplementedError
     n_channels = 3
 
-    def __init__(self, split, subset, img_size, tag, **kwargs):
+    def __init__(self, split, subset, img_size, **kwargs):
+        tag = kwargs.get("tag", "")
         self.data_path = (
             coerce_to_path_and_check_exist(self.root / self.name / tag) / split
         )
@@ -70,10 +71,6 @@ class _AbstractCollectionDataset(TorchDataset):
         return Compose(transform)
 
 
-class InstagramDataset(_AbstractCollectionDataset):
-    name = "instagram"
-
-
 class MegaDepthDataset(_AbstractCollectionDataset):
     name = "megadepth"
 
@@ -84,7 +81,3 @@ class FleuronsDataset(_AbstractCollectionDataset):
 
 class LettersDataset(_AbstractCollectionDataset):
     name = "letters"
-
-
-class CoADataset(_AbstractCollectionDataset):
-    name = "coa"
