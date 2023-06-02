@@ -1,6 +1,12 @@
 set -e
 mkdir -p datasets
 
+# affNIST-test
+wget 'https://www.cs.toronto.edu/~tijmen/affNIST/32x/transformed/test.mat.zip' --output-document test.mat.zip
+unzip test.mat.zip && rm test.mat.zip
+mkdir -p datasets
+mv test.mat datasets/affNIST_test.mat
+
 # Multi-object datasets
 gdown --id 1unCVwJbytG1wHZCQfk41otdtmR8yU1AH -O tetrominoes.zip
 unzip tetrominoes.zip && rm tetrominoes.zip
@@ -31,3 +37,4 @@ gdown --id 1OCLvojYDomLnI6zP6QghgIkZ8PWwmqCD -O weddingkiss.zip
 unzip weddingkiss.zip && rm weddingkiss.zip
 mkdir -p datasets/instagram/weddingkiss
 mv weddingkiss datasets/instagram/weddingkiss/train
+
