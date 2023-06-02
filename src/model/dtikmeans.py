@@ -206,7 +206,7 @@ class DTIKmeans(nn.Module):
             ) * probas.reshape(probas.shape[0], probas.shape[1], 1, 1, 1)
         else:
             prototypes = self.prototypes.unsqueeze(1).expand(
-                self.n_prototypes, B, 1, -1, -1
+                self.n_prototypes, B, -1, -1, -1
             )
 
         inp, target = self.transformer(x, prototypes)

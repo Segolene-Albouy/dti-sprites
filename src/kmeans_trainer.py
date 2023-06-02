@@ -162,9 +162,8 @@ class Trainer:
         self.cluster_kwargs = self.opt_params.pop("cluster", {})
         self.tsf_kwargs = self.opt_params.pop("transformer", {})
         self.optimizer = get_optimizer(self.optimizer_name)(
-            [dict(params=self.model.cluster_parameters(), **self.cluster_kwargs)] +
-            # self.model.custom_optim(**self.tsf_kwargs),
-            [dict(params=self.model.transformer_parameters(), **self.tsf_kwargs)],
+            [dict(params=self.model.cluster_parameters(), **self.cluster_kwargs)]
+            + [dict(params=self.model.transformer_parameters(), **self.tsf_kwargs)],
             **self.opt_params,
         )
         self.model.set_optimizer(self.optimizer)
@@ -940,19 +939,6 @@ class Trainer:
                 error_averages[0].update(
                     abs(images[argmin_idx == 1] - transformed_c1_p0).cpu()
                 )
-                """
-                abs(abs(images[argmin_idx==0]-transformed_c0_p0)-abs(images[argmin_idx==0]-transformed_c0_p1))
-
-                # Take the difference between 2 prototype transformations (b, 1, 3, h, w)
-                img_transform_diff = abs(images.unsqueeze(1).expand(-1,2,-1,-1,-1)-transformed_imgs)
-                error_transform_diff = abs(img_transform_diff[:,0,...]-img_transform_diff[:,1,...])
-                # Inverse transform the difference (b, 1, 1, h, w)
-                error_diff = self.model.transform(error_transform_diff, inverse=True)
-                # Take the average (1, 1, 1, h, w)
-                for k in range(2):
-                    proto_averages[k].update(proto_diff[:,k,...].cpu())
-                    error_averages[k].update(error_diff[:,k,...].cpu())
-                """
             for k in range(2):
                 convert_to_img(error_averages[k].avg).save(
                     self.run_dir / "err_diff_avg_{:d}.png".format(k)
@@ -1101,9 +1087,6 @@ class Trainer:
                     convert_to_img(self.model.transform(inp)[0, k]).save(
                         path / f"top{j}_tsf.png"
                     )
-                    convert_to_img(self.model.transform(inp, inverse=True)[0, k]).save(
-                        path / f"top{j}_tsf_inp.png"
-                    )
             if len(indices) <= N_CLUSTER_SAMPLES:
                 random_idx = indices
             else:
@@ -1114,9 +1097,6 @@ class Trainer:
                 if not self.model.transformer.is_identity:
                     convert_to_img(self.model.transform(inp)[0, k]).save(
                         path / f"random{j}_tsf.png"
-                    )
-                    convert_to_img(self.model.transform(inp, inverse=True)[0, k]).save(
-                        path / f"random{j}_tsf_inp.png"
                     )
             try:
                 convert_to_img(averages[k].avg).save(path / "avg.png")

@@ -12,15 +12,17 @@ from utils.path import DATASETS_PATH
 
 class GTSRB8Dataset(TorchDataset):
     root = DATASETS_PATH
-    name = 'gtsrb8'
+    name = "gtsrb8"
     n_channels = 3
     n_classes = 8
     img_size = (28, 28)
 
-    def __init__(self, split, **kwargs):
-        self.data_path = coerce_to_path_and_check_exist(self.root / 'GTSRB')
+    def __init__(self, split, subset, **kwargs):
+        self.data_path = coerce_to_path_and_check_exist(self.root / "GTSRB")
         self.split = split
-        input_files = get_files_from_dir(self.data_path / 'train', IMG_EXTENSIONS, sort=True, recursive=True)
+        input_files = get_files_from_dir(
+            self.data_path / "train", IMG_EXTENSIONS, sort=True, recursive=True
+        )
         labels = [int(f.parent.name) for f in input_files]
         self.input_files = np.asarray(input_files)
         self.labels = np.asarray(labels)
@@ -32,7 +34,7 @@ class GTSRB8Dataset(TorchDataset):
         self.labels = np.asarray([good_labels[l] for l in self.labels[mask]])
 
         N = len(self.input_files)
-        if split == 'val':
+        if split == "val":
             with use_seed(46):
                 indices = np.random.choice(range(N), 100, replace=False)
             self.input_files = self.input_files[indices]
@@ -42,8 +44,8 @@ class GTSRB8Dataset(TorchDataset):
         return len(self.input_files)
 
     def __getitem__(self, idx):
-        inp = self.transform(Image.open(self.input_files[idx]).convert('RGB'))
-        return inp, self.labels[idx]
+        inp = self.transform(Image.open(self.input_files[idx]).convert("RGB"))
+        return inp, self.labels[idx], []
 
     @property
     @lru_cache()

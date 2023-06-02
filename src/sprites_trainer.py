@@ -1335,10 +1335,10 @@ class Trainer:
                     images.size(0), self.n_prototypes, self.n_backgrounds
                 ).min(2)[0]
             dist_min_by_sample, argmin_idx = map(lambda t: t.cpu().numpy(), dist.min(1))
-            for cluster in range(self.n_prototypes):
-                subset_img[cluster] = np.hstack(
-                    [subset_img[cluster], np.array(path)[argmin_idx == cluster]]
-                )
+            # for cluster in range(self.n_prototypes):
+            #    subset_img[cluster] = np.hstack(
+            #        [subset_img[cluster], np.array(path)[argmin_idx == cluster]]
+            #    )
             loss.update(dist_min_by_sample.mean(), n=len(dist_min_by_sample))
             argmin_idx = argmin_idx.astype(np.int32)
             distances = np.hstack([distances, dist_min_by_sample])
@@ -1614,7 +1614,7 @@ class Trainer:
     def instance_seg_quantitative_eval(self):
         """Run and save quantitative evaluation for instance segmentation"""
         dataset = get_dataset(self.dataset_name)(
-            "train", eval_mode=True, **self.dataset_kwargs
+            "train", eval_mode=True, subset=None, **self.dataset_kwargs
         )
         if 320 % self.batch_size == 0:
             N, B = 320 // self.batch_size, self.batch_size
@@ -1789,12 +1789,12 @@ class Trainer:
             f.write("loss\t" + "\t".join(scores.names) + "\n")
 
         dataset = get_dataset(self.dataset_name)(
-            "train", eval_mode=True, **self.dataset_kwargs
+            "train", subset=None, eval_mode=True, **self.dataset_kwargs
         )
         loader = DataLoader(
             dataset, batch_size=self.batch_size, num_workers=self.n_workers
         )
-        for images, labels in loader:
+        for images, labels, _ in loader:
             B = images.size(0)
             images = images.to(self.device)
             distances = self.model(images)[1]

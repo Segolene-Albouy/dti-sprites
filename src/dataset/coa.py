@@ -29,7 +29,7 @@ class CoADataset(TorchDataset):
         with open(json_file, "r") as f:
             self.data = json.load(f)
 
-        self.n_classes = 4
+        self.n_classes = 5
         self.size = len(self.data)
 
         img_size = kwargs.get("img_size")
