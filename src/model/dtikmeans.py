@@ -35,21 +35,22 @@ class DTIKmeans(nn.Module):
         noise = kwargs.get("noise", 0.5)
         value = kwargs.get("value", None)
         self.ms = kwargs.get("ms", 0)
+        self.color_channels = kwargs.get("color_channels", 3)
         proto_args = kwargs.get("prototype")
         self.proto_source = proto_args.get("source", "data")
         if self.proto_source == "generator":
-            gen_name = proto_args.get("generator", "unet")
+            self.gen_name = proto_args.get("generator", "unet")
             latent_size = (
                 (128,)
-                if gen_name == "marionette"
+                if self.gen_name == "marionette"
                 else (1, self.img_size[0], self.img_size[1])
             )
             self.generator = self.init_generator(
-                gen_name,
+                self.gen_name,
                 latent_dim=128,
-                out_channel=self.img_size[0] * self.img_size[1],
+                color_channel=self.color_channels,
+                out_channel=self.color_channels * self.img_size[0] * self.img_size[1],
             )
-            assert proto_args.get("proba")
             self.latent_params = (
                 nn.Parameter(  # TODO: Check during optimization when shared.
                     torch.stack(
@@ -60,18 +61,20 @@ class DTIKmeans(nn.Module):
                     )
                 )
             )
-            self.latent_shared = proto_args.get("shared_latent", False)
-            if self.latent_shared:
-                self.proba_latent_params = self.latent_params
-            else:
-                self.proba_latent_params = nn.Parameter(
-                    torch.stack(
-                        [
-                            torch.normal(mean=0.0, std=1.0, size=latent_size)
-                            for k in range(n_prototypes)
-                        ]
+
+            if proto_args.get("proba", False):
+                self.latent_shared = proto_args.get("shared_latent", False)
+                if self.latent_shared:
+                    self.proba_latent_params = self.latent_params
+                else:
+                    self.proba_latent_params = nn.Parameter(
+                        torch.stack(
+                            [
+                                torch.normal(mean=0.0, std=1.0, size=latent_size)
+                                for k in range(n_prototypes)
+                            ]
+                        )
                     )
-                )
             clamp_name = kwargs.get("use_clamp", "soft")
             self.clamp_func = get_clamp_func(clamp_name)
 
@@ -98,7 +101,7 @@ class DTIKmeans(nn.Module):
             dataset.n_channels, dataset.img_size, n_prototypes, **kwargs
         )
         self.encoder = self.transformer.encoder
-        if proto_args.get("proba"):
+        if proto_args.get("proba", False):
             self.projector = self.init_projector(self.encoder.out_ch)
             self.proba_estimator = self.init_proba(self.proba_latent_params.shape[1])
 
@@ -115,12 +118,12 @@ class DTIKmeans(nn.Module):
             )
         else:
             self.loss_weights = None
-        self.scale_t = kwargs.get("scale", "minmax")
+        self.scale_t = kwargs.get("scale", None)
 
     @staticmethod
-    def init_generator(name, latent_dim, out_channel):
+    def init_generator(name, latent_dim, color_channel, out_channel):
         if name == "unet":
-            return UNet(1, 1)
+            return UNet(1, color_channel)
         elif name == "marionette":
             return nn.Sequential(
                 nn.Linear(latent_dim, 8 * latent_dim),
@@ -157,14 +160,16 @@ class DTIKmeans(nn.Module):
             x = (x - min_) / (max_ - min_)
             return x.view(b, c, h, w)
         else:
-            return NotImplementedError("Scale type is not implemented.")
+            return self.prototypes
 
     @property
     def prototypes(self):
         if self.proto_source == "generator":
-            gen_theta = self.generator(self.latent_params)
+            params = self.generator(self.latent_params)
             if self.gen_name == "marionette":
-                params = gen_theta.reshape(-1, 1, self.img_size[0], self.img_size[1])
+                params = params.reshape(
+                    -1, self.color_channels, self.img_size[0], self.img_size[1]
+                )
         else:
             params = self.prototype_params
 
@@ -281,7 +286,13 @@ class DTIKmeans(nn.Module):
 
         if hasattr(self, "optimizer"):
             opt = self.optimizer
-            params = [self.prototype_params]
+            params = (
+                [self.latent_params]
+                if hasattr(self, "generator")
+                else [self.prototype_params]
+            )
+            if hasattr(self, "proba_estimator") and not self.latent_shared:
+                params += [self.proba_latent_params]
             if isinstance(opt, (Adam,)):
                 for param in params:
                     opt.state[param]["exp_avg"][i] = opt.state[param]["exp_avg"][j]

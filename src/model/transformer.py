@@ -46,6 +46,7 @@ class PrototypeTransformationNetwork(nn.Module):
         tsf_kwargs = {
             "in_channels": self.enc_out_channels,
             "img_size": img_size,
+            "color_channels": kwargs.get("color_channels", 3),
             "sequence_name": self.sequence_name,
             "grid_size": kwargs.get("grid_size", 4),
             "kernel_size": kwargs.get("kernel_size", 3),
