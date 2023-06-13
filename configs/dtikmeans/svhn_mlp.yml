@@ -1,20 +1,18 @@
 dataset:
-  name: gtsrb8
+  name: svhn
 model:
   name: dtikmeans
-  n_prototypes: 8
+  n_prototypes: 10
   prototype:
-    source: data
-    data:
-      init: sample
+    source: generator
+    generator: marionette
   encoder_name: resnet20
   transformation_sequence: identity_color_projective
-  curriculum_learning: [20, 180]
+  curriculum_learning: [2, 18]
   gaussian_weights: True
   gaussian_weights_std: 7
 training:
   batch_size: 128
-  n_workers: 4
   optimizer:
     name: adam
     lr: 1.0e-3
@@ -23,12 +21,11 @@ training:
   scheduler:
     name: multi_step
     gamma: 0.1
-    milestones: [300]
-  n_epoches: 330
-  train_stat_interval: 100
-  val_stat_interval: 200
-  check_cluster_interval: 25
-  seed: 72670
+    milestones: [30]
+    update_range: epoch
+  n_epoches: 33
+  train_stat_interval: 500
+  val_stat_interval: 1000
+  check_cluster_interval: 100
+  seed: 61469
   visualizer_port:
-  pretrained: 
-  resume: 

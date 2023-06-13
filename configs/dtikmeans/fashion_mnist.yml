@@ -8,6 +8,7 @@ model:
     data:
       init: sample
   encoder_name: resnet20
+  color_channels: 1
   transformation_sequence: identity_color_affine_tps
   curriculum_learning: [5, 15, 25]
   grid_size: 4
@@ -27,5 +28,5 @@ training:
   train_stat_interval: 25
   val_stat_interval: 50
   check_cluster_interval: 50
-  seed: 45639
+  seed: 73987
   visualizer_port:

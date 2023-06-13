@@ -1,16 +1,17 @@
 dataset:
-  name: mnist_color
+  name: mnist
 model:
   name: dtikmeans
   n_prototypes: 10
   prototype:
-    source: data
-    data:
-      init: sample
+    source: generator
+    generator: unet
   encoder_name: resnet20
-  transformation_sequence: identity_color_affine_tps
-  curriculum_learning: [5, 15, 30]
+  color_channels: 1
+  transformation_sequence: identity_affine_morpho_tps
+  curriculum_learning: [5, 15, 20]
   grid_size: 4
+  kernel_size: 7
 training:
   batch_size: 128
   optimizer:
@@ -21,11 +22,11 @@ training:
   scheduler:
     name: multi_step
     gamma: 0.1
-    milestones: [45]
+    milestones: [35]
     update_range: epoch
-  n_epoches: 50
+  n_epoches: 40
   train_stat_interval: 25
   val_stat_interval: 50
   check_cluster_interval: 50
-  seed: 65797
+  seed: 70290
   visualizer_port:

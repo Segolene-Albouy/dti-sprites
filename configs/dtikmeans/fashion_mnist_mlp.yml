@@ -1,15 +1,15 @@
 dataset:
-  name: mnist_color
+  name: fashion_mnist
 model:
   name: dtikmeans
   n_prototypes: 10
   prototype:
-    source: data
-    data:
-      init: sample
+    source: generator
+    generator: marionette
   encoder_name: resnet20
+  color_channels: 1
   transformation_sequence: identity_color_affine_tps
-  curriculum_learning: [5, 15, 30]
+  curriculum_learning: [5, 15, 25]
   grid_size: 4
 training:
   batch_size: 128
@@ -21,11 +21,11 @@ training:
   scheduler:
     name: multi_step
     gamma: 0.1
-    milestones: [45]
+    milestones: [35]
     update_range: epoch
-  n_epoches: 50
+  n_epoches: 40
   train_stat_interval: 25
   val_stat_interval: 50
   check_cluster_interval: 50
-  seed: 65797
+  seed: 30634
   visualizer_port:
