@@ -1,6 +1,7 @@
 from .cosegmentation import WeizmannHorseDataset
 from .gtsrb import GTSRB8Dataset
 from .affnist import AffNISTTestDataset
+from .hdf5 import FRGCDataset
 from .coa import CoADataset
 from .multi_object import DSpritesGrayDataset, TetrominoesDataset, CLEVR6Dataset
 from .instagram import InstagramDataset
@@ -24,6 +25,7 @@ def get_dataset(dataset_name):
         "affnist_test": AffNISTTestDataset,
         "gtsrb8": GTSRB8Dataset,
         "instagram": InstagramDataset,
+        "frgc": FRGCDataset,
         # MultiObject
         "clevr6": CLEVR6Dataset,
         "dsprites_gray": DSpritesGrayDataset,
