@@ -4,10 +4,10 @@ model:
   name: dtikmeans
   n_prototypes: 10
   prototype:
-    source: generator
-    generator: unet
+    source: data
+    data:
+      init: soup 
   encoder_name: resnet20
-  color_channels: 1
   transformation_sequence: identity_affine_morpho_tps
   curriculum_learning: [5, 20, 25]
   grid_size: 4
@@ -28,5 +28,5 @@ training:
   train_stat_interval: 200
   val_stat_interval: 400
   check_cluster_interval: 400
-  seed: 68192
+  seed: 82499
   visualizer_port: 
