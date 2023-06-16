@@ -64,10 +64,11 @@ def generate_data(
         for _ in range(K):
             if init_type == "soup":
                 noise_scale = noise_scale or 1
-                sample = rgb_to_grayscale(
-                    torch.rand(dataset.n_channels, *(size or dataset.img_size))
-                    * noise_scale
-                )
+                sample = torch.rand(dataset[0][0].shape)
+                # rgb_to_grayscale(
+                #    torch.rand(dataset.n_channels, *(size or dataset.img_size))
+                #    * noise_scale
+                # )
                 if value is not None:
                     sample += value
             elif init_type == "sample":
@@ -259,7 +260,9 @@ class TPSGrid(nn.Module):
         # create target cordinate matrix
         HW = img_height * img_width
         y, x = torch.meshgrid(
-            torch.linspace(-1, 1, img_height), torch.linspace(-1, 1, img_width), indexing='ij'
+            torch.linspace(-1, 1, img_height),
+            torch.linspace(-1, 1, img_width),
+            indexing="ij",
         )
         target_coordinate = torch.stack([x.flatten(), y.flatten()], 1)
         target_coordinate_partial_repr = self.compute_partial_repr(
