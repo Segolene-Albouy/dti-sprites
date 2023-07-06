@@ -52,15 +52,20 @@ class PrototypeTransformationNetwork(nn.Module):
             "kernel_size": kwargs.get("kernel_size", 3),
             "padding_mode": kwargs.get("padding_mode", "zeros"),
             "curriculum_learning": kwargs.get("curriculum_learning", False),
+            "shared": kwargs.get("shared", False),
             "use_clamp": kwargs.get("use_clamp", "soft"),
             "n_hidden_layers": kwargs.get("n_hidden_layers", N_LAYERS),
         }
-        self.tsf_sequences = nn.ModuleList(
-            [
-                TransformationSequence(**deepcopy(tsf_kwargs))
-                for i in range(n_prototypes)
-            ]
-        )
+        self.shared_t = tsf_kwargs["shared"]
+        if self.shared_t:
+            self.tsf_sequences = TransformationSequence(**deepcopy(tsf_kwargs))
+        else:
+            self.tsf_sequences = nn.ModuleList(
+                [
+                    TransformationSequence(**deepcopy(tsf_kwargs))
+                    for i in range(n_prototypes)
+                ]
+            )
 
     def get_parameters(self):
         if self.exp_encoder:
@@ -80,10 +85,13 @@ class PrototypeTransformationNetwork(nn.Module):
         else:
             features = self.encoder(x) if features is None else features
             inp = x.unsqueeze(1).expand(-1, self.n_prototypes, -1, -1, -1)
-            target = [
-                tsf_seq(proto, features)
-                for tsf_seq, proto in zip(self.tsf_sequences, prototypes)
-            ]
+            if self.shared_t:
+                target = [self.tsf_sequences(proto, features) for proto in prototypes]
+            else:
+                target = [
+                    tsf_seq(proto, features)
+                    for tsf_seq, proto in zip(self.tsf_sequences, prototypes)
+                ]
             target = torch.stack(target, dim=1)
         return inp, target
 
@@ -94,14 +102,22 @@ class PrototypeTransformationNetwork(nn.Module):
             return x.unsqueeze(1).expand(-1, self.n_prototypes, -1, -1, -1)
         else:
             features = self.encoder(x[:, :3, :, :]) if features is None else features
-            y = torch.stack(
-                [tsf_seq(x, features, inverse=True) for tsf_seq in self.tsf_sequences],
-                1,
-            )
+            if self.shared_t:
+                y = self.tsf_sequences(x, features, inverse=True)
+            else:
+                y = torch.stack(
+                    [
+                        tsf_seq(x, features, inverse=True)
+                        for tsf_seq in self.tsf_sequences
+                    ],
+                    1,
+                )
             return y
 
     def predict_parameters(self, x=None, features=None):
         features = self.encoder(x) if features is None else features
+        if self.shared_t:
+            return self.tsf_sequences.predict_parameters(features)
         return torch.stack(
             [tsf_seq.predict_parameters(features) for tsf_seq in self.tsf_sequences],
             dim=0,
@@ -111,14 +127,23 @@ class PrototypeTransformationNetwork(nn.Module):
         if self.is_identity:
             return prototypes
         else:
-            target = [
-                tsf_seq.apply_parameters(proto, beta, is_var=is_var)
-                for tsf_seq, proto, beta in zip(self.tsf_sequences, prototypes, betas)
-            ]
+            target = (
+                [
+                    self.tsf_sequences.apply_parameters(proto, beta, is_var=is_var)
+                    for proto, beta in zip(prototypes, betas)
+                ]
+                if self.shared_t
+                else [
+                    tsf_seq.apply_parameters(proto, beta, is_var=is_var)
+                    for tsf_seq, proto, beta in zip(
+                        self.tsf_sequences, prototypes, betas
+                    )
+                ]
+            )
             return torch.stack(target, dim=1)
 
     def restart_branch_from(self, i, j, noise_scale=0.001):
-        if self.is_identity:
+        if self.is_identity or self.shared_t:
             return None
 
         self.tsf_sequences[i].load_with_noise(
@@ -158,14 +183,22 @@ class PrototypeTransformationNetwork(nn.Module):
 
     def step(self):
         if not self.is_identity:
-            [tsf_seq.step() for tsf_seq in self.tsf_sequences]
+            if self.shared_t:
+                self.tsf_sequences.step()
+            else:
+                [tsf_seq.step() for tsf_seq in self.tsf_sequences]
 
     def activate_all(self):
         if not self.is_identity:
-            [tsf_seq.activate_all() for tsf_seq in self.tsf_sequences]
+            if self.shared_t:
+                self.tsf_sequences.activate_all()
+            else:
+                [tsf_seq.activate_all() for tsf_seq in self.tsf_sequences]
 
     @property
     def only_id_activated(self):
+        if self.shared_t:
+            return self.tsf_sequences.only_id_activated
         return self.tsf_sequences[0].only_id_activated
 
     def set_optimizer(self, opt):
