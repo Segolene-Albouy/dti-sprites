@@ -158,15 +158,28 @@ class Trainer:
 
         # Optimizer
         self.opt_params = cfg["training"]["optimizer"] or {}
+        self.sprite_opt_params = cfg["training"].get("sprite_optimizer", {})
         self.optimizer_name = self.opt_params.pop("name")
         self.cluster_kwargs = self.opt_params.pop("cluster", {})
         self.tsf_kwargs = self.opt_params.pop("transformer", {})
-        self.optimizer = get_optimizer(self.optimizer_name)(
-            [dict(params=self.model.cluster_parameters(), **self.cluster_kwargs)]
-            + [dict(params=self.model.transformer_parameters(), **self.tsf_kwargs)],
-            **self.opt_params,
-        )
-        self.model.set_optimizer(self.optimizer)
+        self.sprite_optimizer_name = self.sprite_opt_params.pop("name", None)
+        if self.sprite_optimizer_name in ["SGD", "sgd"]:
+            self.sprite_optimizer = get_optimizer(self.sprite_optimizer_name)(
+                [dict(params=self.model.cluster_parameters(), **self.cluster_kwargs)],
+                **self.sprite_opt_params,
+            )
+            self.optimizer = get_optimizer(self.optimizer_name)(
+                [dict(params=self.model.transformer_parameters(), **self.tsf_kwargs)],
+                **self.opt_params,
+            )
+            self.model.set_optimizer(self.optimizer, self.sprite_optimizer)
+        else:
+            self.optimizer = get_optimizer(self.optimizer_name)(
+                [dict(params=self.model.cluster_parameters(), **self.cluster_kwargs)]
+                + [dict(params=self.model.transformer_parameters(), **self.tsf_kwargs)],
+                **self.opt_params,
+            )
+            self.model.set_optimizer(self.optimizer)
         self.print_and_log_info(
             "Using optimizer {} with kwargs {}".format(
                 self.optimizer_name, self.opt_params
@@ -334,6 +347,10 @@ class Trainer:
                 checkpoint.get("batch", 0) + 1,
             )
             self.optimizer.load_state_dict(checkpoint["optimizer_state"])
+            if hasattr(self, "sprite_optimizer"):
+                self.sprite_optimizer.load_state_dict(
+                    checkpoint["sprite_optimizer_state"]
+                )
             self.scheduler.load_state_dict(checkpoint["scheduler_state"])
             self.cur_lr = self.scheduler.get_last_lr()[0]
         self.print_and_log_info(
@@ -487,8 +504,23 @@ class Trainer:
         self.optimizer.zero_grad()
         loss, distances = self.model(images, epoch)
         loss.backward()
+        # grads = {n: p.grad for n, p in self.model.named_parameters()}
+        # torch.save(grads, "%d_%d_grad.pt" % (epoch, start_time))
+        """
+        with torch.no_grad():
+            proto = self.model.prototype_params.detach().cpu().numpy().flatten()
+            import matplotlib.pyplot as plt
+
+            plt.hist(proto)
+            plt.savefig(f"test_{start_time}.png")
+            plt.clf()
+            plt.close()
+        """
+
         self.optimizer.step()
 
+        if hasattr(self, "sprite_optimizer"):
+            self.sprite_optimizer.step()
         average_losses = np.zeros(self.n_prototypes)
         with torch.no_grad():
             argmin_values, argmin_idx = distances.min(1)
@@ -753,6 +785,8 @@ class Trainer:
             "optimizer_state": self.optimizer.state_dict(),
             "scheduler_state": self.scheduler.state_dict(),
         }
+        if hasattr(self, "sprite_optimizer"):
+            state["sprite_optimizer_state"] = self.sprite_optimizer.state_dict()
         save_path = self.run_dir / MODEL_FILE
         torch.save(state, save_path)
         self.print_and_log_info("Model saved at {}".format(save_path))

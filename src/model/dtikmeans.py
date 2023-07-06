@@ -218,7 +218,10 @@ class DTIKmeans(nn.Module):
         distances = (inp - target) ** 2
         if self.loss_weights is not None:
             distances = distances * self.loss_weights
-        distances = distances.flatten(2).mean(2)
+        if hasattr(self, "sprite_optimizer"):
+            distances = distances.flatten(2).sum(2)
+        else:
+            distances = distances.flatten(2).mean(2)
         dist_min = distances.min(1)[0]
         return dist_min.mean(), distances
 
@@ -233,8 +236,10 @@ class DTIKmeans(nn.Module):
     def step(self):
         self.transformer.step()
 
-    def set_optimizer(self, opt):
+    def set_optimizer(self, opt, sprite_opt=None):
         self.optimizer = opt
+        if sprite_opt:
+            self.sprite_optimizer = sprite_opt
         self.transformer.set_optimizer(opt)
 
     def load_state_dict(self, state_dict):
@@ -284,27 +289,32 @@ class DTIKmeans(nn.Module):
             self.proba_latent_params[i].data.copy_(self.proba_latent_params[j])
         self.transformer.restart_branch_from(i, j, noise_scale=0)
 
-        if hasattr(self, "optimizer"):
-            opt = self.optimizer
-            params = (
-                [self.latent_params]
-                if hasattr(self, "generator")
-                else [self.prototype_params]
-            )
-            if hasattr(self, "proba_estimator") and not self.latent_shared:
-                params += [self.proba_latent_params]
-            if isinstance(opt, (Adam,)):
-                for param in params:
-                    opt.state[param]["exp_avg"][i] = opt.state[param]["exp_avg"][j]
-                    opt.state[param]["exp_avg_sq"][i] = opt.state[param]["exp_avg_sq"][
-                        j
-                    ]
-            elif isinstance(opt, (RMSprop,)):
-                for param in params:
-                    opt.state[param]["square_avg"][i] = opt.state[param]["square_avg"][
-                        j
-                    ]
-            else:
-                raise NotImplementedError(
-                    "unknown optimizer: you should define how to reinstanciate statistics if any"
+        if hasattr(
+            self, "sprite_optimizer"
+        ):  # NOTE: This is the case for SGD experiments only.
+            pass
+        else:
+            if hasattr(self, "optimizer"):
+                opt = self.optimizer
+                params = (
+                    [self.latent_params]
+                    if hasattr(self, "generator")
+                    else [self.prototype_params]
                 )
+                if hasattr(self, "proba_estimator") and not self.latent_shared:
+                    params += [self.proba_latent_params]
+                if isinstance(opt, (Adam,)):
+                    for param in params:
+                        opt.state[param]["exp_avg"][i] = opt.state[param]["exp_avg"][j]
+                        opt.state[param]["exp_avg_sq"][i] = opt.state[param][
+                            "exp_avg_sq"
+                        ][j]
+                elif isinstance(opt, (RMSprop,)):
+                    for param in params:
+                        opt.state[param]["square_avg"][i] = opt.state[param][
+                            "square_avg"
+                        ][j]
+                else:
+                    raise NotImplementedError(
+                        "unknown optimizer: you should define how to reinstanciate statistics if any"
+                    )
