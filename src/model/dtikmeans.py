@@ -1,7 +1,7 @@
 from itertools import chain
 import torch
 import torch.nn as nn
-from torch.optim import Adam, RMSprop
+from torch.optim import Adam, RMSprop, AdamW
 import numpy as np
 
 from .transformer import (
@@ -102,7 +102,6 @@ class DTIKmeans(nn.Module):
         )
         self.encoder = self.transformer.encoder
         if proto_args.get("proba", False):
-            self.projector = self.init_projector(self.encoder.out_ch)
             self.proba_estimator = self.init_proba(self.proba_latent_params.shape[1])
 
         self.empty_cluster_threshold = kwargs.get(
@@ -142,26 +141,6 @@ class DTIKmeans(nn.Module):
             nn.LayerNorm(N_HIDDEN_UNITS),
         )
 
-    @staticmethod
-    def init_projector(in_channel):
-        return nn.Sequential(
-            nn.Linear(in_channel, N_HIDDEN_UNITS),
-            nn.LayerNorm(N_HIDDEN_UNITS),
-        )
-
-    @torch.no_grad()
-    def proto_scale(self):
-        if self.scale_t == "minmax":
-            b, c, h, w = self.prototypes.shape
-            x = self.prototypes.view(b, c, h * w)
-            min_ = x.min(-1, keepdim=True)[0]
-            max_ = x.max(-1, keepdim=True)[0]
-
-            x = (x - min_) / (max_ - min_)
-            return x.view(b, c, h, w)
-        else:
-            return self.prototypes
-
     @property
     def prototypes(self):
         if self.proto_source == "generator":
@@ -195,35 +174,37 @@ class DTIKmeans(nn.Module):
 
     def forward(self, x, epoch=None):
         B, _, _, _ = x.size()
-        if epoch == None or epoch >= self.ms:
-            self.prototypes.data.copy_(self.proto_scale())
-
         features = self.encoder(x)
+
+        prototypes = self.prototypes.unsqueeze(1).expand(
+            self.n_prototypes, B, -1, -1, -1
+        )
+
+        inp, target = self.transformer(x, prototypes)
 
         if hasattr(self, "proba_estimator"):
             proba_theta = self.proba_estimator(self.proba_latent_params)
             probas = (1.0 / np.sqrt(self.encoder.out_ch)) * torch.matmul(
-                proba_theta, self.projector(features).T
-            )
+                proba_theta, features.T
+            )  # TODO: Check the shape of features
 
-            prototypes = self.prototypes.unsqueeze(1).expand(
-                -1, probas.shape[1], -1, -1, -1
-            ) * probas.reshape(probas.shape[0], probas.shape[1], 1, 1, 1)
-        else:
-            prototypes = self.prototypes.unsqueeze(1).expand(
-                self.n_prototypes, B, -1, -1, -1
-            )
+        if hasattr(self, "proba_estimator"):
+            distances = (
+                inp - (probas * target).sum(1)
+            ) ** 2  # TODO: Check the shape of probas
+            dist = distances.flatten(1).mean(1)
 
-        inp, target = self.transformer(x, prototypes)
-        distances = (inp - target) ** 2
-        if self.loss_weights is not None:
-            distances = distances * self.loss_weights
-        if hasattr(self, "sprite_optimizer"):
-            distances = distances.flatten(2).sum(2)
         else:
-            distances = distances.flatten(2).mean(2)
-        dist_min = distances.min(1)[0]
-        return dist_min.mean(), distances
+            distances = (inp - target) ** 2
+            if self.loss_weights is not None:
+                distances = distances * self.loss_weights
+            if hasattr(self, "sprite_optimizer"):
+                distances = distances.flatten(2).sum(2)
+            else:
+                distances = distances.flatten(2).mean(2)
+
+            dist = distances.min(1)[0]
+        return dist.mean(), distances
 
     @torch.no_grad()
     def transform(self, x, inverse=False):
@@ -303,7 +284,7 @@ class DTIKmeans(nn.Module):
                 )
                 if hasattr(self, "proba_estimator") and not self.latent_shared:
                     params += [self.proba_latent_params]
-                if isinstance(opt, (Adam,)):
+                if isinstance(opt, (Adam, AdamW)):
                     for param in params:
                         opt.state[param]["exp_avg"][i] = opt.state[param]["exp_avg"][j]
                         opt.state[param]["exp_avg_sq"][i] = opt.state[param][
