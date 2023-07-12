@@ -504,19 +504,6 @@ class Trainer:
         self.optimizer.zero_grad()
         loss, distances = self.model(images, epoch)
         loss.backward()
-        # grads = {n: p.grad for n, p in self.model.named_parameters()}
-        # torch.save(grads, "%d_%d_grad.pt" % (epoch, start_time))
-        """
-        with torch.no_grad():
-            proto = self.model.prototype_params.detach().cpu().numpy().flatten()
-            import matplotlib.pyplot as plt
-
-            plt.hist(proto)
-            plt.savefig(f"test_{start_time}.png")
-            plt.clf()
-            plt.close()
-        """
-
         self.optimizer.step()
 
         if hasattr(self, "sprite_optimizer"):
