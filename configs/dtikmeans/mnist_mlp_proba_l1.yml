@@ -1,35 +1,35 @@
 dataset:
-  name: affnist_test
+  name: mnist
 model:
   name: dtikmeans
   n_prototypes: 10
   prototype:
-    source: data
-    data:
-      init: sample
+    source: generator
+    generator: mlp
+    proba: True
+    proba_type: weight_sprite
   encoder_name: resnet20
+  color_channels: 1
   transformation_sequence: identity_affine_morpho_tps
-  curriculum_learning: [5, 20, 25]
+  curriculum_learning: [5, 15, 20]
   grid_size: 4
   kernel_size: 7
+  reassign_cluster: False 
 training:
   batch_size: 128
-  sprite_optimizer:
-    name: sgd
-    lr: 1.0e-1
   optimizer:
     name: adam
-    lr: 1.0e-4
+    lr: 1.e-3 
     transformer:
       weight_decay: 1.0e-6
   scheduler:
     name: multi_step
     gamma: 0.1
-    milestones: [37]
+    milestones: [35]
     update_range: epoch
-  n_epoches: 45
-  train_stat_interval: 200
-  val_stat_interval: 400
-  check_cluster_interval: 400
-  seed: 70965
-  visualizer_port: 
+  n_epoches: 40
+  train_stat_interval: 25
+  val_stat_interval: 50
+  check_cluster_interval: 50
+  seed: 92951
+  visualizer_port:

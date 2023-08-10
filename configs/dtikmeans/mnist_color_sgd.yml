@@ -15,7 +15,7 @@ training:
   batch_size: 128
   sprite_optimizer:
     name: sgd
-    lr: 1.0e-2
+    lr: 1.0e-3
   optimizer:
     name: adam
     lr: 1.0e-3
@@ -30,5 +30,5 @@ training:
   train_stat_interval: 25
   val_stat_interval: 50
   check_cluster_interval: 50
-  seed: 55788
+  seed: 24724
   visualizer_port:

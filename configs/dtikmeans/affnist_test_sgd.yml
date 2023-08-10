@@ -1,5 +1,5 @@
 dataset:
-  name: mnist
+  name: affnist_test
 model:
   name: dtikmeans
   n_prototypes: 10
@@ -9,7 +9,7 @@ model:
       init: sample
   encoder_name: resnet20
   transformation_sequence: identity_affine_morpho_tps
-  curriculum_learning: [5, 15, 20]
+  curriculum_learning: [5, 20, 25]
   grid_size: 4
   kernel_size: 7
 training:
@@ -19,17 +19,17 @@ training:
     lr: 1.0e-4
   optimizer:
     name: adam
-    lr: 1.0e-3
+    lr: 1.0e-4
     transformer:
       weight_decay: 1.0e-6
   scheduler:
     name: multi_step
     gamma: 0.1
-    milestones: [35]
+    milestones: [37]
     update_range: epoch
-  n_epoches: 40
-  train_stat_interval: 25
-  val_stat_interval: 50
-  check_cluster_interval: 50
-  seed: 79265
-  visualizer_port:
+  n_epoches: 45
+  train_stat_interval: 200
+  val_stat_interval: 400
+  check_cluster_interval: 400
+  seed: 34666
+  visualizer_port: 

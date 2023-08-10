@@ -8,7 +8,7 @@ model:
     generator: marionette
   encoder_name: resnet20
   transformation_sequence: identity_color_affine_tps
-  curriculum_learning: [5, 15, 30]
+  curriculum_learning: [5, 35, 50]
   grid_size: 4
 training:
   batch_size: 128
@@ -16,15 +16,15 @@ training:
     name: adam
     lr: 1.0e-3
     transformer:
-      weight_decay: 0
+      weight_decay: 1.e-6
   scheduler:
     name: multi_step
     gamma: 0.1
-    milestones: [45]
+    milestones: [65]
     update_range: epoch
-  n_epoches: 50
+  n_epoches: 70
   train_stat_interval: 25
   val_stat_interval: 50
   check_cluster_interval: 50
-  seed: 14996
+  seed: 36193
   visualizer_port:
