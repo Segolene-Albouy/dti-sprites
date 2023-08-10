@@ -1,6 +1,7 @@
 from itertools import chain
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.optim import Adam, RMSprop, AdamW
 import numpy as np
 
@@ -42,8 +43,8 @@ class DTIKmeans(nn.Module):
             self.gen_name = proto_args.get("generator", "unet")
             latent_size = (
                 (128,)
-                if self.gen_name == "marionette"
-                else (1, self.img_size[0], self.img_size[1])
+                if self.gen_name == "mlp"
+                else (1, self.img_size[0], self.img_size[1])  # unet
             )
             self.generator = self.init_generator(
                 self.gen_name,
@@ -62,22 +63,6 @@ class DTIKmeans(nn.Module):
                 )
             )
 
-            if proto_args.get("proba", False):
-                self.latent_shared = proto_args.get("shared_latent", False)
-                if self.latent_shared:
-                    self.proba_latent_params = self.latent_params
-                else:
-                    self.proba_latent_params = nn.Parameter(
-                        torch.stack(
-                            [
-                                torch.normal(mean=0.0, std=1.0, size=latent_size)
-                                for k in range(n_prototypes)
-                            ]
-                        )
-                    )
-            clamp_name = kwargs.get("use_clamp", "soft")
-            self.clamp_func = get_clamp_func(clamp_name)
-
         else:
             data_args = proto_args.get("data")
             proto_init = data_args.get("init", "sample")
@@ -94,14 +79,32 @@ class DTIKmeans(nn.Module):
                 )
             )
             self.prototype_params = nn.Parameter(samples)
-            clamp_name = kwargs.get("use_clamp", "soft")
-            self.clamp_func = get_clamp_func(clamp_name)
+        clamp_name = kwargs.get("use_clamp", "soft")
+        self.clamp_func = get_clamp_func(clamp_name)
+
+        if proto_args.get("proba", False):
+            self.latent_shared = proto_args.get("shared_latent", False)
+            if self.latent_shared:
+                assert hasattr(self, "latent_params")
+                self.proba_latent_params = self.latent_params
+            else:
+                self.proba_latent_params = nn.Parameter(
+                    torch.stack(
+                        [
+                            torch.normal(mean=0.0, std=1.0, size=latent_size)
+                            for k in range(n_prototypes)
+                        ]
+                    )
+                )
 
         self.transformer = Transformer(
             dataset.n_channels, dataset.img_size, n_prototypes, **kwargs
         )
         self.encoder = self.transformer.encoder
+
+        self.proba_type = None
         if proto_args.get("proba", False):
+            self.proba_type = proto_args.get("proto_type", "weight_sprite")
             self.proba_estimator = self.init_proba(self.proba_latent_params.shape[1])
 
         self.empty_cluster_threshold = kwargs.get(
@@ -117,13 +120,12 @@ class DTIKmeans(nn.Module):
             )
         else:
             self.loss_weights = None
-        self.scale_t = kwargs.get("scale", None)
 
     @staticmethod
     def init_generator(name, latent_dim, color_channel, out_channel):
         if name == "unet":
             return UNet(1, color_channel)
-        elif name == "marionette":
+        elif name == "mlp":
             return nn.Sequential(
                 nn.Linear(latent_dim, 8 * latent_dim),
                 nn.GroupNorm(8, 8 * latent_dim),
@@ -134,8 +136,14 @@ class DTIKmeans(nn.Module):
         else:
             NotImplementedError("Generator not implemented.")
 
+    def init_proba(self, in_channel):
+        return nn.Sequential(
+            nn.Linear(in_channel, self.encoder.out_ch),
+            nn.LayerNorm(self.encoder.out_ch, elementwise_affine=False),
+        )
+
     @staticmethod
-    def init_proba(in_channel):
+    def init_projector(in_channel):
         return nn.Sequential(
             nn.Linear(in_channel, N_HIDDEN_UNITS),
             nn.LayerNorm(N_HIDDEN_UNITS),
@@ -145,7 +153,7 @@ class DTIKmeans(nn.Module):
     def prototypes(self):
         if self.proto_source == "generator":
             params = self.generator(self.latent_params)
-            if self.gen_name == "marionette":
+            if self.gen_name == "mlp":
                 params = params.reshape(
                     -1, self.color_channels, self.img_size[0], self.img_size[1]
                 )
@@ -161,10 +169,9 @@ class DTIKmeans(nn.Module):
         else:
             params += [self.prototype_params]
         if hasattr(self, "proba_estimator"):
-            params += list(chain(*[self.proba_estimator.parameters()])) + list(
-                chain(*[self.projector.parameters()])
-            )
+            params += list(chain(*[self.proba_estimator.parameters()]))
             if not self.latent_shared:
+                print("Latent parameters of decision modules will be updated.")
                 params += [self.proba_latent_params]
 
         return iter(params)
@@ -184,16 +191,25 @@ class DTIKmeans(nn.Module):
 
         if hasattr(self, "proba_estimator"):
             proba_theta = self.proba_estimator(self.proba_latent_params)
-            probas = (1.0 / np.sqrt(self.encoder.out_ch)) * torch.matmul(
-                proba_theta, features.T
-            )  # TODO: Check the shape of features
+            logits = (1.0 / np.sqrt(self.encoder.out_ch)) * (features @ proba_theta.T)
+            probas = F.softmax(logits, dim=-1)
 
-        if hasattr(self, "proba_estimator"):
-            distances = (
-                inp - (probas * target).sum(1)
-            ) ** 2  # TODO: Check the shape of probas
-            dist = distances.flatten(1).mean(1)
-
+            if self.proba_type == "weight_sprite":
+                distances = (
+                    inp[:, 0, ...] - (probas[..., None, None, None] * target).sum(1)
+                ) ** 2
+                dist = distances.flatten(1).mean(1)
+                epsilon = torch.ones(probas.shape[-1]).cuda() * 0.01
+                freq = torch.minimum(probas.mean(dim=0), epsilon).sum()
+                return dist.mean() - 0.1 * freq, dist, probas.max(1)[1]
+            elif self.proba_type == "weight_diff":
+                distances = (probas[..., None, None, None] * ((inp - target) ** 2)).sum(
+                    1
+                )
+                dist = distances.flatten(1).mean(1)
+                return dist.mean(), dist, probas.max(1)[1]
+            else:
+                NotImplementedError("Reconstruction loss not implemented.")
         else:
             distances = (inp - target) ** 2
             if self.loss_weights is not None:
@@ -204,7 +220,8 @@ class DTIKmeans(nn.Module):
                 distances = distances.flatten(2).mean(2)
 
             dist = distances.min(1)[0]
-        return dist.mean(), distances
+            dist_min_by_sample, argmin_idx = distances.min(1)
+            return dist.mean(), dist_min_by_sample, argmin_idx
 
     @torch.no_grad()
     def transform(self, x, inverse=False):

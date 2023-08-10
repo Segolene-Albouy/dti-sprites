@@ -502,27 +502,29 @@ class Trainer:
         images = images.to(self.device)
 
         self.optimizer.zero_grad()
-        loss, distances = self.model(images, epoch)
+        loss, dist_min_by_sample, argmin_idx = self.model(images, epoch)
         loss.backward()
         self.optimizer.step()
 
         if hasattr(self, "sprite_optimizer"):
+            torch.nn.utils.clip_grad_value_(self.model.prototype_params, 1)
             self.sprite_optimizer.step()
+
         average_losses = np.zeros(self.n_prototypes)
         with torch.no_grad():
-            argmin_values, argmin_idx = distances.min(1)
             mask = torch.zeros(B, self.n_prototypes, device=self.device).scatter(
                 1, argmin_idx[:, None], 1
             )
             proportions = mask.sum(0).cpu().numpy() / B
 
-            dist_min_by_sample, argmin_idx_ = map(
-                lambda t: t.cpu().numpy(), distances.min(1)
+            dist_min_by_sample, argmin_idx = (
+                dist_min_by_sample.cpu().numpy(),
+                argmin_idx.cpu().numpy(),
             )
-            argmin_idx_ = argmin_idx_.astype(np.int32)
+            argmin_idx = argmin_idx.astype(np.int32)
 
             for k in range(self.n_prototypes):
-                sample_per_clus = argmin_idx_ == k
+                sample_per_clus = argmin_idx == k
                 n_clus = np.sum(sample_per_clus)
                 avg_clus = (
                     np.sum(sample_per_clus * dist_min_by_sample) / n_clus
@@ -530,7 +532,6 @@ class Trainer:
                     else 0.0
                 )
                 average_losses[k] = avg_clus
-
         self.train_metrics.update(
             {
                 "time/img": (time.time() - start_time) / B,
@@ -726,8 +727,7 @@ class Trainer:
         self.model.eval()
         for images, labels, _ in self.val_loader:
             images = images.to(self.device)
-            distances = self.model(images)[1]
-            dist_min_by_sample, argmin_idx = distances.min(1)
+            dist_min_by_sample, argmin_idx = self.model(images)[1:]
             loss_val = dist_min_by_sample.mean()
 
             self.val_metrics.update({"loss_val": loss_val.item()})
@@ -872,8 +872,8 @@ class Trainer:
         ids = []
         for images, labels, path in train_loader:
             images = images.to(self.device)
-            dist = self.model(images)[1]
-            dist_min_by_sample, argmin_idx = map(lambda t: t.cpu().numpy(), dist.min(1))
+            out = self.model(images)[1:]
+            dist_min_by_sample, argmin_idx = map(lambda t: t.cpu().numpy(), out)
             paths.append(path)
             distances.append(dist_min_by_sample)
             ids.append(argmin_idx)
@@ -913,10 +913,8 @@ class Trainer:
             proto_averages = {k: AverageTensorMeter() for k in range(self.n_prototypes)}
             for images, labels, path in train_loader:
                 images = images.to(self.device)
-                dist = self.model(images)[1]
-                dist_min_by_sample, argmin_idx = map(
-                    lambda t: t.cpu().numpy(), dist.min(1)
-                )
+                out = self.model(images)[1:]
+                dist_min_by_sample, argmin_idx = map(lambda t: t.cpu().numpy(), out)
 
                 transformed_imgs = self.model.transform(images)
                 transformed_c0_p0 = transformed_imgs[
@@ -985,10 +983,8 @@ class Trainer:
                 )
                 for images, labels, path in train_loader:
                     images = images.to(self.device)
-                    dist = self.model(images)[1]
-                    dist_min_by_sample, argmin_idx = map(
-                        lambda t: t.cpu().numpy(), dist.min(1)
-                    )
+                    out = self.model(images)[1:]
+                    dist_min_by_sample, argmin_idx = map(lambda t: t.cpu().numpy(), out)
                     leaf_id_by_sample.extend([leaf_id + str(idx) for idx in argmin_idx])
                     rec_err_by_sample.append(dist_min_by_sample)
                     paths.append(path)
@@ -1014,8 +1010,8 @@ class Trainer:
         )
         for images, labels, path in train_loader:
             images = images.to(self.device)
-            dist = self.model(images)[1]
-            dist_min_by_sample, argmin_idx = map(lambda t: t.cpu().numpy(), dist.min(1))
+            out = self.model(images)[1:]
+            dist_min_by_sample, argmin_idx = map(lambda t: t.cpu().numpy(), out)
 
             for cluster in range(self.n_prototypes):
                 subset_img[cluster] = np.hstack(
@@ -1177,8 +1173,7 @@ class Trainer:
         )
         for images, labels, _ in loader:
             images = images.to(self.device)
-            distances = self.model(images)[1]
-            dist_min_by_sample, argmin_idx = distances.min(1)
+            dist_min_by_sample, argmin_idx = self.model(images)[1:]
             loss.update(dist_min_by_sample.mean(), n=len(dist_min_by_sample))
             scores.update(labels.long().numpy(), argmin_idx.cpu().numpy())
 
