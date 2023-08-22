@@ -25,8 +25,8 @@ class PrototypeTransformationNetwork(nn.Module):
         super().__init__()
         self.n_prototypes = n_prototypes
         self.sequence_name = transformation_sequence
-        if self.sequence_name in ["id", "identity"]:
-            return None
+        # if self.sequence_name in ["id", "identity"]:
+        #    return None
 
         encoder = kwargs.get("encoder", None)
         if encoder is not None:
@@ -34,6 +34,7 @@ class PrototypeTransformationNetwork(nn.Module):
             self.encoder = encoder
             self.enc_out_channels = self.encoder.out_ch
         else:
+            self.exp_encoder = False
             encoder_kwargs = {
                 "in_channels": in_channels,
                 "encoder_name": kwargs.get("encoder_name", "resnet20"),
@@ -42,7 +43,7 @@ class PrototypeTransformationNetwork(nn.Module):
             }
             self.encoder = Encoder(**encoder_kwargs)
             self.enc_out_channels = get_output_size(in_channels, img_size, self.encoder)
-
+        print(self.exp_encoder)
         tsf_kwargs = {
             "in_channels": self.enc_out_channels,
             "img_size": img_size,
@@ -697,14 +698,29 @@ class MorphologicalModule(_AbstractTransformationModule):
             return x
         beta = beta + self.identity
         alpha, weights = torch.split(beta, [1, self.kernel_size**2], dim=1)
+        out = []
+        for c in range(x.shape[1]):
+            out.append(
+                self.smoothmax_kernel(
+                    x[:, c, ...].unsqueeze(1), alpha, torch.sigmoid(weights)
+                )
+            )
+        return torch.cat(out, dim=1)
         if x.shape[1] == 1:
             return self.smoothmax_kernel(x, alpha, torch.sigmoid(weights))
         else:
-            assert x.shape[1] == 4
-            out = self.smoothmax_kernel(
-                x[:, -1, ...].unsqueeze(1), alpha, torch.sigmoid(weights)
-            )
-            return torch.cat([x[:, :3, ...], out], dim=1)
+            if x.shape[1] == 4:
+                out = self.smoothmax_kernel(
+                    x[:, -1, ...].unsqueeze(1), alpha, torch.sigmoid(weights)
+                )
+                return torch.cat([x[:, :3, ...], out], dim=1)
+            elif x.shape[1] == 2:
+                out = self.smoothmax_kernel(
+                    x[:, -1, ...].unsqueeze(1), alpha, torch.sigmoid(weights)
+                )
+                return torch.cat([x[:, :1, ...], out], dim=1)
+            else:
+                NotImplementedError("Morphological module is not applicable.")
 
     def smoothmax_kernel(self, x, alpha, kernel):
         if isinstance(alpha, torch.Tensor):
