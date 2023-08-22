@@ -78,7 +78,7 @@ def generate_data(
                         sample.unsqueeze(0), size, mode="bilinear", align_corners=False
                     )[0]
             elif init_type == "constant":
-                value = value or 0.5
+                value = value if value != None else 0.5
                 sample = torch.full(
                     (dataset.n_channels, *(size or dataset.img_size)),
                     value,
