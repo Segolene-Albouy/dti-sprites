@@ -21,6 +21,7 @@ from .u_net import UNet
 
 NOISE_SCALE = 0.0001
 EMPTY_CLUSTER_THRESHOLD = 0.2
+EPSILON = 0.5
 
 
 class DTIKmeans(nn.Module):
@@ -105,6 +106,7 @@ class DTIKmeans(nn.Module):
         self.proba_type = None
         if proto_args.get("proba", False):
             self.proba_type = proto_args.get("proto_type", "weight_sprite")
+            self.lambda_freq = proto_args.get("lambda_freq", 0.1)
             self.proba_estimator = self.init_proba(self.proba_latent_params.shape[1])
 
         self.empty_cluster_threshold = kwargs.get(
@@ -140,13 +142,6 @@ class DTIKmeans(nn.Module):
         return nn.Sequential(
             nn.Linear(in_channel, self.encoder.out_ch),
             nn.LayerNorm(self.encoder.out_ch, elementwise_affine=False),
-        )
-
-    @staticmethod
-    def init_projector(in_channel):
-        return nn.Sequential(
-            nn.Linear(in_channel, N_HIDDEN_UNITS),
-            nn.LayerNorm(N_HIDDEN_UNITS),
         )
 
     @property
@@ -199,15 +194,27 @@ class DTIKmeans(nn.Module):
                     inp[:, 0, ...] - (probas[..., None, None, None] * target).sum(1)
                 ) ** 2
                 dist = distances.flatten(1).mean(1)
-                epsilon = torch.ones(probas.shape[-1]).cuda() * 0.01
-                freq = torch.minimum(probas.mean(dim=0), epsilon).sum()
-                return dist.mean() - 0.1 * freq, dist, probas.max(1)[1]
+                freqs = probas.sum(dim=0)
+                freqs = freqs / freqs.sum()
+                freq_loss = freqs.clamp(max=EPSILON / self.n_prototypes)
+                return (
+                    dist.mean() + self.lambda_freq * (1 - freq_loss.sum()),
+                    dist,
+                    probas.max(1)[1],
+                )
             elif self.proba_type == "weight_diff":
                 distances = (probas[..., None, None, None] * ((inp - target) ** 2)).sum(
                     1
                 )
                 dist = distances.flatten(1).mean(1)
-                return dist.mean(), dist, probas.max(1)[1]
+                freqs = -probas.sum(dim=0)
+                freqs = freqs / freqs.sum()
+                freq_loss = -freqs.clamp(max=EPSILON / self.n_prototypes)
+                return (
+                    dist.mean() + self.lambda_freq * (1 - freq_loss.sum()),
+                    dist,
+                    probas.max(1)[1],
+                )
             else:
                 NotImplementedError("Reconstruction loss not implemented.")
         else:
@@ -278,13 +285,15 @@ class DTIKmeans(nn.Module):
 
     def restart_branch_from(self, i, j):
         if hasattr(self, "generator"):
-            self.latent_params[i].data.copy_(self.latent_params[j])
+            self.latent_params[i].data.copy_(self.latent_params[j].detach().clone())
         else:
             self.prototype_params[i].data.copy_(
                 copy_with_noise(self.prototypes[j], NOISE_SCALE)
             )
         if hasattr(self, "proba_estimator") and not self.latent_shared:
-            self.proba_latent_params[i].data.copy_(self.proba_latent_params[j])
+            self.proba_latent_params[i].data.copy_(
+                self.proba_latent_params[j].detach().clone()
+            )
         self.transformer.restart_branch_from(i, j, noise_scale=0)
 
         if hasattr(
