@@ -50,15 +50,15 @@ class DTISprites(nn.Module):
         self.color_channels = kwargs.get("color_channels", 3)
         proto_args = kwargs.get("prototype")
         self.proto_source = proto_args.get("source", "data")
-        data_args = proto_args.get("data")
+        data_args = proto_args.get("data", {})
         self.freeze_frg, self.freeze_bkg, self.freeze_sprite = data_args.get(
             "freeze", [False, False, False]
         )
         value_frg, value_bkg, value_mask = data_args.get("value", [0.5, 0.5, 0.5])
         self.freeze_milestone = proto_args.get("freeze_milestone", 0)
+        assert isinstance(self.freeze_milestone, (int,))
         std = proto_args.get("gaussian_weights_std", 0)
 
-        assert isinstance(self.freeze_milestone, (int,))
         if self.proto_source == "generator":
             if self.freeze_frg:
                 fg_init = data_args["init"][0]
@@ -266,7 +266,7 @@ class DTISprites(nn.Module):
                     masks = self.generator(self.latent_params)
                 else:
                     masks = self.generator(self.latent_params)[
-                        :, self.size[0] * self.size[1]
+                        :, self.color_channels * self.size[0] * self.size[1] :
                     ]
             if self.gen_name == "mlp":
                 masks = masks.reshape(-1, 1, self.size[0], self.size[1])
@@ -288,7 +288,7 @@ class DTISprites(nn.Module):
         if self.proto_source == "generator" and not self.freeze_frg:
             with torch.no_grad():
                 params = self.generator(self.latent_params)[
-                    :, : self.size[0] * self.size[1]
+                    :, : self.color_channels * self.size[0] * self.size[1]
                 ]
                 if self.gen_name == "mlp":
                     params = params.reshape(
@@ -400,7 +400,7 @@ class DTISprites(nn.Module):
         prototypes = (
             self.prototypes
             if self.freeze_frg or not hasattr(self, "generator")
-            else out[:, : self.size[0] * self.size[1]].reshape(
+            else out[:, : self.color_channels * self.size[0] * self.size[1]].reshape(
                 -1, self.color_channels, self.size[0], self.size[1]
             )
         )
@@ -411,9 +411,9 @@ class DTISprites(nn.Module):
             if self.freeze_frg:
                 masks = out.reshape(-1, 1, self.size[0], self.size[1])
             else:
-                out[:, self.size[0] * self.size[1]].reshape(
-                    -1, 1, self.size[0], self.size[1]
-                )
+                masks = out[
+                    :, self.color_channels * self.size[0] * self.size[1] :
+                ].reshape(-1, 1, self.size[0], self.size[1])
         else:
             masks = self.masks
         masks = masks.unsqueeze(1).expand(K, B, 1, -1, -1)
@@ -813,7 +813,7 @@ class DTISprites(nn.Module):
                 if hasattr(self, "generator")
                 else [self.mask_params]
             )
-            if not self.freeze_frg:
+            if not self.freeze_frg and not hasattr(self, "generator"):
                 params += self.prototype_params
             if isinstance(opt, (Adam,)):
                 for param in params:

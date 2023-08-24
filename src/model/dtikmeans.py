@@ -34,8 +34,6 @@ class DTIKmeans(nn.Module):
         self.n_prototypes = n_prototypes
         self.n_objects = 1
         self.img_size = dataset.img_size
-        noise = kwargs.get("noise", 0.5)
-        value = kwargs.get("value", None)
         self.ms = kwargs.get("ms", 0)
         self.color_channels = kwargs.get("color_channels", 3)
         proto_args = kwargs.get("prototype")
@@ -188,7 +186,6 @@ class DTIKmeans(nn.Module):
             proba_theta = self.proba_estimator(self.proba_latent_params)
             logits = (1.0 / np.sqrt(self.encoder.out_ch)) * (features @ proba_theta.T)
             probas = F.softmax(logits, dim=-1)
-
             if self.proba_type == "weight_sprite":
                 distances = (
                     inp[:, 0, ...] - (probas[..., None, None, None] * target).sum(1)
@@ -207,9 +204,9 @@ class DTIKmeans(nn.Module):
                     1
                 )
                 dist = distances.flatten(1).mean(1)
-                freqs = -probas.sum(dim=0)
+                freqs = probas.sum(dim=0)
                 freqs = freqs / freqs.sum()
-                freq_loss = -freqs.clamp(max=EPSILON / self.n_prototypes)
+                freq_loss = freqs.clamp(max=EPSILON / self.n_prototypes)
                 return (
                     dist.mean() + self.lambda_freq * (1 - freq_loss.sum()),
                     dist,
