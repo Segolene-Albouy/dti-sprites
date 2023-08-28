@@ -5,7 +5,7 @@ model:
   n_prototypes: 10
   prototype:
     source: generator
-    generator: marionette
+    generator: mlp
     proba: True
     proba_type: weight_diff
   encoder_name: resnet20
