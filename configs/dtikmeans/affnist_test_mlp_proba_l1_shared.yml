@@ -4,19 +4,21 @@ model:
   name: dtikmeans
   n_prototypes: 10
   prototype:
-    source: data
-    data:
-      init: sample
+    source: generator
+    generator: mlp
+    proba: True
+    proba_type: weight_sprite
+    lambda_freq: 0.
+    shared_latent: True
   encoder_name: resnet20
+  color_channels: 1
   transformation_sequence: identity_affine_morpho_tps
   curriculum_learning: [5, 20, 25]
   grid_size: 4
   kernel_size: 7
+  reassign_cluster: False 
 training:
   batch_size: 128
-  sprite_optimizer:
-    name: sgd
-    lr: 1.0e-4
   optimizer:
     name: adam
     lr: 1.0e-4
@@ -31,5 +33,5 @@ training:
   train_stat_interval: 200
   val_stat_interval: 400
   check_cluster_interval: 400
-  seed: 42720
+  seed: 7281
   visualizer_port: 

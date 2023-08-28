@@ -4,19 +4,20 @@ model:
   name: dtikmeans
   n_prototypes: 8
   prototype:
-    source: data
-    data:
-      init: sample
+    source: generator
+    generator: mlp
+    proba: True
+    proba_type: weight_diff
+    lambda_freq: 0.
+    shared_latent: True
   encoder_name: resnet20
   transformation_sequence: identity_color_projective
   curriculum_learning: [20, 180]
   gaussian_weights: True
   gaussian_weights_std: 7
+  reassign_cluster: False
 training:
   batch_size: 128
-  sprite_optimizer:
-    name: sgd
-    lr: 1.0e-3
   n_workers: 4
   optimizer:
     name: adam
@@ -31,7 +32,7 @@ training:
   train_stat_interval: 100
   val_stat_interval: 200
   check_cluster_interval: 25
-  seed: 51645
+  seed: 12216
   visualizer_port:
   pretrained: 
   resume: 
