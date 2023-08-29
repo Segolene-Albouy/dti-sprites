@@ -8,7 +8,7 @@ model:
     generator: mlp
     proba: True
     proba_type: weight_sprite
-    lambda_freq: 0.1
+    lambda_freq: 0.02
   encoder_name: resnet20
   color_channels: 1
   transformation_sequence: identity_affine_morpho_tps
@@ -30,7 +30,7 @@ training:
     update_range: epoch
   n_epoches: 45
   train_stat_interval: 200
-  val_stat_interval: 200
+  val_stat_interval: 400
   check_cluster_interval: 400
   seed: 7281
   visualizer_port: 

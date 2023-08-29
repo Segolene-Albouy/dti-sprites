@@ -20,7 +20,6 @@ model:
   curriculum_learning: [5, 15, 25]
   curriculum_learning_bkg: False
   grid_size: 4
-  kernel_size: 7
 training:
   batch_size: 128
   optimizer:

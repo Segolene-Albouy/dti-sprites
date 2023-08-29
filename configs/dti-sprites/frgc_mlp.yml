@@ -1,25 +1,23 @@
 dataset:
-  name: usps
+  name: frgc
 model:
   name: dti_sprites
-  n_sprites: 10
+  n_sprites: 20
   n_backgrounds: 1
   n_objects: 1
   prototype:
     source: generator
     generator: mlp
     data:
-      freeze: [True, True, False]
-      init: ["constant", "constant", "random"]
-      value: [1., 0., 0.]
+      freeze: [False, True, False]
+      init: ["random", "constant", "random"]
+      value: [0., 0., 0.]
   encoder_name: resnet20
-  color_channels: 1
   transformation_sequence: identity_color_affine_tps
+  curriculum_learning: [50, 200, 400]
   transformation_sequence_bkg: identity_color
-  curriculum_learning: [60, 120, 200]
-  curriculum_learning_bkg: [60]
+  curriculum_learning_bkg: [50]
   grid_size: 4
-  padding_mode: zeros
 training:
   batch_size: 128
   optimizer:
@@ -30,11 +28,11 @@ training:
   scheduler:
     name: multi_step
     gamma: 0.1
-    milestones: [250]
+    milestones: [650]
     update_range: epoch
-  n_epoches: 270
-  train_stat_interval: 25
-  val_stat_interval: 50
-  check_cluster_interval: 50
-  seed: 49422
-  visualizer_port:
+  n_epoches: 700
+  train_stat_interval: 10
+  val_stat_interval: 20
+  check_cluster_interval: 20
+  seed: 23818
+  visualizer_port: 
