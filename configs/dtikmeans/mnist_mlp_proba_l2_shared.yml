@@ -8,6 +8,7 @@ model:
     generator: mlp
     proba: True
     proba_type: weight_diff
+    lambda_freq: 0.
     shared_latent: True
   encoder_name: resnet20
   color_channels: 1
