@@ -7,8 +7,14 @@ model:
     source: generator
     generator: mlp
     proba: True
+<<<<<<< HEAD
     proba_type: weight_diff
     lambda_freq: 0.0
+=======
+    proba_type: marionette
+    proba_weight: weight_diff
+    lambda_freq: 0.
+>>>>>>> 5b843841e932bc3b4c2bfc3998b5de3e0598ef25
   encoder_name: resnet20
   color_channels: 1
   transformation_sequence: identity_affine_morpho_tps
@@ -32,5 +38,5 @@ training:
   train_stat_interval: 25
   val_stat_interval: 50
   check_cluster_interval: 50
-  seed: 92951
+  seed: 7355
   visualizer_port:

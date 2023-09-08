@@ -7,7 +7,9 @@ model:
     source: generator
     generator: mlp
     proba: True
-    proba_type: weight_diff
+    proba_type: marionette
+    proba_weight: weight_diff
+    lambda_freq: 0.
     shared_latent: True
     lambda_freq: 0.
   encoder_name: resnet20
@@ -33,5 +35,5 @@ training:
   train_stat_interval: 25
   val_stat_interval: 50
   check_cluster_interval: 50
-  seed: 92951
+  seed: 40074
   visualizer_port:
