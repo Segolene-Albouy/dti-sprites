@@ -103,7 +103,7 @@ class DTIKmeans(nn.Module):
 
         self.proba_type = None
         if proto_args.get("proba", False):
-            self.proba_type = proto_args.get("proto_type", "weight_sprite")
+            self.proba_type = proto_args.get("proba_type", "")
             self.lambda_freq = proto_args.get("lambda_freq", 0.1)
             self.proba_estimator = self.init_proba(self.proba_latent_params.shape[1])
 
