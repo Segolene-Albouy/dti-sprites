@@ -9,12 +9,12 @@ model:
     generator: mlp
     data:
       freeze: [False, False, False]
-      init: ["", "constant", ""]
-  encoder_name: resnet32
-  transformation_sequence: identity_color_projective_tps
-  transformation_sequence_bkg: identity_color_projective_tps
-  curriculum_learning: [100, 300, 800]
-  curriculum_learning_bkg: [100, 300, 800]
+      init: ["", "", ""]
+  encoder_name: resnet20
+  transformation_sequence: identity_color_projective
+  transformation_sequence_bkg: identity_color_projective
+  curriculum_learning: [20, 180]
+  curriculum_learning_bkg: [20, 180]
 training:
   batch_size: 128
   n_workers: 4
@@ -26,8 +26,8 @@ training:
   scheduler:
     name: multi_step
     gamma: 0.1
-    milestones: [1300]
-  n_epoches: 1500
+    milestones: [300]
+  n_epoches: 330
   train_stat_interval: 100
   val_stat_interval: 200
   check_cluster_interval: 25
