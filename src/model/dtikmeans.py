@@ -102,11 +102,23 @@ class DTIKmeans(nn.Module):
         self.encoder = self.transformer.encoder
 
         self.proba_type = None
+        self.proba_weight = None
         if proto_args.get("proba", False):
+            self.proba_weight = proto_args.get("proba_weight", "")
             self.proba_type = proto_args.get("proba_type", "")
             self.lambda_freq = proto_args.get("lambda_freq", 0.0)
-            self.proba_estimator = self.init_proba(self.proba_latent_params.shape[1])
-
+            if self.proba_type == "marionette":
+                self.proba_estimator = self.init_proba(
+                    self.proba_latent_params.shape[1]
+                )
+            elif self.proba_type == "linear":
+                self.proba_estimator = nn.Sequential(
+                    nn.Linear(self.encoder.out_ch, self.n_prototypes),
+                    nn.LayerNorm(self.n_prototypes, elementwise_affine=False),
+                )
+            else:
+                raise NotImplementedError("Decision module not implemented.")
+            self.norm = nn.LayerNorm(self.encoder.out_ch, elementwise_affine=False)
         self.empty_cluster_threshold = kwargs.get(
             "empty_cluster_threshold", EMPTY_CLUSTER_THRESHOLD / n_prototypes
         )
@@ -134,7 +146,7 @@ class DTIKmeans(nn.Module):
                 nn.Sigmoid(),
             )
         else:
-            NotImplementedError("Generator not implemented.")
+            raise NotImplementedError("Generator not implemented.")
 
     def init_proba(self, in_channel):
         return nn.Sequential(
@@ -172,6 +184,17 @@ class DTIKmeans(nn.Module):
     def transformer_parameters(self):
         return self.transformer.parameters()
 
+    def estimate_logits(self, features):
+        if self.proba_type == "marionette":
+            proba_theta = self.proba_estimator(self.proba_latent_params)
+            features = self.norm(features)
+            logits = (1.0 / np.sqrt(self.encoder.out_ch)) * (features @ proba_theta.T)
+        elif self.proba_type == "linear":
+            logits = self.proba_estimator(self.norm(features))
+        else:
+            raise NotImplementedError("Decision module not implemented.")
+        return logits
+
     def forward(self, x, epoch=None):
         B, _, _, _ = x.size()
         features = self.encoder(x)
@@ -183,10 +206,9 @@ class DTIKmeans(nn.Module):
         inp, target = self.transformer(x, prototypes)
 
         if hasattr(self, "proba_estimator"):
-            proba_theta = self.proba_estimator(self.proba_latent_params)
-            logits = (1.0 / np.sqrt(self.encoder.out_ch)) * (features @ proba_theta.T)
+            logits = self.estimate_logits(features)
             probas = F.softmax(logits, dim=-1)
-            if self.proba_type == "weight_sprite":
+            if self.proba_weight == "weight_sprite":
                 distances = (
                     inp[:, 0, ...] - (probas[..., None, None, None] * target).sum(1)
                 ) ** 2
@@ -199,7 +221,7 @@ class DTIKmeans(nn.Module):
                     dist,
                     probas.max(1)[1],
                 )
-            elif self.proba_type == "weight_diff":
+            elif self.proba_weight == "weight_diff":
                 distances = (probas[..., None, None, None] * ((inp - target) ** 2)).sum(
                     1
                 )
@@ -213,7 +235,7 @@ class DTIKmeans(nn.Module):
                     probas.max(1)[1],
                 )
             else:
-                NotImplementedError("Reconstruction loss not implemented.")
+                raise NotImplementedError("Reconstruction loss not implemented.")
         else:
             distances = (inp - target) ** 2
             if self.loss_weights is not None:
