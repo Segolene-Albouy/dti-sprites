@@ -11,7 +11,7 @@ model:
     data:
       freeze: [False, False, False]
       init: ["", "", ""]
-  encoder_name: resnet20
+  encoder_name: resnet32
   transformation_sequence: identity_color_projective
   transformation_sequence_bkg: identity_color_projective
   curriculum_learning: [2, 18]

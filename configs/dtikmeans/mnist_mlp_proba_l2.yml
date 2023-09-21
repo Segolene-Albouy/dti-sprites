@@ -13,7 +13,7 @@ model:
   encoder_name: resnet20
   color_channels: 1
   transformation_sequence: identity_affine_morpho_tps
-  curriculum_learning: [5, 15, 20]
+  curriculum_learning: False [5, 15, 20]
   grid_size: 4
   kernel_size: 7
   reassign_cluster: False 
@@ -33,5 +33,5 @@ training:
   train_stat_interval: 25
   val_stat_interval: 50
   check_cluster_interval: 50
-  seed: 7355
+  seed: 38728
   visualizer_port:

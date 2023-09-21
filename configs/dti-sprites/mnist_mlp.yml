@@ -5,7 +5,6 @@ model:
   n_sprites: 10
   n_backgrounds: 1
   n_objects: 1
-  inject_noise: 0
   prototype:
     source: generator
     generator: mlp
@@ -37,5 +36,5 @@ training:
   train_stat_interval: 25
   val_stat_interval: 50
   check_cluster_interval: 50
-  seed: 92951
+  seed: 49712
   visualizer_port:

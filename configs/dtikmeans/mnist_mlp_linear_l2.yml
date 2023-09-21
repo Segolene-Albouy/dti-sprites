@@ -33,5 +33,5 @@ training:
   train_stat_interval: 25
   val_stat_interval: 50
   check_cluster_interval: 50
-  seed: 83484
+  seed: 6725
   visualizer_port:

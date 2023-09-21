@@ -5,14 +5,16 @@ model:
   n_sprites: 8
   n_backgrounds: 1
   inject_noise: 0.4
+  prototype:
+    source: data
+    data:
+      freeze: [False, False, False]
+      init: ["constant", "mean", "gaussian"]
   encoder_name: resnet32
   transformation_sequence: color_projective_tps
   transformation_sequence_bkg: color_projective_tps
   curriculum_learning: [100, 350]
   curriculum_learning_bkg: [100, 350]
-  proto_init: constant
-  mask_init: gaussian
-  bkg_init: mean
   gaussian_weights_std: 5
 training:
   batch_size: 128
