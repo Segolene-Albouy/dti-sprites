@@ -101,24 +101,20 @@ class DTIKmeans(nn.Module):
         )
         self.encoder = self.transformer.encoder
 
-        self.proba_type = None
-        self.proba_weight = None
         if proto_args.get("proba", False):
             self.proba_weight = proto_args.get("proba_weight", "")
             self.proba_type = proto_args.get("proba_type", "")
             self.lambda_freq = proto_args.get("lambda_freq", 0.0)
             if self.proba_type == "marionette":
-                self.proba_estimator = self.init_proba(
-                    self.proba_latent_params.shape[1]
+                self.linear = nn.Linear(
+                    self.proba_latent_params.shape[1], self.encoder.out_ch
                 )
+                self.norm = nn.LayerNorm(self.encoder.out_ch, elementwise_affine=False)
             elif self.proba_type == "linear":
-                self.proba_estimator = nn.Sequential(
-                    nn.Linear(self.encoder.out_ch, self.n_prototypes),
-                    nn.LayerNorm(self.n_prototypes, elementwise_affine=False),
-                )
+                self.linear = nn.Linear(self.encoder.out_ch, self.n_prototypes)
+                self.norm = nn.LayerNorm(self.n_prototypes, elementwise_affine=False)
             else:
                 raise NotImplementedError("Decision module not implemented.")
-            self.norm = nn.LayerNorm(self.encoder.out_ch, elementwise_affine=False)
         self.empty_cluster_threshold = kwargs.get(
             "empty_cluster_threshold", EMPTY_CLUSTER_THRESHOLD / n_prototypes
         )
@@ -134,6 +130,14 @@ class DTIKmeans(nn.Module):
             self.loss_weights = None
 
     @staticmethod
+    def feat_norm(features):
+        return torch.div(
+            features,
+            torch.norm(features, dim=-1, keepdim=True).expand(-1, features.shape[1])
+            + 1e-5,
+        )
+
+    @staticmethod
     def init_generator(name, latent_dim, color_channel, out_channel):
         if name == "unet":
             return UNet(1, color_channel)
@@ -147,12 +151,6 @@ class DTIKmeans(nn.Module):
             )
         else:
             raise NotImplementedError("Generator not implemented.")
-
-    def init_proba(self, in_channel):
-        return nn.Sequential(
-            nn.Linear(in_channel, self.encoder.out_ch),
-            nn.LayerNorm(self.encoder.out_ch, elementwise_affine=False),
-        )
 
     @property
     def prototypes(self):
@@ -173,8 +171,8 @@ class DTIKmeans(nn.Module):
             params += list(chain(*[self.generator.parameters()])) + [self.latent_params]
         else:
             params += [self.prototype_params]
-        if hasattr(self, "proba_estimator"):
-            params += list(chain(*[self.proba_estimator.parameters()]))
+        if hasattr(self, "linear"):
+            params += list(chain(*[self.linear.parameters()]))
             if not self.latent_shared:
                 print("Latent parameters of decision modules will be updated.")
                 params += [self.proba_latent_params]
@@ -186,11 +184,23 @@ class DTIKmeans(nn.Module):
 
     def estimate_logits(self, features):
         if self.proba_type == "marionette":
-            proba_theta = self.proba_estimator(self.proba_latent_params)
-            features = self.norm(features)
+            lin = self.linear(self.proba_latent_params)
+            proba_theta = self.norm(lin)
+            # proba_theta = self.feat_norm(lin)
+            # proba_theta = self.feat_norm(self.norm(lin))
+            # features = self.feat_norm(features)
+            if torch.isnan(features).any():
+                raise ValueError("isnan feature")
             logits = (1.0 / np.sqrt(self.encoder.out_ch)) * (features @ proba_theta.T)
+            if torch.isnan(logits).any():
+                raise ValueError("isnan logits")
+            # logits = (1.0 / (self.encoder.out_ch)) * (features @ proba_theta.T)
+            # logits = (2.0 / np.sqrt(self.encoder.out_ch)) * (features @ proba_theta.T)
+            # logits = 0.5 * (features @ proba_theta.T)
+            # logits = features @ proba_theta.T
         elif self.proba_type == "linear":
-            logits = self.proba_estimator(self.norm(features))
+            features = self.feat_norm(features)
+            logits = self.linear(features)  # TODO: Normalize linear.
         else:
             raise NotImplementedError("Decision module not implemented.")
         return logits
@@ -205,7 +215,7 @@ class DTIKmeans(nn.Module):
 
         inp, target = self.transformer(x, prototypes)
 
-        if hasattr(self, "proba_estimator"):
+        if hasattr(self, "proba_type"):
             logits = self.estimate_logits(features)
             probas = F.softmax(logits, dim=-1)
             if self.proba_weight == "weight_sprite":
@@ -229,6 +239,8 @@ class DTIKmeans(nn.Module):
                 freqs = probas.sum(dim=0)
                 freqs = freqs / freqs.sum()
                 freq_loss = freqs.clamp(max=EPSILON / self.n_prototypes)
+                if dist.mean().isnan():
+                    raise ValueError("isnan loss")
                 return (
                     dist.mean() + self.lambda_freq * (1 - freq_loss.sum()),
                     dist,
@@ -288,6 +300,7 @@ class DTIKmeans(nn.Module):
         if len(unloaded_params) > 0:
             print_warning(f"load_state_dict: {unloaded_params} not found")
 
+    @torch.no_grad()
     def reassign_empty_clusters(self, proportions):
         if not self._reassign_cluster:
             return [], 0
@@ -309,7 +322,7 @@ class DTIKmeans(nn.Module):
             self.prototype_params[i].data.copy_(
                 copy_with_noise(self.prototypes[j], NOISE_SCALE)
             )
-        if hasattr(self, "proba_estimator") and not self.latent_shared:
+        if hasattr(self, "proba_type") and not self.latent_shared:
             self.proba_latent_params[i].data.copy_(
                 self.proba_latent_params[j].detach().clone()
             )
@@ -327,7 +340,7 @@ class DTIKmeans(nn.Module):
                     if hasattr(self, "generator")
                     else [self.prototype_params]
                 )
-                if hasattr(self, "proba_estimator") and not self.latent_shared:
+                if hasattr(self, "proba_type") and not self.latent_shared:
                     params += [self.proba_latent_params]
                 if isinstance(opt, (Adam, AdamW)):
                     for param in params:
