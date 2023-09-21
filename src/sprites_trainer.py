@@ -108,9 +108,7 @@ class Trainer:
             train_dataset = get_dataset(self.dataset_name)(
                 "train", None, **self.dataset_kwargs
             )
-        val_dataset = get_dataset(self.dataset_name)(
-            "train", None, **self.dataset_kwargs
-        )
+        val_dataset = get_dataset(self.dataset_name)("val", None, **self.dataset_kwargs)
 
         self.n_classes = train_dataset.n_classes
         self.is_val_empty = len(val_dataset) == 0
@@ -1405,7 +1403,7 @@ class Trainer:
         for k in range(self.n_prototypes):
             path = coerce_to_path_and_create_dir(cluster_path / f"cluster{k}")
             indices = np.where(cluster_idx == k)[0]
-            top_idx = np.argsort(distances[indices])  # [:N_CLUSTER_SAMPLES]
+            top_idx = np.argsort(distances[indices])[:N_CLUSTER_SAMPLES]
             for j, idx in enumerate(top_idx):
                 inp = dataset[indices[idx]][0].unsqueeze(0).to(self.device)
                 convert_to_img(inp).save(path / f"top{j}_raw.png")
