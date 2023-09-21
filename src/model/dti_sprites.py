@@ -55,9 +55,9 @@ class DTISprites(nn.Module):
             "freeze", [False, False, False]
         )
         value_frg, value_bkg, value_mask = data_args.get("value", [0.5, 0.5, 0.5])
-        self.freeze_milestone = proto_args.get("freeze_milestone", 0)
+        self.freeze_milestone = data_args.get("freeze_milestone", 0)
         assert isinstance(self.freeze_milestone, (int,))
-        std = proto_args.get("gaussian_weights_std", 0)
+        std = data_args.get("gaussian_weights_std", 25)
 
         if self.proto_source == "generator":
             if self.freeze_frg:
@@ -113,7 +113,7 @@ class DTISprites(nn.Module):
             self.prototype_params = nn.Parameter(samples)
             self.mask_params = nn.Parameter(
                 self.init_masks(
-                    n_sprites, data_args["init"][2], self.size, std, value_mask
+                    n_sprites, data_args["init"][2], self.size, std, value_mask, dataset
                 )
             )
 
@@ -241,7 +241,7 @@ class DTISprites(nn.Module):
             NotImplementedError("Generator not implemented.")
 
     @staticmethod
-    def init_masks(K, mask_init, size, std=None, value=1.0):
+    def init_masks(K, mask_init, size, std=None, value=1.0, dataset=None):
         if mask_init == "constant":
             masks = torch.full((K, 1, *size), value)
         elif mask_init == "gaussian":
@@ -250,6 +250,12 @@ class DTISprites(nn.Module):
             masks = mask.unsqueeze(0).expand(K, -1, -1, -1)
         elif mask_init == "random":
             masks = torch.rand(K, 1, *size)
+        elif mask_init == "sample":
+            assert dataset
+            masks = torch.stack(
+                generate_data(dataset, K, init_type=mask_init, value=value)
+            )
+            assert masks.shape[1] == 1
         else:
             raise NotImplementedError(f"unknown mask_init: {mask_init}")
         return masks
@@ -792,19 +798,17 @@ class DTISprites(nn.Module):
 
     def restart_branch_from(self, i, j):
         if hasattr(self, "generator"):
-            j = j.to(self.latent_params.device)
             self.latent_params[i].data.copy_(self.latent_params[j].detach().clone())
         else:
-            j = j.to(self.prototype_params.device)
             if not self.freeze_frg:
                 self.prototype_params[i].data.copy_(
                     copy_with_noise(self.prototype_params[j], NOISE_SCALE)
                 )
             self.mask_params[i].data.copy_(self.mask_params[j].detach().clone())
-            [
-                tsf.restart_branch_from(i, j, noise_scale=0)
-                for tsf in self.sprite_transformers
-            ]
+        [
+            tsf.restart_branch_from(i, j, noise_scale=0)
+            for tsf in self.sprite_transformers
+        ]
 
         if hasattr(self, "optimizer"):
             opt = self.optimizer
@@ -814,7 +818,9 @@ class DTISprites(nn.Module):
                 else [self.mask_params]
             )
             if not self.freeze_frg and not hasattr(self, "generator"):
-                params += self.prototype_params
+                params += [
+                    self.prototype_params
+                ]  # NOTE: In original implementation there is no switch of proto parameters.
             if isinstance(opt, (Adam,)):
                 for param in params:
                     opt.state[param]["exp_avg"][i] = opt.state[param]["exp_avg"][j]
