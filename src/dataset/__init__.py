@@ -42,6 +42,9 @@ def get_dataset(dataset_name):
         "fleurons": FleuronsDataset,
         # Letters
         "letters": LettersDataset,
+        "Lettre_a": LettersDataset,
+        "Lettre_e": LettersDataset,
+        "Lettre_i": LettersDataset,
         # CoA
         "coa": CoADataset,
     }[dataset_name]
@@ -51,4 +54,4 @@ def get_subset(dataset_name):
     if dataset_name == "fleurons":
         return FleuronsDataset
     else:
-        NotImplementedError()
+        raise NotImplementedError()

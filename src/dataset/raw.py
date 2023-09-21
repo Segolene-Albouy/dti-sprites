@@ -80,4 +80,4 @@ class FleuronsDataset(_AbstractCollectionDataset):
 
 
 class LettersDataset(_AbstractCollectionDataset):
-    name = "letters"
+    name = "Lettre_e"
