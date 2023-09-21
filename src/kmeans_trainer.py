@@ -507,7 +507,7 @@ class Trainer:
         self.optimizer.step()
 
         if hasattr(self, "sprite_optimizer"):
-            torch.nn.utils.clip_grad_value_(self.model.prototype_params, 1)
+            #torch.nn.utils.clip_grad_value_(self.model.prototype_params, 0.1)
             self.sprite_optimizer.step()
 
         average_losses = np.zeros(self.n_prototypes)

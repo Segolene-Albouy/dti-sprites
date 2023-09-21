@@ -11,6 +11,7 @@ model:
     proba_weight: weight_diff
     lambda_freq: 0.
     shared_latent: True
+    lambda_freq: 0.
   encoder_name: resnet20
   color_channels: 1
   transformation_sequence: identity_affine_morpho_tps
