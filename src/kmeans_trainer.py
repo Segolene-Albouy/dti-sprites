@@ -817,7 +817,8 @@ class Trainer:
 
         # Prototypes & Variances
         size = MAX_GIF_SIZE if MAX_GIF_SIZE < max(self.img_size) else self.img_size
-        self.save_prototypes()
+        with torch.no_grad():
+            self.save_prototypes()
         if self.is_gmm:
             self.save_variances()
         for k in range(self.n_prototypes):
@@ -855,6 +856,7 @@ class Trainer:
             return subset
         else:
             self.quantitative_eval()
+            # subset = self.qualitative_eval()
         self.print_and_log_info("Evaluation is over")
 
     @torch.no_grad()
@@ -1013,20 +1015,20 @@ class Trainer:
             out = self.model(images)[1:]
             dist_min_by_sample, argmin_idx = map(lambda t: t.cpu().numpy(), out)
 
-            for cluster in range(self.n_prototypes):
-                subset_img[cluster] = np.hstack(
-                    [subset_img[cluster], np.array(path)[argmin_idx == cluster]]
-                )
+            # for cluster in range(self.n_prototypes):
+            #    subset_img[cluster] = np.hstack(
+            #        [subset_img[cluster], np.array(path)[argmin_idx == cluster]]
+            #    )
 
             loss.update(dist_min_by_sample.mean(), n=len(dist_min_by_sample))
             argmin_idx = argmin_idx.astype(np.int32)
             distances = np.hstack([distances, dist_min_by_sample])
             cluster_idx = np.hstack([cluster_idx, argmin_idx])
-
-            dist_max_by_sample, argmax_idx_ = map(
-                lambda t: t.cpu().numpy(), dist.max(1)
-            )
-            argmax_idx_ = argmax_idx_.astype(np.int32)
+            """
+            #dist_max_by_sample, argmax_idx_ = map(
+            #    lambda t: t.cpu().numpy(), dist.max(1)
+            #)
+            #argmax_idx_ = argmax_idx_.astype(np.int32)
 
             transformed_imgs = self.model.transform(images).cpu()
             for k in range(self.n_prototypes):
@@ -1050,7 +1052,7 @@ class Trainer:
                     else 0.0
                 )
                 average_ctr_losses[k].update(avg_ctr_clus, n_ctr_clus)
-
+            """
         self.print_and_log_info("final_loss: {:.5}".format(loss.avg))
         self.print_and_log_info(
             "".join(
