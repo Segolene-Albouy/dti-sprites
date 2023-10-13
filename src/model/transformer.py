@@ -45,6 +45,7 @@ class PrototypeTransformationNetwork(nn.Module):
             self.enc_out_channels = get_output_size(in_channels, img_size, self.encoder)
         print(self.exp_encoder)
         tsf_kwargs = {
+            "freeze_frg": kwargs.get("freeze_frg", False),
             "in_channels": self.enc_out_channels,
             "img_size": img_size,
             "color_channels": kwargs.get("color_channels", 3),
@@ -475,6 +476,7 @@ class AffineModule(_AbstractTransformationModule):
         super().__init__()
         self.img_size = img_size
         self.padding_mode = kwargs.get("padding_mode", "border")
+        self.freeze_frg = kwargs.get("freeze_frg", False)
         n_layers = kwargs.get("n_hidden_layers", N_LAYERS)
         self.regressor = create_mlp(in_channels, 6, N_HIDDEN_UNITS, n_layers)
 
@@ -509,18 +511,33 @@ class AffineModule(_AbstractTransformationModule):
                 )
                 return torch.cat([x[:, :3, ...], out], dim=1)
 
-        grid = F.affine_grid(
-            beta,
-            (x.size(0), x.size(1), self.img_size[0], self.img_size[1]),
-            align_corners=False,
-        )
-        return F.grid_sample(
-            x,
-            grid,
-            mode="bilinear",
-            padding_mode=self.padding_mode,
-            align_corners=False,
-        )
+        if self.freeze_frg:
+            grid = F.affine_grid(
+                beta,
+                (x.size(0), 1, self.img_size[0], self.img_size[1]),
+                align_corners=False,
+            )
+            out = F.grid_sample(
+                x[:, -1, ...].unsqueeze(1),
+                grid,
+                mode="bilinear",
+                padding_mode=self.padding_mode,
+                align_corners=False,
+            )
+            return torch.cat([x[:, 0, ...].unsqueeze(1), out], dim=1)
+        else:
+            grid = F.affine_grid(
+                beta,
+                (x.size(0), x.size(1), self.img_size[0], self.img_size[1]),
+                align_corners=False,
+            )
+            return F.grid_sample(
+                x,
+                grid,
+                mode="bilinear",
+                padding_mode=self.padding_mode,
+                align_corners=False,
+            )
 
 
 class PositionModule(_AbstractTransformationModule):
@@ -698,7 +715,15 @@ class MorphologicalModule(_AbstractTransformationModule):
             return x
         beta = beta + self.identity
         alpha, weights = torch.split(beta, [1, self.kernel_size**2], dim=1)
-        out = []
+        # out = []
+        if x.shape[1] == 1:
+            return self.smoothmax_kernel(x, alpha, torch.sigmoid(weights))
+        else:  # Assume that the last channel is mask, apply transformation to just mask
+            tr_mask = self.smoothmax_kernel(
+                x[:, -1, ...].unsqueeze(1), alpha, torch.sigmoid(weights)
+            )
+            return torch.cat([x[:, : x.shape[1] - 1, ...], tr_mask], dim=1)
+
         for c in range(x.shape[1]):
             out.append(
                 self.smoothmax_kernel(

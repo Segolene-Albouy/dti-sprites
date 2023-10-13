@@ -3,7 +3,7 @@ dataset:
   img_size: 32
 model:
   name: dti_sprites
-  n_sprites: 10
+  n_sprites: 5
   n_backgrounds: 1
   n_objects: 1
   inject_noise: 0 
@@ -11,15 +11,16 @@ model:
     source: data
     data:
       freeze: [True, True, False]
-      value: [0.1, 0.9, 0.]
-      init: ["constant", "constant", "random"]
+      value: [0.0, 0.5, 0.]
+      init: ["constant", "constant", "gaussian"]
+      gaussian_weights_std: 16
   encoder_name: resnet32
   transformation_sequence: color_affine #_morpho_tps
-  transformation_sequence_bkg: color_affine
-  curriculum_learning: [200] #, 350, 400]
-  curriculum_learning_bkg: [200]
+  transformation_sequence_bkg: color
+  curriculum_learning: False #[200] #, 350, 400]
+  curriculum_learning_bkg: False #[200]
 training:
-  batch_size: 64 
+  batch_size: 16
   n_workers: 4
   optimizer:
     name: adam

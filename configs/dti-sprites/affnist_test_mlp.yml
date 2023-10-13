@@ -3,7 +3,7 @@ dataset:
 model:
   name: dti_sprites
   n_sprites: 10
-  n_backgrounds: 1
+  n_backgrounds: 0 #1
   n_objects: 1
   prototype:
     source: generator
@@ -16,10 +16,11 @@ model:
   color_channels: 1
   transformation_sequence: identity_affine_morpho_tps
   transformation_sequence_bkg: identity
-  curriculum_learning: [10, 40, 50]
+  curriculum_learning: [5, 20, 25]
   curriculum_learning_bkg: False
   grid_size: 4
   kernel_size: 7
+  freeze_frg: True
 training:
   batch_size: 128
   optimizer:
@@ -36,5 +37,5 @@ training:
   train_stat_interval: 200
   val_stat_interval: 400
   check_cluster_interval: 400
-  seed: 65018
+  seed: 26499
   visualizer_port: 

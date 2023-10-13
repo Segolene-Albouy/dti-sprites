@@ -20,6 +20,7 @@ model:
   curriculum_learning_bkg: [60]
   grid_size: 4
   padding_mode: zeros
+  freeze_frg: True
 training:
   batch_size: 128
   optimizer:
@@ -36,5 +37,5 @@ training:
   train_stat_interval: 25
   val_stat_interval: 50
   check_cluster_interval: 50
-  seed: 61540
+  seed: 18966
   visualizer_port:

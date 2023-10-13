@@ -72,7 +72,7 @@ class DTISprites(nn.Module):
                         value=value_frg,
                     )
                 )
-                self.prototype_params = nn.Parameter(samples)
+                self.prototype_params = nn.Parameter(samples, requires_grad=False)
                 latent_out_ch = 1  # Channel for mask
             else:
                 latent_out_ch = self.color_channels + 1
@@ -178,6 +178,11 @@ class DTISprites(nn.Module):
                     color_channel=self.color_channels,
                     out_channel=self.color_channels * self.size[0] * self.size[1],
                 )
+                latent_size = (
+                    (128,)
+                    if self.gen_name == "mlp"
+                    else (1, self.size[0], self.size[1])
+                )
                 self.latent_bkg_params = (
                     nn.Parameter(  # TODO: Check during optimization when shared.
                         torch.stack(
@@ -238,7 +243,7 @@ class DTISprites(nn.Module):
                 nn.Sigmoid(),
             )
         else:
-            NotImplementedError("Generator not implemented.")
+            raise NotImplementedError("Generator not implemented.")
 
     @staticmethod
     def init_masks(K, mask_init, size, std=None, value=1.0, dataset=None):
@@ -334,21 +339,21 @@ class DTISprites(nn.Module):
         if self.freeze_sprite and self.cur_epoch >= self.freeze_milestone:
             return True
         else:
-            False
+            return False
 
     @property
     def are_frg_frozen(self):
         if self.freeze_frg and self.cur_epoch >= self.freeze_milestone:
             return True
         else:
-            False
+            return False
 
     @property
     def are_bkg_frozen(self):
         if self.freeze_bkg and self.cur_epoch >= self.freeze_milestone:
             return True
         else:
-            False
+            return False
 
     def cluster_parameters(self):
         params = []
@@ -405,12 +410,12 @@ class DTISprites(nn.Module):
         L, K, M = self.n_objects, self.n_sprites, self.n_backgrounds or 1
         prototypes = (
             self.prototypes
-            if self.freeze_frg or not hasattr(self, "generator")
+            if not hasattr(self, "generator") or self.freeze_frg
             else out[:, : self.color_channels * self.size[0] * self.size[1]].reshape(
                 -1, self.color_channels, self.size[0], self.size[1]
             )
         )
-        prototypes = prototypes.unsqueeze(1).expand(K, B, C, -1, -1)
+        prototypes = prototypes.unsqueeze(1).expand(K, B, -1, -1, -1)
         features = self.encoder(x)
 
         if hasattr(self, "generator"):
@@ -422,10 +427,7 @@ class DTISprites(nn.Module):
                 ].reshape(-1, 1, self.size[0], self.size[1])
         else:
             masks = self.masks
-        masks = masks.unsqueeze(1).expand(K, B, 1, -1, -1)
-
-        # if self.are_frg_frozen:
-        #    prototypes = prototypes.detach()
+        masks = masks.unsqueeze(1).expand(K, B, -1, -1, -1)
 
         sprites = torch.cat([prototypes, masks], dim=2)
         if self.inject_noise and self.training:
@@ -466,8 +468,6 @@ class DTISprites(nn.Module):
             else:
                 backgrounds = self.backgrounds
             backgrounds = backgrounds.unsqueeze(1).expand(M, B, C, -1, -1)
-            # if self.are_bkg_frozen:
-            #    backgrounds = backgrounds.detach()
             tsf_bkgs = self.bkg_transformer(x, backgrounds, features)[1].transpose(
                 0, 1
             )  # MBCHW
@@ -507,7 +507,10 @@ class DTISprites(nn.Module):
             grid[:, indices[0], indices[1]] = occ_grid
             occ_grid = grid + torch.triu(1 - grid.transpose(1, 2), diagonal=1)
         else:
-            occ_grid = self.occ_grid.unsqueeze(0).expand(B, -1, -1)
+            occ_grid = torch.zeros(B, L, L, device=x.device)
+            a = self.occ_grid.unsqueeze(0).expand(
+                B, -1, -1
+            )  # TODO: There is an unused thing here.
 
         return occ_grid.permute(1, 2, 0)  # LLB
 
@@ -570,8 +573,8 @@ class DTISprites(nn.Module):
                     )
                     indices = new_indices
         # For debug purposes only
-        if step > 0:
-            self._diff_selections = diff_select
+        # if step > 0:
+        #     self._diff_selections = diff_select
 
         if self.add_empty_sprite and self.are_sprite_frozen:
             resps = torch.cat([resps, torch.zeros(L, 1, B, device=device)], dim=1)
@@ -799,10 +802,18 @@ class DTISprites(nn.Module):
     def restart_branch_from(self, i, j):
         if hasattr(self, "generator"):
             self.latent_params[i].data.copy_(self.latent_params[j].detach().clone())
+            if self.freeze_frg:
+                self.prototype_params[i].data.copy_(
+                    self.prototype_params[j].detach().clone()
+                )
         else:
             if not self.freeze_frg:
                 self.prototype_params[i].data.copy_(
                     copy_with_noise(self.prototype_params[j], NOISE_SCALE)
+                )
+            else:
+                self.prototype_params[i].data.copy_(
+                    self.prototype_params[j].detach().clone()
                 )
             self.mask_params[i].data.copy_(self.mask_params[j].detach().clone())
         [

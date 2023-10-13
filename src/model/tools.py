@@ -7,7 +7,6 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 from torch.utils.data.dataloader import DataLoader
-from torchvision.transforms.functional import rgb_to_grayscale
 
 
 def copy_with_noise(t, noise_scale=0.0001):

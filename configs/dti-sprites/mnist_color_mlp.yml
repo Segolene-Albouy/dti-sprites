@@ -18,6 +18,7 @@ model:
   transformation_sequence_bkg: identity_color
   curriculum_learning: [5, 15, 30]
   curriculum_learning_bkg: [5]
+  freeze_frg: True
   grid_size: 4
 training:
   batch_size: 128
