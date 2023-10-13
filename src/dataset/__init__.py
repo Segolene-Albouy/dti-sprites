@@ -1,6 +1,7 @@
 from .cosegmentation import WeizmannHorseDataset
 from .gtsrb import GTSRB8Dataset
 from .affnist import AffNISTTestDataset
+from .fleurons import FleuronsDataset
 from .hdf5 import FRGCDataset
 from .coa import CoADataset
 from .multi_object import DSpritesGrayDataset, TetrominoesDataset, CLEVR6Dataset
@@ -14,7 +15,7 @@ from .torchvision import (
     MNIST1kDataset,
     USPSDataset,
 )
-from .raw import FleuronsDataset, LettersDataset
+from .raw import LettersDataset
 
 
 def get_dataset(dataset_name):

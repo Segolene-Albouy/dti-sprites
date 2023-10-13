@@ -507,7 +507,7 @@ class Trainer:
         self.optimizer.step()
 
         if hasattr(self, "sprite_optimizer"):
-            #torch.nn.utils.clip_grad_value_(self.model.prototype_params, 0.1)
+            # torch.nn.utils.clip_grad_value_(self.model.prototype_params, 0.1)
             self.sprite_optimizer.step()
 
         average_losses = np.zeros(self.n_prototypes)
@@ -856,7 +856,7 @@ class Trainer:
             return subset
         else:
             self.quantitative_eval()
-            # subset = self.qualitative_eval()
+            subset = self.qualitative_eval()
         self.print_and_log_info("Evaluation is over")
 
     @torch.no_grad()
@@ -1098,7 +1098,7 @@ class Trainer:
         for k in range(self.n_prototypes):
             path = coerce_to_path_and_create_dir(cluster_path / f"cluster{k}")
             indices = np.where(cluster_idx == k)[0]
-            top_idx = np.argsort(distances[indices])[:N_CLUSTER_SAMPLES]
+            top_idx = np.argsort(distances[indices])  # [:N_CLUSTER_SAMPLES]
             for j, idx in enumerate(top_idx):
                 inp = dataset[indices[idx]][0].unsqueeze(0).to(self.device)
                 convert_to_img(inp).save(path / f"top{j}_raw.png")

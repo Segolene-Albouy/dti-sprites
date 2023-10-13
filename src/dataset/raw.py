@@ -75,8 +75,8 @@ class MegaDepthDataset(_AbstractCollectionDataset):
     name = "megadepth"
 
 
-class FleuronsDataset(_AbstractCollectionDataset):
-    name = "fleurons"
+# class FleuronsDataset(_AbstractCollectionDataset):
+#    name = "fleurons"
 
 
 class LettersDataset(_AbstractCollectionDataset):
