@@ -19,8 +19,8 @@ model:
   transformation_sequence_bkg: identity
   curriculum_learning: [5, 15, 25]
   curriculum_learning_bkg: False
-  freeze_frg: True
   grid_size: 4
+  freeze_frg: True
 training:
   batch_size: 128
   optimizer:
@@ -37,5 +37,5 @@ training:
   train_stat_interval: 25
   val_stat_interval: 50
   check_cluster_interval: 50
-  seed: 76651
+  seed: 65860
   visualizer_port:

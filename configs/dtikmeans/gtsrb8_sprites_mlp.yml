@@ -1,15 +1,12 @@
 dataset:
   name: gtsrb8
 model:
-  name: dti_sprites
+  name: dtikmeans
   n_sprites: 8
-  n_backgrounds: 1
   prototype:
     source: generator
     generator: mlp
     data:
-      freeze: [False, False, False]
-      init: ["", "", ""]
   encoder_name: resnet32
   transformation_sequence: color_projective_tps
   transformation_sequence_bkg: color_projective_tps
@@ -31,7 +28,7 @@ training:
   train_stat_interval: 100
   val_stat_interval: 200
   check_cluster_interval: 25
-  seed: 33604
+  seed: 4820
   visualizer_port:
   pretrained: 
   resume: 

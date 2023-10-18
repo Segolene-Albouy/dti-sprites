@@ -11,12 +11,11 @@ model:
     data:
       freeze: [False, False, False]
       init: ["", "", ""]
-  encoder_name: resnet20
+  encoder_name: resnet32
   transformation_sequence: identity_color_projective
   transformation_sequence_bkg: identity_color_projective
-  curriculum_learning: [2, 18]
-  curriculum_learning_bkg: [2, 18]
-  gaussian_weights_std: 7
+  curriculum_learning: [10, 35]
+  curriculum_learning_bkg: [10, 35]
 training:
   batch_size: 128
   n_workers: 4
@@ -28,8 +27,8 @@ training:
   scheduler:
     name: multi_step
     gamma: 0.1
-    milestones: [30]
-  n_epoches: 33
+    milestones: [50]
+  n_epoches: 55
   train_stat_interval: 500
   val_stat_interval: 1000
   check_cluster_interval: 100

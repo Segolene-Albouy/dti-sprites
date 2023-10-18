@@ -1,20 +1,20 @@
 dataset:
   name: gtsrb8
 model:
-  name: dti_sprites
+  name: dtikmeans
   n_sprites: 8
   n_backgrounds: 1
+  inject_noise: 0.4
   prototype:
-    source: generator
-    generator: mlp
+    source: data
     data:
-      freeze: [False, False, False]
-      init: ["", "", ""]
+      init: sample
   encoder_name: resnet32
   transformation_sequence: color_projective_tps
   transformation_sequence_bkg: color_projective_tps
   curriculum_learning: [100, 350]
   curriculum_learning_bkg: [100, 350]
+  gaussian_weights_std: 7
 training:
   batch_size: 128
   n_workers: 4
