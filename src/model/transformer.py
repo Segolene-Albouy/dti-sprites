@@ -524,7 +524,7 @@ class AffineModule(_AbstractTransformationModule):
                 padding_mode=self.padding_mode,
                 align_corners=False,
             )
-            return torch.cat([x[:, 0, ...].unsqueeze(1), out], dim=1)
+            return torch.cat([x[:, : x.size(1) - 1, ...], out], dim=1)
         else:
             grid = F.affine_grid(
                 beta,
@@ -648,6 +648,7 @@ class TPSModule(_AbstractTransformationModule):
         super().__init__()
         self.img_size = img_size
         self.padding_mode = kwargs.get("padding_mode", "border")
+        self.freeze_frg = kwargs.get("freeze_frg", False)
         self.grid_size = kwargs.get("grid_size", 4)
         n_layers = kwargs.get("n_hidden_layers", N_LAYERS)
         self.regressor = create_mlp(
@@ -672,13 +673,23 @@ class TPSModule(_AbstractTransformationModule):
             return x
         source_control_points = self.identity + beta.view(x.size(0), -1, 2)
         grid = self.tps_grid(source_control_points).view(x.size(0), *self.img_size, 2)
-        return F.grid_sample(
-            x,
-            grid,
-            mode="bilinear",
-            padding_mode=self.padding_mode,
-            align_corners=False,
-        )
+        if self.freeze_frg:
+            out = F.grid_sample(
+                x[:, -1, ...].unsqueeze(1),
+                grid,
+                mode="bilinear",
+                padding_mode=self.padding_mode,
+                align_corners=False,
+            )
+            return torch.cat([x[:, : x.size(1) - 1, ...], out], dim=1)
+        else:
+            return F.grid_sample(
+                x,
+                grid,
+                mode="bilinear",
+                padding_mode=self.padding_mode,
+                align_corners=False,
+            )
 
 
 ########################
@@ -690,6 +701,7 @@ class MorphologicalModule(_AbstractTransformationModule):
     def __init__(self, in_channels, **kwargs):
         super().__init__()
         self.kernel_size = kwargs.get("kernel_size", 3)
+        self.freeze_frg = kwargs.get("freeze_frg", False)
         assert isinstance(self.kernel_size, (int, float))
         self.padding = self.kernel_size // 2
         n_layers = kwargs.get("n_hidden_layers", N_LAYERS)
@@ -715,37 +727,14 @@ class MorphologicalModule(_AbstractTransformationModule):
             return x
         beta = beta + self.identity
         alpha, weights = torch.split(beta, [1, self.kernel_size**2], dim=1)
-        # out = []
-        if x.shape[1] == 1:
-            return self.smoothmax_kernel(x, alpha, torch.sigmoid(weights))
-        else:  # Assume that the last channel is mask, apply transformation to just mask
-            tr_mask = self.smoothmax_kernel(
+        if self.freeze_frg:
+            out = self.smoothmax_kernel(
                 x[:, -1, ...].unsqueeze(1), alpha, torch.sigmoid(weights)
             )
-            return torch.cat([x[:, : x.shape[1] - 1, ...], tr_mask], dim=1)
-
-        for c in range(x.shape[1]):
-            out.append(
-                self.smoothmax_kernel(
-                    x[:, c, ...].unsqueeze(1), alpha, torch.sigmoid(weights)
-                )
-            )
-        return torch.cat(out, dim=1)
-        if x.shape[1] == 1:
-            return self.smoothmax_kernel(x, alpha, torch.sigmoid(weights))
+            return torch.cat([x[:, : x.shape[1] - 1, ...], out], dim=1)
         else:
-            if x.shape[1] == 4:
-                out = self.smoothmax_kernel(
-                    x[:, -1, ...].unsqueeze(1), alpha, torch.sigmoid(weights)
-                )
-                return torch.cat([x[:, :3, ...], out], dim=1)
-            elif x.shape[1] == 2:
-                out = self.smoothmax_kernel(
-                    x[:, -1, ...].unsqueeze(1), alpha, torch.sigmoid(weights)
-                )
-                return torch.cat([x[:, :1, ...], out], dim=1)
-            else:
-                NotImplementedError("Morphological module is not applicable.")
+            assert x.shape[1] == 1
+            return self.smoothmax_kernel(x, alpha, torch.sigmoid(weights))
 
     def smoothmax_kernel(self, x, alpha, kernel):
         if isinstance(alpha, torch.Tensor):
