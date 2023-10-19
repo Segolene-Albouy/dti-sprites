@@ -78,6 +78,8 @@ class MegaDepthDataset(_AbstractCollectionDataset):
 # class FleuronsDataset(_AbstractCollectionDataset):
 #    name = "fleurons"
 
+class GenericDataset(_AbstractCollectionDataset):
+    name = "generic"
 
 class LettersDataset(_AbstractCollectionDataset):
     name = "Lettre_e"
