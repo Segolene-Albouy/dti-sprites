@@ -4,8 +4,8 @@ from PIL import Image
 import numpy as np
 import torch
 
-from utils import coerce_to_path_and_check_exist, coerce_to_path_and_create_dir, get_files_from_dir
-from utils.logger import print_info, print_warning
+from . import coerce_to_path_and_check_exist, coerce_to_path_and_create_dir, get_files_from_dir
+from .logger import print_info, print_warning
 
 
 IMG_EXTENSIONS = ['jpeg', 'jpg', 'JPG', 'png', 'ppm']

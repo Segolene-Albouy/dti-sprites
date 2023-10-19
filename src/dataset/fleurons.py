@@ -2,7 +2,7 @@ import torch
 import os
 import numpy as np
 from torch.utils.data import Dataset
-from utils import get_files_from_dir
+from ..utils import get_files_from_dir
 import pandas as pd
 from PIL import Image
 from torchvision.transforms import Compose, Resize, ToTensor

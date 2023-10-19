@@ -4,7 +4,7 @@ from sklearn.metrics.cluster import normalized_mutual_info_score as nmi_score
 from scipy.optimize import linear_sum_assignment
 from scipy.special import comb
 
-from utils.logger import print_warning
+from .logger import print_warning
 
 
 def _comb2(n):

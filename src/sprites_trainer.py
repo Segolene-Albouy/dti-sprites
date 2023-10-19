@@ -17,19 +17,19 @@ try:
 except ModuleNotFoundError:
     pass
 
-from dataset import get_dataset, get_subset
-from model import get_model
-from model.tools import count_parameters, safe_model_state_dict
-from optimizer import get_optimizer
-from scheduler import get_scheduler
-from utils import (
+from .dataset import get_dataset, get_subset
+from .model import get_model
+from .model.tools import count_parameters, safe_model_state_dict
+from .optimizer import get_optimizer
+from .scheduler import get_scheduler
+from .utils import (
     use_seed,
     coerce_to_path_and_check_exist,
     coerce_to_path_and_create_dir,
 )
-from utils.image import convert_to_img, save_gif
-from utils.logger import get_logger, print_info, print_warning
-from utils.metrics import (
+from .utils.image import convert_to_img, save_gif
+from .utils.logger import get_logger, print_info, print_warning
+from .utils.metrics import (
     AverageTensorMeter,
     AverageMeter,
     Metrics,
@@ -37,8 +37,8 @@ from utils.metrics import (
     SegmentationScores,
     InstanceSegScores,
 )
-from utils.path import CONFIGS_PATH, RUNS_PATH
-from utils.plot import plot_bar, plot_lines
+from .utils.path import CONFIGS_PATH, RUNS_PATH
+from .utils.plot import plot_bar, plot_lines
 
 
 PRINT_TRAIN_STAT_FMT = "Epoch [{}/{}], Iter [{}/{}], train_metrics: {}".format
