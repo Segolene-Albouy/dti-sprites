@@ -1,7 +1,7 @@
 from abc import ABCMeta, abstractmethod
 from copy import deepcopy
 
-from kornia import homography_warp
+from kornia.geometry import homography_warp
 import numpy as np
 import torch
 from torch import nn
