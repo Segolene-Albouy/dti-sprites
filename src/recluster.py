@@ -11,17 +11,17 @@ import pandas as pd
 import torch
 from torch.utils.data import DataLoader
 
-from dataset import get_subset, get_dataset
-from model import get_model
-from model.tools import count_parameters, safe_model_state_dict
-from optimizer import get_optimizer
-from scheduler import get_scheduler
-from utils import use_seed, coerce_to_path_and_check_exist, coerce_to_path_and_create_dir
-from utils.image import convert_to_img, save_gif
-from utils.logger import get_logger, print_info, print_warning
-from utils.metrics import AverageTensorMeter, AverageMeter, Metrics, Scores
-from utils.path import CONFIGS_PATH, RUNS_PATH
-from trainer import Trainer
+from .dataset import get_subset, get_dataset
+from .model import get_model
+from .model.tools import count_parameters, safe_model_state_dict
+from .optimizer import get_optimizer
+from .scheduler import get_scheduler
+from .utils import use_seed, coerce_to_path_and_check_exist, coerce_to_path_and_create_dir
+from .utils.image import convert_to_img, save_gif
+from .utils.logger import get_logger, print_info, print_warning
+from .utils.metrics import AverageTensorMeter, AverageMeter, Metrics, Scores
+from .utils.path import CONFIGS_PATH, RUNS_PATH
+from .trainer import Trainer
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Pipeline to train a NN model specified by a YML config")

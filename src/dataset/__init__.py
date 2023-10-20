@@ -15,7 +15,7 @@ from .torchvision import (
     MNIST1kDataset,
     USPSDataset,
 )
-from .raw import LettersDataset
+from .raw import LettersDataset, GenericDataset
 
 
 def get_dataset(dataset_name):
@@ -48,6 +48,8 @@ def get_dataset(dataset_name):
         "Lettre_i": LettersDataset,
         # CoA
         "coa": CoADataset,
+        # Generic
+        "generic": GenericDataset,
     }[dataset_name]
 
 

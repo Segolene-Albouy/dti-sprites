@@ -1,7 +1,7 @@
 from abc import ABCMeta, abstractmethod
 from copy import deepcopy
 
-from kornia import homography_warp
+from kornia.geometry import homography_warp
 import numpy as np
 import torch
 from torch import nn
@@ -12,7 +12,7 @@ from torchvision.models import vgg16_bn
 from .mini_resnet import get_resnet_model as get_mini_resnet_model
 from .resnet import get_resnet_model
 from .tools import copy_with_noise, get_output_size, TPSGrid, create_mlp, get_clamp_func
-from utils.logger import print_warning
+from ..utils.logger import print_warning
 
 N_HIDDEN_UNITS = 128
 N_LAYERS = 2

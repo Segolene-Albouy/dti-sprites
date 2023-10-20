@@ -5,9 +5,9 @@ from PIL import Image
 from torch.utils.data.dataset import Dataset as TorchDataset
 from torchvision.transforms import CenterCrop, Compose, Resize, ToTensor
 
-from utils import coerce_to_path_and_check_exist, get_files_from_dir
-from utils.image import IMG_EXTENSIONS
-from utils.path import DATASETS_PATH
+from ..utils import coerce_to_path_and_check_exist, get_files_from_dir
+from ..utils.image import IMG_EXTENSIONS
+from ..utils.path import DATASETS_PATH
 from pathlib import Path
 
 
@@ -78,6 +78,8 @@ class MegaDepthDataset(_AbstractCollectionDataset):
 # class FleuronsDataset(_AbstractCollectionDataset):
 #    name = "fleurons"
 
+class GenericDataset(_AbstractCollectionDataset):
+    name = "generic"
 
 class LettersDataset(_AbstractCollectionDataset):
     name = "Lettre_e"

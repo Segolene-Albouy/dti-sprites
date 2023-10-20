@@ -19,7 +19,7 @@ from .tools import (
     get_clamp_func,
     create_mlp,
 )
-from utils.logger import print_warning
+from ..utils.logger import print_warning
 from .u_net import UNet
 
 NOISE_SCALE = 0.0001

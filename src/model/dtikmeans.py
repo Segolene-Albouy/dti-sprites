@@ -16,7 +16,7 @@ from .tools import (
     generate_data,
     get_clamp_func,
 )
-from utils.logger import print_warning
+from ..utils.logger import print_warning
 from .u_net import UNet
 
 NOISE_SCALE = 0.0001
