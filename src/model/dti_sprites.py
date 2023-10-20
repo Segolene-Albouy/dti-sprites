@@ -5,6 +5,7 @@ import numpy as np
 import torch
 from torch.optim import Adam, RMSprop
 import torch.nn as nn
+from torch.utils.data.dataloader import DataLoader
 
 from .transformer import (
     PrototypeTransformationNetwork as Transformer,
@@ -44,6 +45,7 @@ class DTISprites(nn.Module):
         else:
             img_size = dataset.img_size
             n_ch = dataset.n_channels
+            self.dataset = dataset
 
         # Prototypes & masks
         self.size = kwargs.get("sprite_size", img_size)
@@ -80,12 +82,13 @@ class DTISprites(nn.Module):
             latent_size = (
                 (128,) if self.gen_name == "mlp" else (1, self.size[0], self.size[1])
             )
-
+            init_linear = proto_args.get("init_linear", "random")
             self.generator = self.init_generator(
                 self.gen_name,
                 latent_dim=128,
                 color_channel=self.color_channels,
                 out_channel=latent_out_ch * self.size[0] * self.size[1],
+                init=init_linear,
             )
             self.latent_params = (
                 nn.Parameter(  # TODO: Check during optimization when shared.
@@ -177,6 +180,7 @@ class DTISprites(nn.Module):
                     latent_dim=128,
                     color_channel=self.color_channels,
                     out_channel=self.color_channels * self.size[0] * self.size[1],
+                    init="mean",
                 )
                 latent_size = (
                     (128,)
@@ -230,18 +234,54 @@ class DTISprites(nn.Module):
         self._reassign_cluster = kwargs.get("reassign_cluster", True)
         self.inject_noise = kwargs.get("inject_noise", 0)
 
-    @staticmethod
-    def init_generator(name, latent_dim, color_channel, out_channel):
+    # @staticmethod
+    def init_generator(
+        self, name, latent_dim, color_channel, out_channel, init="random"
+    ):
         if name == "unet":
             return UNet(1, color_channel)
         elif name == "mlp":
-            return nn.Sequential(
+            linear = nn.Linear(8 * latent_dim, out_channel)
+            if init == "random":  # Keep the initialization as is
+                pass
+            elif init == "constant":  # Initialize to zero to have 0.5 after sigmoid
+                nn.init.constant_(linear.weight, val=0.0)
+                nn.init.constant_(linear.bias, val=0.0)
+            elif (
+                init == "gaussian"
+            ):  # Initialize the mask as gaussian and foreground as 0
+                nn.init.constant_(linear.weight, val=0.0)
+                sample = torch.cat(
+                    (
+                        torch.zeros(size=(28, 28, 3)),
+                        create_gaussian_weights(self.size, n_channels=1, std=5).reshape(
+                            28, 28, 1
+                        ),
+                    ),
+                    dim=2,
+                )
+                linear.bias.data.copy_(sample.flatten())
+            elif init == "mean":
+                nn.init.constant_(linear.weight, val=0.0)
+                images = next(
+                    iter(
+                        DataLoader(
+                            self.dataset, batch_size=100, shuffle=True, num_workers=4
+                        )
+                    )
+                )[0]
+                sample = images.mean(0).reshape(28, 28, 3)
+                linear.bias.data.copy_(sample.flatten())
+            else:
+                raise NotImplementedError
+            model = nn.Sequential(
                 nn.Linear(latent_dim, 8 * latent_dim),
                 nn.GroupNorm(8, 8 * latent_dim),
                 nn.ReLU(inplace=True),
-                nn.Linear(8 * latent_dim, out_channel),
+                linear,
                 nn.Sigmoid(),
             )
+            return model
         else:
             raise NotImplementedError("Generator not implemented.")
 
