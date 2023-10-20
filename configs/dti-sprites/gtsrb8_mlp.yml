@@ -4,6 +4,7 @@ model:
   name: dti_sprites
   n_sprites: 8
   n_backgrounds: 1
+  inject_noise: 0.4
   prototype:
     source: generator
     generator: mlp
@@ -31,7 +32,7 @@ training:
   train_stat_interval: 100
   val_stat_interval: 200
   check_cluster_interval: 25
-  seed: 33604
+  seed: 41773
   visualizer_port:
   pretrained: 
   resume: 

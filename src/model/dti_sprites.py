@@ -180,7 +180,6 @@ class DTISprites(nn.Module):
                     latent_dim=128,
                     color_channel=self.color_channels,
                     out_channel=self.color_channels * self.size[0] * self.size[1],
-                    init="mean",
                 )
                 latent_size = (
                     (128,)
