@@ -1325,6 +1325,7 @@ class Trainer:
         average_losses = {k: AverageMeter() for k in range(self.n_prototypes)}
         average_ctr_losses = {k: AverageMeter() for k in range(self.n_prototypes)}
         subset_img = [np.array([]) for k in range(self.n_prototypes)]
+        cluster_by_path = []
         for images, labels, path in train_loader:
             images = images.to(self.device)
             dist = self.model(images)[1]
@@ -1341,6 +1342,10 @@ class Trainer:
             argmin_idx = argmin_idx.astype(np.int32)
             distances = np.hstack([distances, dist_min_by_sample])
             cluster_idx = np.hstack([cluster_idx, argmin_idx])
+            if hasattr(train_loader.dataset, "data_path"):
+                cluster_by_path += [
+                    (os.path.relpath(p, train_loader.dataset.data_path), argmin_idx[i]) 
+                    for i, p in enumerate(path)]
 
             dist_max_by_sample, argmax_idx_ = map(
                 lambda t: t.cpu().numpy(), dist.max(1)
@@ -1369,6 +1374,13 @@ class Trainer:
                     else 0.0
                 )
                 average_ctr_losses[k].update(avg_ctr_clus, n_ctr_clus)
+
+        # Save cluster_by_path as csv
+        if cluster_by_path:
+            cluster_by_path = pd.DataFrame(
+                cluster_by_path, columns=["path", "cluster_id"]
+            ).set_index("path")
+            cluster_by_path.to_csv(self.run_dir / "cluster_by_path.csv")
 
         self.print_and_log_info("final_loss: {:.5}".format(float(loss.avg)))
         self.print_and_log_info(
