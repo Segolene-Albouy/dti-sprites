@@ -1,24 +1,26 @@
-from .cosegmentation import WeizmannHorseDataset
-from .gtsrb import GTSRB8Dataset
-from .affnist import AffNISTTestDataset
-from .fleurons import FleuronsDataset
-from .hdf5 import FRGCDataset
-from .coa import CoADataset
-from .multi_object import DSpritesGrayDataset, TetrominoesDataset, CLEVR6Dataset
-from .instagram import InstagramDataset
-from .torchvision import (
-    SVHNDataset,
-    FashionMNISTDataset,
-    MNISTDataset,
-    MNISTTestDataset,
-    MNISTColorDataset,
-    MNIST1kDataset,
-    USPSDataset,
-)
 from .raw import LettersDataset, GenericDataset
 
-
 def get_dataset(dataset_name):
+    if dataset_name == "generic":
+        return GenericDataset
+    
+    from .cosegmentation import WeizmannHorseDataset
+    from .gtsrb import GTSRB8Dataset
+    from .affnist import AffNISTTestDataset
+    from .fleurons import FleuronsDataset
+    from .hdf5 import FRGCDataset
+    from .coa import CoADataset
+    from .multi_object import DSpritesGrayDataset, TetrominoesDataset, CLEVR6Dataset
+    from .instagram import InstagramDataset
+    from .torchvision import (
+        SVHNDataset,
+        FashionMNISTDataset,
+        MNISTDataset,
+        MNISTTestDataset,
+        MNISTColorDataset,
+        MNIST1kDataset,
+        USPSDataset,
+    )
     return {
         # Cosegmentation
         "weizmann_horse": WeizmannHorseDataset,
@@ -54,6 +56,7 @@ def get_dataset(dataset_name):
 
 
 def get_subset(dataset_name):
+    from .fleurons import FleuronsDataset
     if dataset_name == "fleurons":
         return FleuronsDataset
     else:

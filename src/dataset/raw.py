@@ -18,6 +18,7 @@ class _AbstractCollectionDataset(TorchDataset):
     root = DATASETS_PATH
     name = NotImplementedError
     n_channels = 3
+    include_recursive = False
 
     def __init__(self, split, subset, img_size, **kwargs):
         tag = kwargs.get("tag", "")
@@ -30,8 +31,9 @@ class _AbstractCollectionDataset(TorchDataset):
         else:
             try:
                 input_files = get_files_from_dir(
-                    self.data_path, IMG_EXTENSIONS, sort=True
+                    self.data_path, IMG_EXTENSIONS, sort=True, recursive=self.include_recursive
                 )
+                input_files = [p for p in input_files if not "/__" in str(p)]
             except FileNotFoundError:
                 input_files = []
 
@@ -80,6 +82,7 @@ class MegaDepthDataset(_AbstractCollectionDataset):
 
 class GenericDataset(_AbstractCollectionDataset):
     name = "generic"
+    include_recursive = True
 
 class LettersDataset(_AbstractCollectionDataset):
     name = "Lettre_e"
