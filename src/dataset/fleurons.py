@@ -10,8 +10,8 @@ from torchvision.transforms import Compose, Resize, ToTensor
 
 class FleuronsDataset(Dataset):
     def __init__(self, split, eval_mode=True, subset=None, **kwargs) -> None:
-        self.n_classes = 37
-        self.data_path = "datasets/ROIi_fleurons_blocks/"
+        self.n_classes = 36
+        self.data_path = "datasets/fleurons/"
         self.img_size = kwargs.get("img_size", 128)
         self.n_channels = 3
         if type(self.img_size) is int:
@@ -22,12 +22,11 @@ class FleuronsDataset(Dataset):
             raise ValueError
 
         try:
-            metadata_path = os.path.join(
-                self.data_path, "filtered_ROIi_fleurons_blocks_annotation.tsv"
-            )
+            metadata_path = os.path.join(self.data_path, "filtered_metadata_3.tsv")
+            img_path = os.path.join(self.data_path, "filtered_imgs_3")
             annotations = pd.read_csv(metadata_path, delimiter="\t")
             self.files = [
-                os.path.join(metadata_path, filename)
+                os.path.join(img_path, filename)
                 for filename in annotations["image_filename"]
             ]
             self.labels, _ = pd.factorize(annotations["motif_id"])
