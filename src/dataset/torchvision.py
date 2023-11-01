@@ -5,8 +5,8 @@ from torch.utils.data.dataset import Dataset as TorchDataset, ConcatDataset
 from torchvision.datasets import FashionMNIST, MNIST, SVHN, USPS
 from torchvision.transforms import ToTensor, Compose
 
-from ..utils import use_seed
-from ..utils.path import DATASETS_PATH
+from utils import use_seed
+from utils.path import DATASETS_PATH
 from .torch_transforms import ColorAugment
 
 
@@ -15,6 +15,7 @@ VAL_SPLIT_RATIO = 0.1
 
 class _AbstractTorchvisionDataset(TorchDataset):
     """_Abstract torchvision dataset"""
+
     __metaclass__ = ABCMeta
     root = DATASETS_PATH
 
@@ -30,42 +31,61 @@ class _AbstractTorchvisionDataset(TorchDataset):
     def __init__(self, split, subset, **kwargs):
         super().__init__()
         self.split = split
-        self.eval_mode = kwargs.get('eval_mode', False)
+        self.eval_mode = kwargs.get("eval_mode", False)
 
         kwargs = {}
-        if self.name in ['svhn']:
-            kwargs['split'] = 'test'
+        if self.name in ["svhn"]:
+            kwargs["split"] = "test"
         else:
-            kwargs['train'] = False
-        dataset = self.dataset_class(root=self.root, transform=self.transform, download=True, **kwargs)
+            kwargs["train"] = False
+        dataset = self.dataset_class(
+            root=self.root, transform=self.transform, download=True, **kwargs
+        )
         if self.n_samples is not None:
             assert self.n_samples < len(dataset)
             with use_seed(46):
-                indices = np.random.choice(range(len(dataset)), self.n_samples, replace=False)
+                indices = np.random.choice(
+                    range(len(dataset)), self.n_samples, replace=False
+                )
             dataset.data = dataset.data[indices]
-            dataset.targets = dataset.targets[indices] if hasattr(dataset, 'targets') else dataset.labels[indices]
+            dataset.targets = (
+                dataset.targets[indices]
+                if hasattr(dataset, "targets")
+                else dataset.labels[indices]
+            )
 
-        if split == 'val':
+        if split == "val":
             n_val = max(round(VAL_SPLIT_RATIO * len(dataset)), 100)
             if n_val < len(dataset):
                 with use_seed(46):
-                    indices = np.random.choice(range(len(dataset)), n_val, replace=False)
+                    indices = np.random.choice(
+                        range(len(dataset)), n_val, replace=False
+                    )
 
                 dataset.data = dataset.data[indices]
-                if hasattr(dataset, 'targets'):
+                if hasattr(dataset, "targets"):
                     dataset.targets = np.asarray(dataset.targets)[indices]
                 else:
                     dataset.labels = np.asarray(dataset.labels)[indices]
         elif not self.test_split_only and self.n_samples is None:
             kwargs = {}
-            if self.name in ['svhn']:
-                kwargs['split'] = 'train'
+            if self.name in ["svhn"]:
+                kwargs["split"] = "train"
             else:
-                kwargs['train'] = True
-            train_dataset = self.dataset_class(root=self.root, transform=self.transform, download=True, **kwargs)
+                kwargs["train"] = True
+            train_dataset = self.dataset_class(
+                root=self.root, transform=self.transform, download=True, **kwargs
+            )
             sets = [dataset, train_dataset]
-            if self.name == 'svhn' and not self.eval_mode:
-                sets.append(self.dataset_class(root=self.root, transform=self.transform, download=True, split='extra'))
+            if self.name == "svhn" and not self.eval_mode:
+                sets.append(
+                    self.dataset_class(
+                        root=self.root,
+                        transform=self.transform,
+                        download=True,
+                        split="extra",
+                    )
+                )
             dataset = ConcatDataset(sets)
 
         self.dataset = dataset
@@ -84,7 +104,7 @@ class _AbstractTorchvisionDataset(TorchDataset):
 
 class FashionMNISTDataset(_AbstractTorchvisionDataset):
     dataset_class = FashionMNIST
-    name = 'fashion_mnist'
+    name = "fashion_mnist"
     n_classes = 10
     n_channels = 1
     img_size = (28, 28)
@@ -92,25 +112,25 @@ class FashionMNISTDataset(_AbstractTorchvisionDataset):
 
 class MNISTDataset(_AbstractTorchvisionDataset):
     dataset_class = MNIST
-    name = 'mnist'
+    name = "mnist"
     n_classes = 10
     n_channels = 1
     img_size = (28, 28)
 
 
 class MNISTTestDataset(MNISTDataset):
-    name = 'mnist_test'
+    name = "mnist_test"
     test_split_only = True
 
 
 class MNIST1kDataset(MNISTDataset):
-    name = 'mnist_1k'
+    name = "mnist_1k"
     test_split_only = True
     n_samples = 1000
 
 
 class MNISTColorDataset(MNISTDataset):
-    name = 'mnist_color'
+    name = "mnist_color"
     n_channels = 3
 
     def __getitem__(self, idx):
@@ -121,7 +141,7 @@ class MNISTColorDataset(MNISTDataset):
 
 class SVHNDataset(_AbstractTorchvisionDataset):
     dataset_class = SVHN
-    name = 'svhn'
+    name = "svhn"
     n_classes = 10
     n_channels = 3
     img_size = (32, 32)
@@ -129,7 +149,7 @@ class SVHNDataset(_AbstractTorchvisionDataset):
 
 class USPSDataset(_AbstractTorchvisionDataset):
     dataset_class = USPS
-    name = 'usps'
+    name = "usps"
     n_classes = 10
     n_channels = 1
     img_size = (16, 16)

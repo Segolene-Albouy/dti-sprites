@@ -1,7 +1,7 @@
 from torch.nn import functional as F
 import torch
 
-from ..utils import use_seed
+from utils import use_seed
 
 
 class ColorAugment:

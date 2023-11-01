@@ -7,8 +7,8 @@ from torch.utils.data.dataset import Dataset as TorchDataset
 from torchvision.transforms import Compose, ToTensor
 
 from .torch_transforms import TensorResize
-from ..utils import coerce_to_path_and_check_exist, use_seed
-from ..utils.path import DATASETS_PATH
+from utils import coerce_to_path_and_check_exist, use_seed
+from utils.path import DATASETS_PATH
 
 INPUT_EXTENSIONS = ["jpeg", "jpg", "JPG", "png"]
 HDF5_FILE = "data4torch.h5"

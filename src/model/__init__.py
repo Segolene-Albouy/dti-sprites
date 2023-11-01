@@ -1,6 +1,6 @@
 import torch
 
-from ..utils import coerce_to_path_and_check_exist
+from utils import coerce_to_path_and_check_exist
 from .dti_sprites import DTISprites
 from .dtikmeans import DTIKmeans
 from .tools import safe_model_state_dict

@@ -5,9 +5,9 @@ from PIL import Image
 from torch.utils.data.dataset import Dataset as TorchDataset
 from torchvision.transforms import CenterCrop, Compose, Resize, ToTensor
 
-from ..utils import coerce_to_path_and_check_exist, get_files_from_dir
-from ..utils.image import IMG_EXTENSIONS
-from ..utils.path import DATASETS_PATH
+from utils import coerce_to_path_and_check_exist, get_files_from_dir
+from utils.image import IMG_EXTENSIONS
+from utils.path import DATASETS_PATH
 from pathlib import Path
 
 
@@ -31,7 +31,10 @@ class _AbstractCollectionDataset(TorchDataset):
         else:
             try:
                 input_files = get_files_from_dir(
-                    self.data_path, IMG_EXTENSIONS, sort=True, recursive=self.include_recursive
+                    self.data_path,
+                    IMG_EXTENSIONS,
+                    sort=True,
+                    recursive=self.include_recursive,
                 )
                 input_files = [p for p in input_files if not "/__" in str(p)]
             except FileNotFoundError:
@@ -80,9 +83,11 @@ class MegaDepthDataset(_AbstractCollectionDataset):
 # class FleuronsDataset(_AbstractCollectionDataset):
 #    name = "fleurons"
 
+
 class GenericDataset(_AbstractCollectionDataset):
     name = "generic"
     include_recursive = True
+
 
 class LettersDataset(_AbstractCollectionDataset):
     name = "Lettre_e"

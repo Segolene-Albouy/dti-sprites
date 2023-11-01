@@ -5,9 +5,9 @@ import json
 from torch.utils.data.dataset import Dataset as TorchDataset
 from torchvision.transforms import CenterCrop, Compose, ToTensor, Resize
 
-from ..utils import coerce_to_path_and_check_exist
-from ..utils.image import IMG_EXTENSIONS
-from ..utils.path import DATASETS_PATH
+from utils import coerce_to_path_and_check_exist
+from utils.image import IMG_EXTENSIONS
+from utils.path import DATASETS_PATH
 
 
 class CoADataset(TorchDataset):
