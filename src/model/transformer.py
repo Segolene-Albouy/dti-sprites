@@ -1,7 +1,7 @@
 from abc import ABCMeta, abstractmethod
 from copy import deepcopy
 
-from kornia import homography_warp
+from kornia.geometry import homography_warp
 import numpy as np
 import torch
 from torch import nn
@@ -30,11 +30,11 @@ class PrototypeTransformationNetwork(nn.Module):
 
         encoder = kwargs.get("encoder", None)
         if encoder is not None:
-            self.exp_encoder = True
+            self.shared_enc = True
             self.encoder = encoder
             self.enc_out_channels = self.encoder.out_ch
         else:
-            self.exp_encoder = False
+            self.shared_enc = False
             encoder_kwargs = {
                 "in_channels": in_channels,
                 "encoder_name": kwargs.get("encoder_name", "resnet20"),
@@ -43,7 +43,6 @@ class PrototypeTransformationNetwork(nn.Module):
             }
             self.encoder = Encoder(**encoder_kwargs)
             self.enc_out_channels = get_output_size(in_channels, img_size, self.encoder)
-        print(self.exp_encoder)
         tsf_kwargs = {
             "freeze_frg": kwargs.get("freeze_frg", False),
             "in_channels": self.enc_out_channels,
@@ -70,10 +69,9 @@ class PrototypeTransformationNetwork(nn.Module):
             )
 
     def get_parameters(self):
-        if self.exp_encoder:
+        if self.shared_enc:
             return self.tsf_sequences.parameters()
-        else:
-            return self.parameters()
+        return self.parameters()
 
     @property
     def is_identity(self):
