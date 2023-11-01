@@ -1,7 +1,7 @@
 import logging
 import time
 
-from utils import coerce_to_path_and_check_exist
+from . import coerce_to_path_and_check_exist
 
 
 class TerminalColors:
