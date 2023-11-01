@@ -175,11 +175,13 @@ class DTISprites(nn.Module):
         self.learn_backgrounds = M > 0
         if self.learn_backgrounds:
             if self.proto_source == "generator" and not self.freeze_bkg:
+                init_bkg = proto_args.get("init_bkg", "random")
                 self.bkg_generator = self.init_generator(
                     self.gen_name,
                     latent_dim=128,
                     color_channel=self.color_channels,
                     out_channel=self.color_channels * self.size[0] * self.size[1],
+                    init=init_bkg,
                 )
                 latent_size = (
                     (128,)
@@ -243,25 +245,26 @@ class DTISprites(nn.Module):
             linear = nn.Linear(8 * latent_dim, out_channel)
             if init == "random":  # Keep the initialization as is
                 pass
-            elif init == "constant":  # Initialize to zero to have 0.5 after sigmoid
-                nn.init.constant_(linear.weight, val=0.0)
+            elif init == "constant":  # Initialize to 1 to have 1 after sigmoid
+                nn.init.constant_(linear.weight, val=0.1)
                 nn.init.constant_(linear.bias, val=0.0)
             elif (
                 init == "gaussian"
             ):  # Initialize the mask as gaussian and foreground as 0
-                nn.init.constant_(linear.weight, val=0.0)
+                # nn.init.constant_(linear.weight, val=0.1)
                 sample = torch.cat(
                     (
-                        torch.zeros(size=(28, 28, 3)),
-                        create_gaussian_weights(self.size, n_channels=1, std=5).reshape(
-                            28, 28, 1
-                        ),
+                        torch.full(size=(1, 28 * 28 * 3), fill_value=0.9),
+                        create_gaussian_weights(self.size, n_channels=1, std=5)
+                        .permute(1, 2, 0)
+                        .flatten()
+                        .reshape(1, 28 * 28 * 1),
                     ),
-                    dim=2,
+                    dim=-1,
                 )
                 linear.bias.data.copy_(sample.flatten())
             elif init == "mean":
-                nn.init.constant_(linear.weight, val=0.0)
+                # nn.init.constant_(linear.weight, val=0.1)
                 images = next(
                     iter(
                         DataLoader(
@@ -269,7 +272,7 @@ class DTISprites(nn.Module):
                         )
                     )
                 )[0]
-                sample = images.mean(0).reshape(28, 28, 3)
+                sample = images.mean(0).permute(1, 2, 0)
                 linear.bias.data.copy_(sample.flatten())
             else:
                 raise NotImplementedError
@@ -293,7 +296,7 @@ class DTISprites(nn.Module):
             mask = create_gaussian_weights(size, 1, std)
             masks = mask.unsqueeze(0).expand(K, -1, -1, -1)
         elif mask_init == "random":
-            masks = torch.rand(K, 1, *size)
+            masks = torch.rand(K, 1, *size)  # LOOK
         elif mask_init == "sample":
             assert dataset
             masks = torch.stack(
@@ -410,7 +413,7 @@ class DTISprites(nn.Module):
         return iter(params)
 
     def transformer_parameters(self):
-        params = [t.parameters() for t in self.sprite_transformers]
+        params = [t.get_parameters() for t in self.sprite_transformers]
         if hasattr(self, "layer_transformer"):
             params.append(self.layer_transformer.get_parameters())
         if self.learn_backgrounds:
@@ -546,10 +549,7 @@ class DTISprites(nn.Module):
             grid[:, indices[0], indices[1]] = occ_grid
             occ_grid = grid + torch.triu(1 - grid.transpose(1, 2), diagonal=1)
         else:
-            occ_grid = torch.zeros(B, L, L, device=x.device)
-            a = self.occ_grid.unsqueeze(0).expand(
-                B, -1, -1
-            )  # TODO: There is an unused thing here.
+            occ_grid = self.occ_grid.unsqueeze(0).expand(B, -1, -1)
 
         return occ_grid.permute(1, 2, 0)  # LLB
 
@@ -845,6 +845,16 @@ class DTISprites(nn.Module):
                 self.prototype_params[i].data.copy_(
                     self.prototype_params[j].detach().clone()
                 )
+            """
+            passed = False
+            for param in self.generator.parameters():
+                if type(param) == nn.Linear:
+                    if passed:
+                        passed = False
+                        param.bias.data.copy_(copy_with_noise(param.bias, NOISE_SCALE))
+                    else:
+                        passed = True
+            """
         else:
             if not self.freeze_frg:
                 self.prototype_params[i].data.copy_(
