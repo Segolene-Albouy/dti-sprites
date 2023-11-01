@@ -326,7 +326,7 @@ dependencies:
     - h5py==3.8.0
     - jsonpatch==1.32
     - jsonpointer==2.3
-    - kornia==0.3.0
+    - kornia==0.7.0
     - matplotlib==3.2.2
     - networkx==2.6.3
     - pathtools==0.1.2
