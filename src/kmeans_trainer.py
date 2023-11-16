@@ -158,28 +158,28 @@ class Trainer:
 
         # Optimizer
         self.opt_params = cfg["training"]["optimizer"] or {}
-        self.sprite_opt_params = cfg["training"].get("sprite_optimizer", {})
+        # self.sprite_opt_params = cfg["training"].get("sprite_optimizer", {})
         self.optimizer_name = self.opt_params.pop("name")
         self.cluster_kwargs = self.opt_params.pop("cluster", {})
         self.tsf_kwargs = self.opt_params.pop("transformer", {})
-        self.sprite_optimizer_name = self.sprite_opt_params.pop("name", None)
-        if self.sprite_optimizer_name in ["SGD", "sgd"]:
-            self.sprite_optimizer = get_optimizer(self.sprite_optimizer_name)(
-                [dict(params=self.model.cluster_parameters(), **self.cluster_kwargs)],
-                **self.sprite_opt_params,
-            )
-            self.optimizer = get_optimizer(self.optimizer_name)(
-                [dict(params=self.model.transformer_parameters(), **self.tsf_kwargs)],
-                **self.opt_params,
-            )
-            self.model.set_optimizer(self.optimizer, self.sprite_optimizer)
-        else:
-            self.optimizer = get_optimizer(self.optimizer_name)(
-                [dict(params=self.model.cluster_parameters(), **self.cluster_kwargs)]
-                + [dict(params=self.model.transformer_parameters(), **self.tsf_kwargs)],
-                **self.opt_params,
-            )
-            self.model.set_optimizer(self.optimizer)
+        # self.sprite_optimizer_name = self.sprite_opt_params.pop("name", None)
+        # if self.sprite_optimizer_name in ["SGD", "sgd"]:
+        #     self.sprite_optimizer = get_optimizer(self.sprite_optimizer_name)(
+        #         [dict(params=self.model.cluster_parameters(), **self.cluster_kwargs)],
+        #         **self.sprite_opt_params,
+        #     )
+        #     self.optimizer = get_optimizer(self.optimizer_name)(
+        #        [dict(params=self.model.transformer_parameters(), **self.tsf_kwargs)],
+        #         **self.opt_params,
+        #     )
+        #     self.model.set_optimizer(self.optimizer, self.sprite_optimizer)
+        # else:
+        self.optimizer = get_optimizer(self.optimizer_name)(
+            [dict(params=self.model.cluster_parameters(), **self.cluster_kwargs)]
+            + [dict(params=self.model.transformer_parameters(), **self.tsf_kwargs)],
+            **self.opt_params,
+        )
+        self.model.set_optimizer(self.optimizer)
         self.print_and_log_info(
             "Using optimizer {} with kwargs {}".format(
                 self.optimizer_name, self.opt_params
@@ -221,14 +221,15 @@ class Trainer:
         if checkpoint_path is not None:
             self.load_from_tag(checkpoint_path)
         elif checkpoint_path_resume is not None:
-            if recluster:
-                self.load_from_tag(self.run_dir, resume=True)
-            else:
-                self.load_from_tag(checkpoint_path_resume, resume=True)
+            # if recluster:
+            #     self.load_from_tag(self.run_dir, resume=True)
+            # else:
+            self.load_from_tag(checkpoint_path_resume, resume=True)
         else:
             self.start_epoch, self.start_batch = 1, 1
 
         self.parent_model = None
+        """
         if not isinstance(subset, type(None)):
             assert parent_model
             self.parent_model = parent_model
@@ -244,11 +245,11 @@ class Trainer:
                     self.model.prototypes[0].data.copy_(self.model.prototypes[1])
                 else:
                     ValueError("Invalid subset id")
-
+        """
         # Train metrics & check_cluster interval
         metric_names = ["time/img", "loss"]
         metric_names += [f"prop_clus{i}" for i in range(self.n_prototypes)]
-        metric_names += [f"loss_clus{i}" for i in range(self.n_prototypes)]
+        # metric_names += [f"loss_clus{i}" for i in range(self.n_prototypes)]
         train_iter_interval = cfg["training"]["train_stat_interval"]
         self.train_stat_interval = train_iter_interval
         self.train_metrics = Metrics(*metric_names)
@@ -329,6 +330,7 @@ class Trainer:
         print_info(string)
         self.logger.info(string)
 
+    # NOTE: Didnt check during debug
     def load_from_tag(self, tag, resume=False):
         self.print_and_log_info("Loading model from run {}".format(tag))
         path = coerce_to_path_and_check_exist(
@@ -386,12 +388,12 @@ class Trainer:
         prev_check_cluster_iter = cur_iter
         if self.start_epoch == self.n_epoches + 1:
             self.print_and_log_info("No training, only evaluating")
-            if recluster:
-                distances = self.evaluate(recluster)
-                return distances
-            subset = self.evaluate()
+            # if recluster:
+            #     distances = self.evaluate(recluster)
+            #     return distances
+            self.evaluate()
             self.print_and_log_info("Training run is over")
-            return subset
+            return None  # subset
 
         for epoch in range(self.start_epoch, self.n_epoches + 1):
             batch_start = self.start_batch if epoch == self.start_epoch else 1
@@ -402,7 +404,7 @@ class Trainer:
                 if cur_iter > self.n_iterations:
                     break
 
-                self.single_train_batch_run(images, epoch)
+                self.single_train_batch_run(images)
                 if self.scheduler_update_range == "batch":
                     self.update_scheduler(epoch, batch=batch)
 
@@ -427,10 +429,10 @@ class Trainer:
                 self.update_scheduler(epoch + 1, batch=1)
 
         self.save_training_metrics()
-        subset = self.evaluate()
+        self.evaluate()
 
         self.print_and_log_info("Training run is over")
-        return subset
+        # return subset
 
     def update_scheduler(self, epoch, batch):
         self.scheduler.step()
@@ -441,6 +443,7 @@ class Trainer:
                 PRINT_LR_UPD_FMT(epoch, self.n_epoches, batch, self.n_batches, lr)
             )
 
+    '''
     def duplicate(self):
         # Model
         self.model.duplicate(self.device)
@@ -494,44 +497,47 @@ class Trainer:
                 coerce_to_path_and_create_dir(out / f"tsf{k}")
                 for k in range(self.n_prototypes // 2, self.n_prototypes)
             ]
+    '''
 
-    def single_train_batch_run(self, images, epoch):
+    def single_train_batch_run(self, images):
         start_time = time.time()
         B = images.size(0)
         self.model.train()
         images = images.to(self.device)
 
         self.optimizer.zero_grad()
-        loss, dist_min_by_sample, argmin_idx = self.model(images, epoch)
+        # loss, dist_min_by_sample, argmin_idx = self.model(images)
+        loss, distances = self.model(images)
         loss.backward()
         self.optimizer.step()
 
-        if hasattr(self, "sprite_optimizer"):
-            # torch.nn.utils.clip_grad_value_(self.model.prototype_params, 0.1)
-            self.sprite_optimizer.step()
+        # if hasattr(self, "sprite_optimizer"):
+        #    # torch.nn.utils.clip_grad_value_(self.model.prototype_params, 0.1)
+        #    self.sprite_optimizer.step()
 
         average_losses = np.zeros(self.n_prototypes)
         with torch.no_grad():
+            argmin_idx = distances.min(1)[1]
             mask = torch.zeros(B, self.n_prototypes, device=self.device).scatter(
                 1, argmin_idx[:, None], 1
             )
             proportions = mask.sum(0).cpu().numpy() / B
 
-            dist_min_by_sample, argmin_idx = (
-                dist_min_by_sample.cpu().numpy(),
-                argmin_idx.cpu().numpy(),
-            )
-            argmin_idx = argmin_idx.astype(np.int32)
+            # dist_min_by_sample, argmin_idx = (
+            #     dist_min_by_sample.cpu().numpy(),
+            #     argmin_idx.cpu().numpy(),
+            # )
+            # argmin_idx = argmin_idx.astype(np.int32)
 
-            for k in range(self.n_prototypes):
-                sample_per_clus = argmin_idx == k
-                n_clus = np.sum(sample_per_clus)
-                avg_clus = (
-                    np.sum(sample_per_clus * dist_min_by_sample) / n_clus
-                    if n_clus
-                    else 0.0
-                )
-                average_losses[k] = avg_clus
+            # for k in range(self.n_prototypes):
+            #    sample_per_clus = argmin_idx == k
+            #    n_clus = np.sum(sample_per_clus)
+            #    avg_clus = (
+            #        np.sum(sample_per_clus * dist_min_by_sample) / n_clus
+            #        if n_clus
+            #        else 0.0
+            #    )
+            #    average_losses[k] = avg_clus
         self.train_metrics.update(
             {
                 "time/img": (time.time() - start_time) / B,
@@ -541,9 +547,9 @@ class Trainer:
         self.train_metrics.update(
             {f"prop_clus{i}": p for i, p in enumerate(proportions)}
         )
-        self.train_metrics.update(
-            {f"loss_clus{i}": average_losses[i] for i in range(self.n_prototypes)}
-        )
+        # self.train_metrics.update(
+        #     {f"loss_clus{i}": average_losses[i] for i in range(self.n_prototypes)}
+        # )
 
     @torch.no_grad()
     def log_images(self, cur_iter):
@@ -645,12 +651,13 @@ class Trainer:
             )
 
         self.update_visualizer_metrics(cur_iter, train=True)
-        self.train_metrics.reset(
-            *(
-                ["time/img", "loss"]
-                + [f"loss_clus{i}" for i in range(self.n_prototypes)]
-            )
-        )
+        self.train_metrics.reset("time/img", "loss")
+        # self.train_metrics.reset(
+        #    *(
+        #        ["time/img", "loss"]
+        #        + [f"loss_clus{i}" for i in range(self.n_prototypes)]
+        #    )
+        # )
 
     def update_visualizer_metrics(self, cur_iter, train):
         if self.visualizer is None:
@@ -727,7 +734,9 @@ class Trainer:
         self.model.eval()
         for images, labels, _ in self.val_loader:
             images = images.to(self.device)
-            dist_min_by_sample, argmin_idx = self.model(images)[1:]
+            distances = self.model(images)[1]
+            dist_min_by_sample, argmin_idx = distances.min(1)
+            # dist_min_by_sample, argmin_idx = self.model(images)[1:]
             loss_val = dist_min_by_sample.mean()
 
             self.val_metrics.update({"loss_val": loss_val.item()})
@@ -772,8 +781,8 @@ class Trainer:
             "optimizer_state": self.optimizer.state_dict(),
             "scheduler_state": self.scheduler.state_dict(),
         }
-        if hasattr(self, "sprite_optimizer"):
-            state["sprite_optimizer_state"] = self.sprite_optimizer.state_dict()
+        # if hasattr(self, "sprite_optimizer"):
+        #   state["sprite_optimizer_state"] = self.sprite_optimizer.state_dict()
         save_path = self.run_dir / MODEL_FILE
         torch.save(state, save_path)
         self.print_and_log_info("Model saved at {}".format(save_path))
@@ -850,15 +859,17 @@ class Trainer:
         self.model.eval()
         no_label = self.train_loader.dataset[0][1] == -1
         if no_label:
-            if recluster:
-                return self.distance_eval()
-            subset = self.qualitative_eval()
-            return subset
+            self.qualitative_eval()
+            # if recluster:
+            #     return self.distance_eval()
+            # subset = self.qualitative_eval()
+            # return subset
         else:
             self.quantitative_eval()
-            subset = self.qualitative_eval()
+            # subset = self.qualitative_eval()
         self.print_and_log_info("Evaluation is over")
 
+    """
     @torch.no_grad()
     def distance_eval(self):
         dataset = self.train_loader.dataset
@@ -889,6 +900,7 @@ class Trainer:
             ret_val.append((p, d, i))
 
         return np.array(ret_val)
+    """
 
     @torch.no_grad()
     def qualitative_eval(self):
@@ -897,10 +909,10 @@ class Trainer:
         scores_path = self.run_dir / FINAL_SCORES_FILE
         with open(scores_path, mode="w") as f:
             f.write("loss\n")
-            for k in range(self.n_prototypes):
-                f.write("clus_loss{" + str(k) + "}\n")
-            for k in range(self.n_prototypes):
-                f.write("ctr_clus_loss{" + str(k) + "}\n")
+            # for k in range(self.n_prototypes):
+            #     f.write("clus_loss{" + str(k) + "}\n")
+            # for k in range(self.n_prototypes):
+            #     f.write("ctr_clus_loss{" + str(k) + "}\n")
         cluster_path = coerce_to_path_and_create_dir(self.run_dir / "clusters")
         dataset = self.train_loader.dataset
         train_loader = DataLoader(
@@ -909,6 +921,7 @@ class Trainer:
             num_workers=self.n_workers,
             shuffle=False,
         )
+        """
         # Compute difference (for hierarchical clustering)
         if self.n_prototypes == 2:
             error_averages = {k: AverageTensorMeter() for k in range(self.n_prototypes)}
@@ -998,22 +1011,17 @@ class Trainer:
                     self.run_dir / "leaf_id_by_sample.npy", np.array(leaf_id_by_sample)
                 )
                 np.save(self.run_dir / "paths.npy", np.concatenate(paths, axis=0))
+        """
         # Compute results
         distances, cluster_idx = np.array([]), np.array([], dtype=np.int32)
         averages = {k: AverageTensorMeter() for k in range(self.n_prototypes)}
-        average_losses = {k: AverageMeter() for k in range(self.n_prototypes)}
-        average_ctr_losses = {k: AverageMeter() for k in range(self.n_prototypes)}
-        subset_img = [np.array([]) for k in range(self.n_prototypes)]
-        train_loader = DataLoader(
-            dataset,
-            batch_size=self.batch_size,
-            num_workers=self.n_workers,
-            shuffle=False,
-        )
+        # average_losses = {k: AverageMeter() for k in range(self.n_prototypes)}
+        # average_ctr_losses = {k: AverageMeter() for k in range(self.n_prototypes)}
+        # subset_img = [np.array([]) for k in range(self.n_prototypes)]
         for images, labels, path in train_loader:
             images = images.to(self.device)
-            out = self.model(images)[1:]
-            dist_min_by_sample, argmin_idx = map(lambda t: t.cpu().numpy(), out)
+            out = self.model(images)[1]
+            dist_min_by_sample, argmin_idx = map(lambda t: t.cpu().numpy(), out.min(1))
 
             # for cluster in range(self.n_prototypes):
             #    subset_img[cluster] = np.hstack(
@@ -1029,12 +1037,12 @@ class Trainer:
             #    lambda t: t.cpu().numpy(), dist.max(1)
             #)
             #argmax_idx_ = argmax_idx_.astype(np.int32)
-
+            """
             transformed_imgs = self.model.transform(images).cpu()
             for k in range(self.n_prototypes):
                 imgs = transformed_imgs[argmin_idx == k, k]
                 averages[k].update(imgs)
-
+                """
                 sample_per_clus = argmin_idx == k
                 n_clus = np.sum(sample_per_clus)
                 avg_clus = (
@@ -1052,8 +1060,9 @@ class Trainer:
                     else 0.0
                 )
                 average_ctr_losses[k].update(avg_ctr_clus, n_ctr_clus)
-            """
+                """
         self.print_and_log_info("final_loss: {:.5}".format(loss.avg))
+        """
         self.print_and_log_info(
             "".join(
                 [
@@ -1076,7 +1085,6 @@ class Trainer:
                 ]
             )
         )
-
         with open(scores_path, mode="a") as f:
             f.write("{:.5}\n".format(loss.avg))
             for k in range(self.n_prototypes):
@@ -1087,6 +1095,7 @@ class Trainer:
                 f.write(
                     "{:.5}\n".format(average_ctr_losses[k].avg)
                 ) if average_ctr_losses[k].avg else f.write("0.\n")
+        """
 
         # Save results
         with open(cluster_path / "cluster_counts.tsv", mode="w") as f:
@@ -1122,6 +1131,7 @@ class Trainer:
             except AssertionError:
                 print_warning(f"no image found in cluster {k}")
 
+        """
         if self.parent_model != None:
             scores_path = self.run_dir / "parent_scores.tsv"
             with open(scores_path, mode="w") as f:
@@ -1157,6 +1167,7 @@ class Trainer:
                     f.write("{:.5}\n".format(loss.avg))
 
         return subset_img
+        """
 
     @torch.no_grad()
     def quantitative_eval(self):
@@ -1175,7 +1186,9 @@ class Trainer:
         )
         for images, labels, _ in loader:
             images = images.to(self.device)
-            dist_min_by_sample, argmin_idx = self.model(images)[1:]
+            distances = self.model(images)[1]
+            dist_min_by_sample, argmin_idx = distances.min(1)
+            # dist_min_by_sample, argmin_idx = self.model(images)[1:]
             loss.update(dist_min_by_sample.mean(), n=len(dist_min_by_sample))
             scores.update(labels.long().numpy(), argmin_idx.cpu().numpy())
 
@@ -1218,6 +1231,9 @@ if __name__ == "__main__":
     dataset = cfg["dataset"]["name"]
 
     run_dir = RUNS_PATH / dataset / args.tag
+    trainer = Trainer(config, run_dir, seed=seed)
+    trainer.run(seed=seed)
+    """
     run_dir = str(run_dir)
     n_dup = cfg["training"].get("n_dup", 0)
     subsets = {}
@@ -1243,3 +1259,4 @@ if __name__ == "__main__":
             if temp:
                 subsets["00"] = temp[0]
                 subsets["01"] = temp[1]
+    """

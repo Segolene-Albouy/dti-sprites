@@ -12,7 +12,7 @@ from torchvision.models import vgg16_bn
 from .mini_resnet import get_resnet_model as get_mini_resnet_model
 from .resnet import get_resnet_model
 from .tools import copy_with_noise, get_output_size, TPSGrid, create_mlp, get_clamp_func
-from utils.logger import print_warning
+from ..utils.logger import print_warning
 
 N_HIDDEN_UNITS = 128
 N_LAYERS = 2
@@ -411,6 +411,8 @@ class _AbstractTransformationModule(nn.Module):
 class IdentityModule(_AbstractTransformationModule):
     def __init__(self, in_channels, *args, **kwargs):
         super().__init__()
+        self.regressor = nn.Sequential(nn.Linear(in_channels, 0))
+        self.register_buffer("identity", torch.zeros(0))
 
     def forward(self, x, *args, **kwargs):
         return x
@@ -653,9 +655,7 @@ class TPSModule(_AbstractTransformationModule):
             in_channels, self.grid_size**2 * 2, N_HIDDEN_UNITS, n_layers
         )
         y, x = torch.meshgrid(
-            torch.linspace(-1, 1, self.grid_size),
-            torch.linspace(-1, 1, self.grid_size),
-            indexing="ij",
+            torch.linspace(-1, 1, self.grid_size), torch.linspace(-1, 1, self.grid_size)
         )
         target_control_points = torch.stack([x.flatten(), y.flatten()], dim=1)
         self.tps_grid = TPSGrid(img_size, target_control_points)
@@ -729,7 +729,7 @@ class MorphologicalModule(_AbstractTransformationModule):
             out = self.smoothmax_kernel(
                 x[:, -1, ...].unsqueeze(1), alpha, torch.sigmoid(weights)
             )
-            return torch.cat([x[:, : x.shape[1] - 1, ...], out], dim=1)
+            return torch.cat([x[:, : x.size(1) - 1, ...], out], dim=1)
         else:
             assert x.shape[1] == 1
             return self.smoothmax_kernel(x, alpha, torch.sigmoid(weights))
