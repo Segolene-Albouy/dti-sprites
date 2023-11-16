@@ -3,7 +3,7 @@ dataset:
 model:
   name: dti_sprites
   n_sprites: 10
-  n_backgrounds: 0 #1
+  n_backgrounds: 0
   n_objects: 1
   prototype:
     source: generator
@@ -18,7 +18,6 @@ model:
   transformation_sequence_bkg: identity
   curriculum_learning: [5, 15, 20]
   curriculum_learning_bkg: False
-  freeze_frg: True
   grid_size: 4
   kernel_size: 7
 training:
@@ -37,5 +36,5 @@ training:
   train_stat_interval: 25
   val_stat_interval: 50
   check_cluster_interval: 50
-  seed: 51583
+  seed: 66247
   visualizer_port:

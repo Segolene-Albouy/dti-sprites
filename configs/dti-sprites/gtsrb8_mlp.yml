@@ -8,12 +8,6 @@ model:
   prototype:
     source: generator
     generator: mlp
-    data:
-      freeze: [False, False, False]
-      init: ["", "", ""]
-      gaussian_weights_std: 5
-    init_bkg: mean
-    init_linear: gaussian
   encoder_name: resnet32
   transformation_sequence: color_projective_tps
   transformation_sequence_bkg: color_projective_tps
@@ -35,7 +29,7 @@ training:
   train_stat_interval: 100
   val_stat_interval: 200
   check_cluster_interval: 25
-  seed: 49669
+  seed: 85534
   visualizer_port:
   pretrained: 
   resume: 
