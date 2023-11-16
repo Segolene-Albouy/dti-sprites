@@ -6,8 +6,8 @@ import numpy as np
 from torch.utils.data.dataset import Dataset as TorchDataset
 from torchvision.transforms import ToTensor, Compose
 
-from utils import coerce_to_path_and_check_exist, use_seed
-from utils.path import DATASETS_PATH
+from ..utils import coerce_to_path_and_check_exist, use_seed
+from ..utils.path import DATASETS_PATH
 
 
 class _AbstractMultiObjectDataset(TorchDataset):

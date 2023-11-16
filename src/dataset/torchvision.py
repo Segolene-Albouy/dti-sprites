@@ -5,8 +5,8 @@ from torch.utils.data.dataset import Dataset as TorchDataset, ConcatDataset
 from torchvision.datasets import FashionMNIST, MNIST, SVHN, USPS
 from torchvision.transforms import ToTensor, Compose
 
-from utils import use_seed
-from utils.path import DATASETS_PATH
+from ..utils import use_seed
+from ..utils.path import DATASETS_PATH
 from .torch_transforms import ColorAugment
 
 

@@ -7,7 +7,7 @@ for i in {0..9}
 do 
     seed=$(shuf -i 1-100000 -n 1)
     sed -i "s/seed:.*/seed: $seed/" configs/$config
-    CUDA_VISIBLE_DEVICES=$cuda python src/sprites_trainer.py --tag ${run_tag}_$i --config $config
+    CUDA_VISIBLE_DEVICES=$cuda python  -m src.sprites_trainer --tag ${run_tag}_$i --config $config
 done
 
 echo All runs are finished.

@@ -5,9 +5,9 @@ import numpy as np
 from torch.utils.data.dataset import Dataset as TorchDataset
 from torchvision.transforms import Compose, Resize, ToTensor
 
-from utils import coerce_to_path_and_check_exist, get_files_from_dir, use_seed
-from utils.image import IMG_EXTENSIONS
-from utils.path import DATASETS_PATH
+from ..utils import coerce_to_path_and_check_exist, get_files_from_dir, use_seed
+from ..utils.image import IMG_EXTENSIONS
+from ..utils.path import DATASETS_PATH
 
 
 class GTSRB8Dataset(TorchDataset):

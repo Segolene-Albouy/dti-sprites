@@ -4,8 +4,8 @@ from PIL import Image
 from torch.utils.data.dataset import Dataset as TorchDataset
 from torchvision.transforms import ToTensor, Compose, Resize
 
-from utils import coerce_to_path_and_check_exist, get_files_from_dir
-from utils.path import DATASETS_PATH
+from ..utils import coerce_to_path_and_check_exist, get_files_from_dir
+from ..utils.path import DATASETS_PATH
 
 
 class WeizmannHorseDataset(TorchDataset):
