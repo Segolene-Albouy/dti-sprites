@@ -43,7 +43,7 @@ def init_linear(hidden, out, init, n_channels=3, std=5, freeze_frg=False, datase
                 (
                     torch.full(
                         size=(
-                            3 * 28 * 28,
+                            3 * h * h,
                         ),  # int(out / (n_channels + 1)) * n_channels,),
                         fill_value=0.9,
                     ),
@@ -128,6 +128,7 @@ class DTISprites(nn.Module):
                 self.init_masks(n_sprites, mask_init, size, std, value_mask)
             )
         else:
+            std = proto_args.get("gaussian_weights_std", 5)
             if freeze_frg:
                 self.prototype_params = nn.Parameter(
                     torch.stack(
@@ -160,6 +161,7 @@ class DTISprites(nn.Module):
                 color_channels,
                 latent_out_ch * self.img_size[0] * self.img_size[1],
                 kwargs.get("init_latent_linear", "random"),
+                std=std
             )
 
         clamp_name = kwargs.get("use_clamp", "soft")
@@ -253,7 +255,8 @@ class DTISprites(nn.Module):
                         color_channels,
                         color_channels * img_size[0] * img_size[1],
                         kwargs.get("init_bkg_linear", "random"),
-                        dataset,
+                        std=None,
+                        dataset=dataset,
                     )
                     self.latent_bkg_params = nn.Parameter(
                         torch.stack(
@@ -310,12 +313,12 @@ class DTISprites(nn.Module):
 
     @staticmethod
     def init_generator(
-        name, latent_dim, color_channel, out_channel, init="random", dataset=None
+        name, latent_dim, color_channel, out_channel, init="random", std=5, dataset=None
     ):
         if name == "unet":
             return UNet(1, color_channel)
         elif name == "mlp":
-            linear = init_linear(8 * latent_dim, out_channel, init, dataset=dataset)
+            linear = init_linear(8 * latent_dim, out_channel, init, std=std, dataset=dataset)
             model = nn.Sequential(
                 nn.Linear(latent_dim, 8 * latent_dim),
                 nn.GroupNorm(8, 8 * latent_dim),
