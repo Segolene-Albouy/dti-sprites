@@ -53,11 +53,11 @@ class PrototypeTransformationNetwork(nn.Module):
             "kernel_size": kwargs.get("kernel_size", 3),
             "padding_mode": kwargs.get("padding_mode", "zeros"),
             "curriculum_learning": kwargs.get("curriculum_learning", False),
-            "shared": kwargs.get("shared", False),
+            "shared_t": kwargs.get("shared_t", False),
             "use_clamp": kwargs.get("use_clamp", "soft"),
             "n_hidden_layers": kwargs.get("n_hidden_layers", N_LAYERS),
         }
-        self.shared_t = tsf_kwargs["shared"]
+        self.shared_t = tsf_kwargs["shared_t"]
         if self.shared_t:
             self.tsf_sequences = TransformationSequence(**deepcopy(tsf_kwargs))
         else:
