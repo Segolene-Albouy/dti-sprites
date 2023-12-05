@@ -20,7 +20,7 @@ class _AbstractMultiObjectDataset(TorchDataset):
     N = NotImplementedError
     instance_eval = True
 
-    def __init__(self, split, **kwargs):
+    def __init__(self, split, subset, **kwargs):
         self.data_path = coerce_to_path_and_check_exist(self.root / self.name)
         self.split = split
         self.eval_mode = kwargs.get("eval_mode", False) or split == "test"
@@ -89,3 +89,10 @@ class TetrominoesDataset(_AbstractMultiObjectDataset):
     img_size = (35, 35)
     N = 60000
     n_classes = 20
+
+
+class FleuronsCompDataset(_AbstractMultiObjectDataset):
+    name = "fleurons_compounds"
+    img_size = (256, 256)
+    N = 100
+    n_classes = 73  # sprites + bkg
