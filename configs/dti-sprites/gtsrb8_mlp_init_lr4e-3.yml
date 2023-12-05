@@ -22,7 +22,7 @@ training:
     name: adam
     lr: 1.0e-3
     transformer:
-      lr: 3.0e-3
+      lr: 4.0e-3
       weight_decay: 1.0e-6
   scheduler:
     name: multi_step
@@ -32,7 +32,7 @@ training:
   train_stat_interval: 100
   val_stat_interval: 200
   check_cluster_interval: 25
-  seed: 54971
+  seed: 95906
   visualizer_port:
   pretrained: 
   resume: 
