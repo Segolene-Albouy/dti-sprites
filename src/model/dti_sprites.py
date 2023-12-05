@@ -433,7 +433,7 @@ class DTISprites(nn.Module):
             params.append(self.occ_predictor.parameters())
         return chain(*params)
 
-    def forward(self, x):
+    def forward(self, x, img_masks=None):
         B, C, H, W = x.size()
         L, K, M = self.n_objects, self.n_sprites, self.n_backgrounds or 1
         tsf_layers, tsf_masks, tsf_bkgs, occ_grid, class_prob = self.predict(x)
@@ -443,13 +443,19 @@ class DTISprites(nn.Module):
                 tsf_layers, tsf_masks, occ_grid, tsf_bkgs, class_prob
             )  # B(K**L*M)CHW
             x = x.unsqueeze(1).expand(-1, K**L * M, -1, -1, -1)
-            distances = self.criterion(x, target)
+            if img_masks != None:
+                img_masks = img_masks.unsqueeze(1).expand(-1, K**L * M, -1, -1, -1)
+            distances = self.criterion(x, target, weights=img_masks)
             loss = distances.min(1)[0].mean()
         else:
             target = self.compose(
                 tsf_layers, tsf_masks, occ_grid, tsf_bkgs, class_prob
             )  # BCHW
-            loss = self.criterion(x.unsqueeze(1), target.unsqueeze(1)).mean()
+            if img_masks != None:
+                img_masks = img_masks.unsqueeze(1)
+            loss = self.criterion(
+                x.unsqueeze(1), target.unsqueeze(1), weights=img_masks
+            ).mean()
             distances = 1 - class_prob.permute(2, 0, 1).flatten(1)  # B(L*K)
 
         return loss, distances
