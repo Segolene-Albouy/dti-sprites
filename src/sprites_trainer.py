@@ -606,7 +606,7 @@ class Trainer:
         for k in range(self.n_prototypes):
             img = convert_to_img(prototypes[k])
             if cur_iter is not None:
-                img.convert('RGB').save(self.prototypes_path / f"proto{k}" / f"{cur_iter}.jpg")
+                img.save(self.prototypes_path / f"proto{k}" / f"{cur_iter}.jpg")
             else:
                 img.save(self.prototypes_path / f"prototype{k}.png")
 
@@ -615,11 +615,11 @@ class Trainer:
         prototypes = self.model.prototypes
         masks = self.model.masks
         for k in range(self.n_prototypes):
-            img = convert_to_img(prototypes[k] * masks[k])
             if cur_iter is not None:
-                img.convert('RGB').save(self.masked_prototypes_path / f"proto{k}" / f"{cur_iter}.jpg")
+                convert_to_img(prototypes[k] * masks[k]).save(self.masked_prototypes_path / f"proto{k}" / f"{cur_iter}.jpg")
             else:
-                img.save(self.masked_prototypes_path / f"prototype{k}.png")
+                img = torch.vstack([prototypes[k] * masks[k], masks[k]])
+                convert_to_img(img, with_alpha=True).save(self.masked_prototypes_path / f"prototype{k}.png")
 
     @torch.no_grad()
     def save_masks(self, cur_iter=None):
@@ -627,7 +627,7 @@ class Trainer:
         for k in range(self.n_prototypes):
             img = convert_to_img(masks[k])
             if cur_iter is not None:
-                img.convert('RGB').save(self.masks_path / f"mask{k}" / f"{cur_iter}.jpg")
+                img.save(self.masks_path / f"mask{k}" / f"{cur_iter}.jpg")
             else:
                 img.save(self.masks_path / f"mask{k}.png")
 
@@ -637,7 +637,7 @@ class Trainer:
         for k in range(self.n_backgrounds):
             img = convert_to_img(backgrounds[k])
             if cur_iter is not None:
-                img.convert('RGB').save(self.backgrounds_path / f"bkg{k}" / f"{cur_iter}.jpg")
+                img.save(self.backgrounds_path / f"bkg{k}" / f"{cur_iter}.jpg")
             else:
                 img.save(self.backgrounds_path / f"background{k}.png")
 
@@ -657,7 +657,7 @@ class Trainer:
         for k in range(transformed_imgs.size(0)):
             for j, img in enumerate(transformed_imgs[k][1:]):
                 if cur_iter is not None:
-                    convert_to_img(img, with_alpha=False).save(
+                    convert_to_img(img).save(
                         self.transformation_path
                         / f"img{k}"
                         / f"tsf{j}"
@@ -682,7 +682,7 @@ class Trainer:
                     tmp_path = self.transformation_path / f"img{k}"
                     for j, img in enumerate(compositions[i][k][1:]):
                         if cur_iter is not None:
-                            convert_to_img(img, with_alpha=False).save(
+                            convert_to_img(img).save(
                                 tmp_path / f"{name}_tsf{j}" / f"{cur_iter}.jpg"
                             )
                         else:

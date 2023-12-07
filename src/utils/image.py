@@ -23,7 +23,7 @@ def resize(img, size, keep_aspect_ratio=True, resample=Image.ANTIALIAS, fit_insi
     return img.resize(size, resample=resample)
 
 
-def convert_to_img(arr, with_alpha=True):
+def convert_to_img(arr, with_alpha=False):
     if isinstance(arr, torch.Tensor):
         if len(arr.shape) == 4:
             arr = arr.squeeze(0)
