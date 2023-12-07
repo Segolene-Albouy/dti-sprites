@@ -23,7 +23,7 @@ def resize(img, size, keep_aspect_ratio=True, resample=Image.ANTIALIAS, fit_insi
     return img.resize(size, resample=resample)
 
 
-def convert_to_img(arr):
+def convert_to_img(arr, with_alpha=True):
     if isinstance(arr, torch.Tensor):
         if len(arr.shape) == 4:
             arr = arr.squeeze(0)
@@ -34,9 +34,11 @@ def convert_to_img(arr):
     assert isinstance(arr, np.ndarray)
     if len(arr.shape) == 3 and arr.shape[2] == 1:
         arr = arr[:, :, 0]
+    if len(arr.shape) == 2 or arr.shape[2] == 3:
+        with_alpha = False
     if np.issubdtype(arr.dtype, np.floating):
         arr = (arr.clip(0, 1) * 255)
-    return Image.fromarray(arr.astype(np.uint8)).convert('RGB')
+    return Image.fromarray(arr.astype(np.uint8)).convert('RGBA' if with_alpha else 'RGB')
 
 
 def convert_to_rgba(t):

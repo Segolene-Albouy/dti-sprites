@@ -569,7 +569,7 @@ class Trainer:
         for k in range(self.n_prototypes):
             img = convert_to_img(prototypes[k])
             if cur_iter is not None:
-                img.save(self.prototypes_path / f"proto{k}" / f"{cur_iter}.jpg")
+                img.convert('RGB').save(self.prototypes_path / f"proto{k}" / f"{cur_iter}.jpg")
             else:
                 img.save(self.prototypes_path / f"prototype{k}.png")
 
