@@ -1,26 +1,26 @@
 dataset:
   name: Lettre_e
-  img_size: 32
+  img_size: [32, 32]
 model:
   name: dti_sprites
-  n_sprites: 5
+  n_sprites: 20
   n_backgrounds: 1
   n_objects: 1
-  inject_noise: 0 
   prototype:
     source: data
     data:
       freeze: [True, True, False]
-      value: [0.0, 0.5, 0.]
+      value: [0.1, 0.9, 0.]
       init: ["constant", "constant", "gaussian"]
       gaussian_weights_std: 16
   encoder_name: resnet32
   transformation_sequence: color_affine #_morpho_tps
   transformation_sequence_bkg: color
-  curriculum_learning: False #[200] #, 350, 400]
+  curriculum_learning: False #[200, 350, 400]
   curriculum_learning_bkg: False #[200]
+  shared_t: True
 training:
-  batch_size: 16
+  batch_size: 32
   n_workers: 4
   optimizer:
     name: adam
@@ -30,11 +30,11 @@ training:
   scheduler:
     name: multi_step
     gamma: 0.1
-    milestones: [450]
-  n_epoches: 500
+    milestones: [650]
+  n_epoches: 800
   train_stat_interval: 200
   val_stat_interval: 100
   check_cluster_interval: 100
-  seed: 2971
+  seed: 131
   n_dup: 0
   visualizer_port:

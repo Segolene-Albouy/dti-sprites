@@ -3,7 +3,7 @@ dataset:
 model:
   name: dti_sprites
   n_sprites: 10
-  n_backgrounds: 1
+  n_backgrounds: 0 #1
   n_objects: 1
   inject_noise: 0
   prototype:
@@ -16,11 +16,8 @@ model:
   encoder_name: resnet20
   color_channels: 1
   transformation_sequence: identity_color_affine_tps
-  transformation_sequence_bkg: identity
   curriculum_learning: [5, 15, 25]
-  curriculum_learning_bkg: False
   grid_size: 4
-  freeze_frg: True
 training:
   batch_size: 128
   optimizer:
@@ -37,5 +34,5 @@ training:
   train_stat_interval: 25
   val_stat_interval: 50
   check_cluster_interval: 50
-  seed: 65860
+  seed: 79597
   visualizer_port:

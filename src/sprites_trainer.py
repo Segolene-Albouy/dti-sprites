@@ -455,14 +455,16 @@ class Trainer:
 
         for epoch in range(self.start_epoch, self.n_epoches + 1):
             batch_start = self.start_batch if epoch == self.start_epoch else 1
-            for batch, (images, labels, _) in enumerate(self.train_loader, start=1):
+            for batch, (images, labels, img_masks) in enumerate(
+                self.train_loader, start=1
+            ):
                 if batch < batch_start:
                     continue
                 cur_iter += 1
                 if cur_iter > self.n_iterations:
                     break
 
-                self.single_train_batch_run(images)
+                self.single_train_batch_run(images, img_masks)
                 if self.scheduler_update_range == "batch":
                     self.update_scheduler(epoch, batch=batch)
 
@@ -501,14 +503,17 @@ class Trainer:
                 PRINT_LR_UPD_FMT(epoch, self.n_epoches, batch, self.n_batches, lr)
             )
 
-    def single_train_batch_run(self, images):
+    def single_train_batch_run(self, images, masks):
         start_time = time.time()
         B = images.size(0)
         self.model.train()
         images = images.to(self.device)
-
+        if masks != []:
+            masks = masks.to(self.device)
+        else:
+            masks = None
         self.optimizer.zero_grad()
-        loss, distances = self.model(images)
+        loss, distances = self.model(images, masks)
         loss.backward()
         self.optimizer.step()
 
@@ -1403,7 +1408,7 @@ class Trainer:
         for k in range(self.n_prototypes):
             path = coerce_to_path_and_create_dir(cluster_path / f"cluster{k}")
             indices = np.where(cluster_idx == k)[0]
-            top_idx = np.argsort(distances[indices])[:N_CLUSTER_SAMPLES]
+            top_idx = np.argsort(distances[indices])  # [:N_CLUSTER_SAMPLES]
             for j, idx in enumerate(top_idx):
                 inp = dataset[indices[idx]][0].unsqueeze(0).to(self.device)
                 convert_to_img(inp).save(path / f"top{j}_raw.png")
@@ -1417,10 +1422,10 @@ class Trainer:
                 random_idx = np.random.choice(indices, N_CLUSTER_SAMPLES, replace=False)
             for j, idx in enumerate(random_idx):
                 inp = dataset[idx][0].unsqueeze(0).to(self.device)
-                convert_to_img(inp).save(path / f"random{j}_raw.png")
-                convert_to_img(self.model.transform(inp)[0, k]).save(
-                    path / f"random{j}_tsf.png"
-                )
+                # convert_to_img(inp).save(path / f"random{j}_raw.png")
+                # convert_to_img(self.model.transform(inp)[0, k]).save(
+                #    path / f"random{j}_tsf.png"
+                # )
                 # convert_to_img(self.model.transform(inp, inverse=True)[0, k]).save(path / f'random{j}_tsf_inp.png')
             try:
                 convert_to_img(averages[k].avg).save(path / "avg.png")

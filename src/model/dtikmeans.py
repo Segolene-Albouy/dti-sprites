@@ -1,27 +1,18 @@
-from itertools import chain
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from torch.optim import Adam, RMSprop, AdamW
+from torch.optim import Adam
 import numpy as np
+from itertools import chain
 
-from .transformer import (
-    PrototypeTransformationNetwork as Transformer,
-    N_HIDDEN_UNITS,
-    N_LAYERS,
-)
-from .tools import (
-    copy_with_noise,
-    create_gaussian_weights,
-    generate_data,
-    get_clamp_func,
-)
+from .transformer import PrototypeTransformationNetwork
+from .tools import copy_with_noise, create_gaussian_weights, generate_data
 from ..utils.logger import print_warning
+
 from .u_net import UNet
 
 NOISE_SCALE = 0.0001
 EMPTY_CLUSTER_THRESHOLD = 0.2
-EPSILON = 0.5
+LATENT_SIZE = 128
 
 
 class DTIKmeans(nn.Module):
@@ -32,96 +23,56 @@ class DTIKmeans(nn.Module):
         if dataset is None:
             raise NotImplementedError
         self.n_prototypes = n_prototypes
-        self.n_objects = 1
         self.img_size = dataset.img_size
-        self.ms = kwargs.get("ms", 0)
+        # Prototypes
         self.color_channels = kwargs.get("color_channels", 3)
+        assert kwargs.get("prototype")
         proto_args = kwargs.get("prototype")
-        self.proto_source = proto_args.get("source", "data")
-        if self.proto_source == "generator":
-            self.gen_name = proto_args.get("generator", "unet")
-            latent_size = (
-                (128,)
-                if self.gen_name == "mlp"
-                else (1, self.img_size[0], self.img_size[1])  # unet
+        proto_source = proto_args.get("source", "data")
+        assert proto_source in ["data", "generator"]
+        self.proto_source = proto_source
+        if proto_source == "data":
+            data_args = proto_args.get("data")
+            init_type = data_args.get("init", "sample")
+            std = data_args.get("gaussian_weights_std", 25)
+            self.prototype_params = nn.Parameter(
+                torch.stack(generate_data(dataset, n_prototypes, init_type, std=std))
+            )
+        else:
+            gen_name = proto_args.get("generator", "mlp")
+            print_warning("Sprites will be generated from latent variables.")
+            assert gen_name in ["mlp", "unet"]
+            latent_dims = (
+                (LATENT_SIZE,)
+                if gen_name == "mlp"
+                else (1, self.img_size[0], self.img_size[1])
+            )
+            self.latent_params = nn.Parameter(
+                torch.stack(
+                    [
+                        torch.normal(mean=0.0, std=1.0, size=latent_dims)
+                        for k in range(n_prototypes)
+                    ],
+                    dim=0,
+                )
             )
             self.generator = self.init_generator(
-                self.gen_name,
-                latent_dim=128,
-                color_channel=self.color_channels,
-                out_channel=self.color_channels * self.img_size[0] * self.img_size[1],
-            )
-            self.latent_params = (
-                nn.Parameter(  # TODO: Check during optimization when shared.
-                    torch.stack(
-                        [
-                            torch.normal(mean=0.0, std=1.0, size=latent_size)
-                            for k in range(n_prototypes)
-                        ]
-                    )
-                )
+                gen_name,
+                LATENT_SIZE,
+                self.color_channels,
+                self.color_channels * self.img_size[0] * self.img_size[1],
             )
 
-        else:
-            data_args = proto_args.get("data")
-            proto_init = data_args.get("init", "sample")
-            std = data_args.get("gaussian_weights_std", 25)
-
-            samples = torch.stack(
-                generate_data(
-                    dataset,
-                    n_prototypes,
-                    proto_init,
-                    std=std,
-                    size=self.img_size,
-                    value=0.9,
-                )
-            )
-            self.prototype_params = nn.Parameter(samples)
-        clamp_name = kwargs.get("use_clamp", "soft")
-        self.clamp_func = get_clamp_func(clamp_name)
-
-        if proto_args.get("proba", False):
-            self.latent_shared = proto_args.get("shared_latent", False)
-            if self.latent_shared:
-                assert hasattr(self, "latent_params")
-                self.proba_latent_params = self.latent_params
-            else:
-                self.proba_latent_params = nn.Parameter(
-                    torch.stack(
-                        [
-                            torch.normal(mean=0.0, std=1.0, size=latent_size)
-                            for k in range(n_prototypes)
-                        ]
-                    )
-                )
-
-        self.transformer = Transformer(
+        self.transformer = PrototypeTransformationNetwork(
             dataset.n_channels, dataset.img_size, n_prototypes, **kwargs
         )
-        self.encoder = self.transformer.encoder
-
-        if proto_args.get("proba", False):
-            self.proba_weight = proto_args.get("proba_weight", "")
-            self.proba_type = proto_args.get("proba_type", "")
-            self.lambda_freq = proto_args.get("lambda_freq", 0.0)
-            if self.proba_type == "marionette":
-                self.linear = nn.Linear(
-                    self.proba_latent_params.shape[1], self.encoder.out_ch
-                )
-                self.norm = nn.LayerNorm(self.encoder.out_ch, elementwise_affine=False)
-            elif self.proba_type == "linear":
-                self.linear = nn.Linear(self.encoder.out_ch, self.n_prototypes)
-                self.norm = nn.LayerNorm(self.n_prototypes, elementwise_affine=False)
-            else:
-                raise NotImplementedError("Decision module not implemented.")
         self.empty_cluster_threshold = kwargs.get(
             "empty_cluster_threshold", EMPTY_CLUSTER_THRESHOLD / n_prototypes
         )
         self._reassign_cluster = kwargs.get("reassign_cluster", True)
         use_gaussian_weights = kwargs.get("gaussian_weights", False)
         if use_gaussian_weights:
-            std = kwargs["gaussian_weights_std"]
+            std = kwargs["loss_weights_std"]
             self.register_buffer(
                 "loss_weights",
                 create_gaussian_weights(dataset.img_size, dataset.n_channels, std),
@@ -129,13 +80,13 @@ class DTIKmeans(nn.Module):
         else:
             self.loss_weights = None
 
-    @staticmethod
-    def feat_norm(features):
-        return torch.div(
-            features,
-            torch.norm(features, dim=-1, keepdim=True).expand(-1, features.shape[1])
-            + 1e-5,
-        )
+    def cluster_parameters(self):
+        if hasattr(self, "generator"):
+            return list(chain(*[self.generator.parameters()])) + [self.latent_params]
+        return [self.prototype_params]
+
+    def transformer_parameters(self):
+        return self.transformer.parameters()
 
     @staticmethod
     def init_generator(name, latent_dim, color_channel, out_channel):
@@ -155,127 +106,49 @@ class DTIKmeans(nn.Module):
     @property
     def prototypes(self):
         if self.proto_source == "generator":
+            with torch.no_grad():
+                params = self.generator(self.latent_params)
+                if len(params.size()) != 4:
+                    params = params.reshape(
+                        -1, self.color_channels, self.img_size[0], self.img_size[1]
+                    )
+                return params
+        else:
+            return self.prototype_params
+
+    def forward(self, x):
+        if self.proto_source == "generator":
             params = self.generator(self.latent_params)
-            if self.gen_name == "mlp":
+            if len(params.size()) != 4:
                 params = params.reshape(
                     -1, self.color_channels, self.img_size[0], self.img_size[1]
                 )
         else:
             params = self.prototype_params
-
-        return self.clamp_func(params)
-
-    def cluster_parameters(self):
-        params = []
-        if hasattr(self, "generator"):
-            params += list(chain(*[self.generator.parameters()])) + [self.latent_params]
-        else:
-            params += [self.prototype_params]
-        if hasattr(self, "linear"):
-            params += list(chain(*[self.linear.parameters()]))
-            if not self.latent_shared:
-                print("Latent parameters of decision modules will be updated.")
-                params += [self.proba_latent_params]
-
-        return iter(params)
-
-    def transformer_parameters(self):
-        return self.transformer.parameters()
-
-    def estimate_logits(self, features):
-        if self.proba_type == "marionette":
-            lin = self.linear(self.proba_latent_params)
-            proba_theta = self.norm(lin)
-            # proba_theta = self.feat_norm(lin)
-            # proba_theta = self.feat_norm(self.norm(lin))
-            # features = self.feat_norm(features)
-            if torch.isnan(features).any():
-                raise ValueError("isnan feature")
-            logits = (1.0 / np.sqrt(self.encoder.out_ch)) * (features @ proba_theta.T)
-            if torch.isnan(logits).any():
-                raise ValueError("isnan logits")
-            # logits = (1.0 / (self.encoder.out_ch)) * (features @ proba_theta.T)
-            # logits = (2.0 / np.sqrt(self.encoder.out_ch)) * (features @ proba_theta.T)
-            # logits = 0.5 * (features @ proba_theta.T)
-            # logits = features @ proba_theta.T
-        elif self.proba_type == "linear":
-            features = self.feat_norm(features)
-            logits = self.linear(features)  # TODO: Normalize linear.
-        else:
-            raise NotImplementedError("Decision module not implemented.")
-        return logits
-
-    def forward(self, x, epoch=None):
-        B, _, _, _ = x.size()
-        features = self.encoder(x)
-
-        prototypes = self.prototypes.unsqueeze(1).expand(
-            self.n_prototypes, B, -1, -1, -1
-        )
-
+        prototypes = params.unsqueeze(1).expand(-1, x.size(0), x.size(1), -1, -1)
         inp, target = self.transformer(x, prototypes)
-
-        if hasattr(self, "proba_type"):
-            logits = self.estimate_logits(features)
-            probas = F.softmax(logits, dim=-1)
-            if self.proba_weight == "weight_sprite":
-                distances = (
-                    inp[:, 0, ...] - (probas[..., None, None, None] * target).sum(1)
-                ) ** 2
-                dist = distances.flatten(1).mean(1)
-                freqs = probas.sum(dim=0)
-                freqs = freqs / freqs.sum()
-                freq_loss = freqs.clamp(max=EPSILON / self.n_prototypes)
-                return (
-                    dist.mean() + self.lambda_freq * (1 - freq_loss.sum()),
-                    dist,
-                    probas.max(1)[1],
-                )
-            elif self.proba_weight == "weight_diff":
-                distances = (probas[..., None, None, None] * ((inp - target) ** 2)).sum(
-                    1
-                )
-                dist = distances.flatten(1).mean(1)
-                freqs = probas.sum(dim=0)
-                freqs = freqs / freqs.sum()
-                freq_loss = freqs.clamp(max=EPSILON / self.n_prototypes)
-                if dist.mean().isnan():
-                    raise ValueError("isnan loss")
-                return (
-                    dist.mean() + self.lambda_freq * (1 - freq_loss.sum()),
-                    dist,
-                    probas.max(1)[1],
-                )
-            else:
-                raise NotImplementedError("Reconstruction loss not implemented.")
-        else:
-            distances = (inp - target) ** 2
-            if self.loss_weights is not None:
-                distances = distances * self.loss_weights
-            if hasattr(self, "sprite_optimizer"):
-                distances = distances.flatten(2).sum(2)
-            else:
-                distances = distances.flatten(2).mean(2)
-
-            dist = distances.min(1)[0]
-            dist_min_by_sample, argmin_idx = distances.min(1)
-            return dist.mean(), dist_min_by_sample, argmin_idx
+        distances = (inp - target) ** 2
+        if self.loss_weights is not None:
+            distances = distances * self.loss_weights
+        distances = distances.flatten(2).mean(2)
+        dist_min = distances.min(1)[0]
+        return dist_min.mean(), distances
 
     @torch.no_grad()
     def transform(self, x, inverse=False):
         if inverse:
             return self.transformer.inverse_transform(x)
         else:
-            prototypes = self.prototypes.unsqueeze(1).expand(-1, x.size(0), -1, -1, -1)
+            prototypes = self.prototypes.unsqueeze(1).expand(
+                -1, x.size(0), x.size(1), -1, -1
+            )
             return self.transformer(x, prototypes)[1]
 
     def step(self):
         self.transformer.step()
 
-    def set_optimizer(self, opt, sprite_opt=None):
+    def set_optimizer(self, opt):
         self.optimizer = opt
-        if sprite_opt:
-            self.sprite_optimizer = sprite_opt
         self.transformer.set_optimizer(opt)
 
     def load_state_dict(self, state_dict):
@@ -285,22 +158,12 @@ class DTIKmeans(nn.Module):
             if name in state:
                 if isinstance(param, nn.Parameter):
                     param = param.data
-                if "activations" in name and state[name].shape != param.shape:
-                    state[name].copy_(
-                        torch.Tensor([True] * state[name].size(0)).to(param.device)
-                    )
-                else:
-                    state[name].copy_(param)
-            elif name == "prototypes":
-                # TODO: Check if prototype_params is already copied.
-                if not hasattr(self, "generator"):
-                    state["prototype_params"].copy_(param)
+                state[name].copy_(param)
             else:
                 unloaded_params.append(name)
         if len(unloaded_params) > 0:
             print_warning(f"load_state_dict: {unloaded_params} not found")
 
-    @torch.no_grad()
     def reassign_empty_clusters(self, proportions):
         if not self._reassign_cluster:
             return [], 0
@@ -317,43 +180,23 @@ class DTIKmeans(nn.Module):
 
     def restart_branch_from(self, i, j):
         if hasattr(self, "generator"):
-            self.latent_params[i].data.copy_(self.latent_params[j].detach().clone())
+            self.latent_params[i].data.copy_(
+                copy_with_noise(self.latent_params[j], NOISE_SCALE)
+            )
+            param = self.latent_params
         else:
             self.prototype_params[i].data.copy_(
-                copy_with_noise(self.prototypes[j], NOISE_SCALE)
+                copy_with_noise(self.prototype_params[j], NOISE_SCALE)
             )
-        if hasattr(self, "proba_type") and not self.latent_shared:
-            self.proba_latent_params[i].data.copy_(
-                self.proba_latent_params[j].detach().clone()
-            )
+            param = self.prototype_params
         self.transformer.restart_branch_from(i, j, noise_scale=0)
 
-        if hasattr(
-            self, "sprite_optimizer"
-        ):  # NOTE: This is the case for SGD experiments only.
-            pass
-        else:
-            if hasattr(self, "optimizer"):
-                opt = self.optimizer
-                params = (
-                    [self.latent_params]
-                    if hasattr(self, "generator")
-                    else [self.prototype_params]
+        if hasattr(self, "optimizer"):
+            opt = self.optimizer
+            if isinstance(opt, (Adam,)):
+                opt.state[param]["exp_avg"][i] = opt.state[param]["exp_avg"][j]
+                opt.state[param]["exp_avg_sq"][i] = opt.state[param]["exp_avg_sq"][j]
+            else:
+                raise NotImplementedError(
+                    "unknown optimizer: you should define how to reinstanciate statistics if any"
                 )
-                if hasattr(self, "proba_type") and not self.latent_shared:
-                    params += [self.proba_latent_params]
-                if isinstance(opt, (Adam, AdamW)):
-                    for param in params:
-                        opt.state[param]["exp_avg"][i] = opt.state[param]["exp_avg"][j]
-                        opt.state[param]["exp_avg_sq"][i] = opt.state[param][
-                            "exp_avg_sq"
-                        ][j]
-                elif isinstance(opt, (RMSprop,)):
-                    for param in params:
-                        opt.state[param]["square_avg"][i] = opt.state[param][
-                            "square_avg"
-                        ][j]
-                else:
-                    raise NotImplementedError(
-                        "unknown optimizer: you should define how to reinstanciate statistics if any"
-                    )

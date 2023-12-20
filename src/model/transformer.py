@@ -30,11 +30,11 @@ class PrototypeTransformationNetwork(nn.Module):
 
         encoder = kwargs.get("encoder", None)
         if encoder is not None:
-            self.exp_encoder = True
+            self.shared_enc = True
             self.encoder = encoder
             self.enc_out_channels = self.encoder.out_ch
         else:
-            self.exp_encoder = False
+            self.shared_enc = False
             encoder_kwargs = {
                 "in_channels": in_channels,
                 "encoder_name": kwargs.get("encoder_name", "resnet20"),
@@ -43,7 +43,6 @@ class PrototypeTransformationNetwork(nn.Module):
             }
             self.encoder = Encoder(**encoder_kwargs)
             self.enc_out_channels = get_output_size(in_channels, img_size, self.encoder)
-        print(self.exp_encoder)
         tsf_kwargs = {
             "freeze_frg": kwargs.get("freeze_frg", False),
             "in_channels": self.enc_out_channels,
@@ -54,11 +53,11 @@ class PrototypeTransformationNetwork(nn.Module):
             "kernel_size": kwargs.get("kernel_size", 3),
             "padding_mode": kwargs.get("padding_mode", "zeros"),
             "curriculum_learning": kwargs.get("curriculum_learning", False),
-            "shared": kwargs.get("shared", False),
+            "shared_t": kwargs.get("shared_t", False),
             "use_clamp": kwargs.get("use_clamp", "soft"),
             "n_hidden_layers": kwargs.get("n_hidden_layers", N_LAYERS),
         }
-        self.shared_t = tsf_kwargs["shared"]
+        self.shared_t = tsf_kwargs["shared_t"]
         if self.shared_t:
             self.tsf_sequences = TransformationSequence(**deepcopy(tsf_kwargs))
         else:
@@ -70,10 +69,9 @@ class PrototypeTransformationNetwork(nn.Module):
             )
 
     def get_parameters(self):
-        if self.exp_encoder:
+        if self.shared_enc:
             return self.tsf_sequences.parameters()
-        else:
-            return self.parameters()
+        return self.parameters()
 
     @property
     def is_identity(self):
@@ -413,6 +411,8 @@ class _AbstractTransformationModule(nn.Module):
 class IdentityModule(_AbstractTransformationModule):
     def __init__(self, in_channels, *args, **kwargs):
         super().__init__()
+        self.regressor = nn.Sequential(nn.Linear(in_channels, 0))
+        self.register_buffer("identity", torch.zeros(0))
 
     def forward(self, x, *args, **kwargs):
         return x
@@ -655,9 +655,7 @@ class TPSModule(_AbstractTransformationModule):
             in_channels, self.grid_size**2 * 2, N_HIDDEN_UNITS, n_layers
         )
         y, x = torch.meshgrid(
-            torch.linspace(-1, 1, self.grid_size),
-            torch.linspace(-1, 1, self.grid_size),
-            indexing="ij",
+            torch.linspace(-1, 1, self.grid_size), torch.linspace(-1, 1, self.grid_size)
         )
         target_control_points = torch.stack([x.flatten(), y.flatten()], dim=1)
         self.tps_grid = TPSGrid(img_size, target_control_points)
@@ -731,7 +729,7 @@ class MorphologicalModule(_AbstractTransformationModule):
             out = self.smoothmax_kernel(
                 x[:, -1, ...].unsqueeze(1), alpha, torch.sigmoid(weights)
             )
-            return torch.cat([x[:, : x.shape[1] - 1, ...], out], dim=1)
+            return torch.cat([x[:, : x.size(1) - 1, ...], out], dim=1)
         else:
             assert x.shape[1] == 1
             return self.smoothmax_kernel(x, alpha, torch.sigmoid(weights))

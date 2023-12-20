@@ -11,7 +11,7 @@ model:
     data:
       freeze: [False, False, False]
       init: ["constant", "mean", "gaussian"]
-    gaussian_weights_std: 8
+      gaussian_weights_std: 8
   encoder_name: resnet32
   transformation_sequence: color_projective_tps
   transformation_sequence_bkg: color_projective_tps

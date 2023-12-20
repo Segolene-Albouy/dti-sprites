@@ -64,10 +64,6 @@ def generate_data(
             if init_type == "soup":
                 noise_scale = noise_scale or 1
                 sample = torch.rand(dataset[0][0].shape)
-                # rgb_to_grayscale(
-                #    torch.rand(dataset.n_channels, *(size or dataset.img_size))
-                #    * noise_scale
-                # )
                 if value is not None:
                     sample += value
             elif init_type == "sample":
@@ -77,12 +73,16 @@ def generate_data(
                         sample.unsqueeze(0), size, mode="bilinear", align_corners=False
                     )[0]
             elif init_type == "constant":
-                value = value if value != None else 0.5
-                sample = torch.full(
-                    (dataset.n_channels, *(size or dataset.img_size)),
-                    value,
-                    dtype=torch.float,
-                )
+                if value is not None:
+                    sample = torch.full(
+                        (dataset.n_channels, *(size or dataset.img_size)),
+                        value,
+                        dtype=torch.float,
+                    )
+                else:
+                    raise ValueError(
+                        "value arg is mandatory with init_type=='constant'"
+                    )
             elif init_type == "random_color":
                 sample = torch.ones(3, *(size or dataset.img_size)) * torch.rand(
                     3, 1, 1

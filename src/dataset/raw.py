@@ -9,6 +9,8 @@ from ..utils import coerce_to_path_and_check_exist, get_files_from_dir
 from ..utils.image import IMG_EXTENSIONS
 from ..utils.path import DATASETS_PATH
 from pathlib import Path
+import numpy as np
+import torch
 
 
 class _AbstractCollectionDataset(TorchDataset):
@@ -31,7 +33,10 @@ class _AbstractCollectionDataset(TorchDataset):
         else:
             try:
                 input_files = get_files_from_dir(
-                    self.data_path, IMG_EXTENSIONS, sort=True, recursive=self.include_recursive
+                    self.data_path,
+                    IMG_EXTENSIONS,
+                    sort=True,
+                    recursive=self.include_recursive,
                 )
                 input_files = [p for p in input_files if not "/__" in str(p)]
             except FileNotFoundError:
@@ -59,8 +64,15 @@ class _AbstractCollectionDataset(TorchDataset):
         return self.size
 
     def __getitem__(self, idx):
-        inp = self.transform(Image.open(self.input_files[idx]).convert("RGB"))
-        return inp, self.labels[idx], str(self.input_files[idx])
+        img = Image.open(self.input_files[idx])
+        if img.mode == "RGBA":
+            alpha = img.split()[-1]
+        else:
+            h, w = img.size
+            alpha = Image.new("L", (h, w), (255))
+        inp = self.transform(img.convert("RGB"))
+        alpha = self.transform(alpha)
+        return inp, self.labels[idx], alpha  # str(self.input_files[idx])
 
     @property
     @lru_cache()
@@ -77,12 +89,10 @@ class MegaDepthDataset(_AbstractCollectionDataset):
     name = "megadepth"
 
 
-# class FleuronsDataset(_AbstractCollectionDataset):
-#    name = "fleurons"
-
 class GenericDataset(_AbstractCollectionDataset):
     name = "generic"
     include_recursive = True
+
 
 class LettersDataset(_AbstractCollectionDataset):
     name = "Lettre_e"

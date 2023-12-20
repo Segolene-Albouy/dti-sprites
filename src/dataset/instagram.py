@@ -11,13 +11,15 @@ from ..utils.path import DATASETS_PATH
 
 class InstagramDataset(TorchDataset):
     root = DATASETS_PATH
-    name = 'instagram'
+    name = "instagram"
     n_channels = 3
     inp_exts = IMG_EXTENSIONS
     img_size = (128, 128)
 
     def __init__(self, split, tag, **kwargs):
-        self.data_path = coerce_to_path_and_check_exist(self.root / self.name / tag) / split
+        self.data_path = (
+            coerce_to_path_and_check_exist(self.root / self.name / tag) / split
+        )
         self.split = split
         self.tag = tag
         try:
@@ -33,7 +35,7 @@ class InstagramDataset(TorchDataset):
         return self.size
 
     def __getitem__(self, idx):
-        inp = self.transform(Image.open(self.input_files[idx]).convert('RGB'))
+        inp = self.transform(Image.open(self.input_files[idx]).convert("RGB"))
         return inp, self.labels[idx]
 
     @property

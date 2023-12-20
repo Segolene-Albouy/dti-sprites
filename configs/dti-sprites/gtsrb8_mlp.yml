@@ -8,9 +8,6 @@ model:
   prototype:
     source: generator
     generator: mlp
-    data:
-      freeze: [False, False, False]
-      init: ["", "", ""]
   encoder_name: resnet32
   transformation_sequence: color_projective_tps
   transformation_sequence_bkg: color_projective_tps
@@ -32,7 +29,7 @@ training:
   train_stat_interval: 100
   val_stat_interval: 200
   check_cluster_interval: 25
-  seed: 41773
+  seed: 85534
   visualizer_port:
   pretrained: 
   resume: 
