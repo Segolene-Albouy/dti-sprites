@@ -104,9 +104,7 @@ class DTISprites(nn.Module):
         self.proto_source = proto_source
         if proto_args.get("data", None) is not None:
             data_args = proto_args.get("data")
-            freeze_frg, freeze_bkg, freeze_sprite = data_args.get(
-                "freeze", [0, 0, 0]
-            )
+            freeze_frg, freeze_bkg, freeze_sprite = data_args.get("freeze", [0, 0, 0])
             value_frg, value_bkg, value_mask = data_args.get("value", [0.5, 0.5, 0.5])
             std = data_args.get("gaussian_weights_std", 25)
             proto_init, bkg_init, mask_init = data_args.get(
@@ -124,11 +122,11 @@ class DTISprites(nn.Module):
                     generate_data(dataset, n_sprites, proto_init, value=value_frg)
                 )
             )
+            self.prototype_params.requires_grad = False if freeze_frg else True
             self.mask_params = nn.Parameter(
                 self.init_masks(n_sprites, mask_init, size, std, value_mask)
             )
         else:
-            std = proto_args.get("gaussian_weights_std", 5)
             if freeze_frg:
                 self.prototype_params = nn.Parameter(
                     torch.stack(
@@ -231,6 +229,7 @@ class DTISprites(nn.Module):
                         generate_data(dataset, M, init_type=bkg_init, value=value_bkg)
                     )
                 )
+                self.bkg_params.requires_grad = False if freeze_bkg else True
             else:
                 if freeze_bkg:
                     self.bkg_params = nn.Parameter(
@@ -412,7 +411,7 @@ class DTISprites(nn.Module):
     def are_sprite_frozen(self):
         return (
             True
-            if self.freeze_milestone > 0 and self.cur_epoch < self.freeze_milestone 
+            if self.freeze_milestone > 0 and self.cur_epoch < self.freeze_milestone
             else False
         )
 
@@ -544,7 +543,7 @@ class DTISprites(nn.Module):
         else:
             tsf_bkgs = None
 
-        if self.inject_noise and self.training: #  and epoch >= 500:
+        if self.inject_noise and self.training:  #  and epoch >= 500:
             noise = (
                 torch.rand(K, 1, H, W, device=x.device)[None, None, ...]
                 .expand(L, B, K, 1, H, W)
