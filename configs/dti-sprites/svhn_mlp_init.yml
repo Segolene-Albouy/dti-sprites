@@ -13,8 +13,8 @@ model:
   init_latent_linear: gaussian
   init_bkg_linear: mean
   encoder_name: resnet32
-  transformation_sequence: identity_color_projective
-  transformation_sequence_bkg: identity_color_projective
+  transformation_sequence: color_projective_tps
+  transformation_sequence_bkg: color_projective_tps
   curriculum_learning: [10, 35]
   curriculum_learning_bkg: [10, 35]
 training:
@@ -33,7 +33,7 @@ training:
   train_stat_interval: 5000
   val_stat_interval: 10000
   check_cluster_interval: 100
-  seed: 14373
+  seed: 14136
   visualizer_port:
   pretrained:
   resume:
