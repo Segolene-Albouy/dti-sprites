@@ -21,6 +21,7 @@ class _AbstractCollectionDataset(TorchDataset):
     name = NotImplementedError
     n_channels = 3
     include_recursive = False
+    output_paths = False
 
     def __init__(self, split, subset, img_size, **kwargs):
         tag = kwargs.get("tag", "")
@@ -72,6 +73,8 @@ class _AbstractCollectionDataset(TorchDataset):
             alpha = Image.new("L", (h, w), (255))
         inp = self.transform(img.convert("RGB"))
         alpha = self.transform(alpha)
+        if self.output_paths:
+            return inp, self.labels[idx], alpha, str(self.input_files[idx])
         return inp, self.labels[idx], alpha  # str(self.input_files[idx])
 
     @property
