@@ -7,16 +7,16 @@ model:
   n_backgrounds: 1
   n_objects: 1
   prototype:
-    source: data # generator
-    #generator: mlp
+    source: generator
+    generator: mlp
     data:
       freeze: [1, 0, 500]
       value: [0.1, 0.9, 0.]
-      init: ["constant", "constant", "constant"] # gauss -> constant
+      init: ["constant", "constant", "gaussian"] 
       gaussian_weights_std: 5
   encoder_name: resnet32
   transformation_sequence: identity_color_affine
-  transformation_sequence_bkg: identity_color
+  transformation_sequence_bkg: color
   curriculum_learning: [500, 500]
   curriculum_learning_bkg: False 
   shared_t: True
