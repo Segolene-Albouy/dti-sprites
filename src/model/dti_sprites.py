@@ -105,7 +105,7 @@ class DTISprites(nn.Module):
         if proto_args.get("data", None) is not None:
             data_args = proto_args.get("data")
             freeze_frg, freeze_bkg, freeze_sprite = data_args.get(
-                "freeze", [False, False, False]
+                "freeze", [0, 0, 0]
             )
             value_frg, value_bkg, value_mask = data_args.get("value", [0.5, 0.5, 0.5])
             std = data_args.get("gaussian_weights_std", 25)
@@ -161,7 +161,7 @@ class DTISprites(nn.Module):
                 color_channels,
                 latent_out_ch * self.img_size[0] * self.img_size[1],
                 kwargs.get("init_latent_linear", "random"),
-                std=std
+                std=std,
             )
 
         clamp_name = kwargs.get("use_clamp", "soft")
@@ -318,7 +318,9 @@ class DTISprites(nn.Module):
         if name == "unet":
             return UNet(1, color_channel)
         elif name == "mlp":
-            linear = init_linear(8 * latent_dim, out_channel, init, std=std, dataset=dataset)
+            linear = init_linear(
+                8 * latent_dim, out_channel, init, std=std, dataset=dataset
+            )
             model = nn.Sequential(
                 nn.Linear(latent_dim, 8 * latent_dim),
                 nn.GroupNorm(8, 8 * latent_dim),
@@ -410,7 +412,7 @@ class DTISprites(nn.Module):
     def are_sprite_frozen(self):
         return (
             True
-            if self.freeze_milestone > 0 and self.cur_epoch < self.freeze_milestone
+            if self.freeze_milestone > 0 and self.cur_epoch < self.freeze_milestone 
             else False
         )
 
@@ -436,10 +438,12 @@ class DTISprites(nn.Module):
             params.append(self.occ_predictor.parameters())
         return chain(*params)
 
-    def forward(self, x, img_masks=None):
+    def forward(self, x, img_masks=None, epoch=None):
         B, C, H, W = x.size()
         L, K, M = self.n_objects, self.n_sprites, self.n_backgrounds or 1
-        tsf_layers, tsf_masks, tsf_bkgs, occ_grid, class_prob = self.predict(x)
+        tsf_layers, tsf_masks, tsf_bkgs, occ_grid, class_prob = self.predict(
+            x, epoch=epoch
+        )
 
         if class_prob is None:
             target = self.compose(
@@ -463,7 +467,7 @@ class DTISprites(nn.Module):
 
         return loss, distances
 
-    def predict(self, x):
+    def predict(self, x, epoch=None):
         B, C, H, W = x.size()
         h, w = self.prototypes.shape[2:]
         L, K, M = self.n_objects, self.n_sprites, self.n_backgrounds or 1
@@ -540,7 +544,7 @@ class DTISprites(nn.Module):
         else:
             tsf_bkgs = None
 
-        if self.inject_noise and self.training:
+        if self.inject_noise and self.training: #  and epoch >= 500:
             noise = (
                 torch.rand(K, 1, H, W, device=x.device)[None, None, ...]
                 .expand(L, B, K, 1, H, W)

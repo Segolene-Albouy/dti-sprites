@@ -464,7 +464,7 @@ class Trainer:
                 if cur_iter > self.n_iterations:
                     break
 
-                self.single_train_batch_run(images, img_masks)
+                self.single_train_batch_run(images, img_masks, epoch=epoch)
                 if self.scheduler_update_range == "batch":
                     self.update_scheduler(epoch, batch=batch)
 
@@ -503,7 +503,7 @@ class Trainer:
                 PRINT_LR_UPD_FMT(epoch, self.n_epoches, batch, self.n_batches, lr)
             )
 
-    def single_train_batch_run(self, images, masks):
+    def single_train_batch_run(self, images, masks, epoch=None):
         start_time = time.time()
         B = images.size(0)
         self.model.train()
@@ -513,7 +513,7 @@ class Trainer:
         else:
             masks = None
         self.optimizer.zero_grad()
-        loss, distances = self.model(images, masks)
+        loss, distances = self.model(images, masks, epoch=epoch)
         loss.backward()
         self.optimizer.step()
 

@@ -72,7 +72,7 @@ class DTIKmeans(nn.Module):
         self._reassign_cluster = kwargs.get("reassign_cluster", True)
         use_gaussian_weights = kwargs.get("gaussian_weights", False)
         if use_gaussian_weights:
-            std = kwargs["loss_weights_std"]
+            std = kwargs.get("gaussian_weights_std")
             self.register_buffer(
                 "loss_weights",
                 create_gaussian_weights(dataset.img_size, dataset.n_channels, std),
