@@ -3,21 +3,22 @@ dataset:
   img_size: [32, 32]
 model:
   name: dti_sprites
-  n_sprites: 20
+  n_sprites: 10
   n_backgrounds: 1
   n_objects: 1
   prototype:
-    source: data
+    source: data # generator
+    #generator: mlp
     data:
-      freeze: [True, True, False]
+      freeze: [1, 0, 500]
       value: [0.1, 0.9, 0.]
-      init: ["constant", "constant", "gaussian"]
-      gaussian_weights_std: 16
+      init: ["constant", "constant", "constant"] # gauss -> constant
+      gaussian_weights_std: 5
   encoder_name: resnet32
-  transformation_sequence: color_affine #_morpho_tps
-  transformation_sequence_bkg: color
-  curriculum_learning: False #[200, 350, 400]
-  curriculum_learning_bkg: False #[200]
+  transformation_sequence: identity_color_affine
+  transformation_sequence_bkg: identity_color
+  curriculum_learning: [500, 500]
+  curriculum_learning_bkg: False 
   shared_t: True
 training:
   batch_size: 32
@@ -30,11 +31,11 @@ training:
   scheduler:
     name: multi_step
     gamma: 0.1
-    milestones: [650]
-  n_epoches: 800
+    milestones: [1300]
+  n_epoches: 1600
   train_stat_interval: 200
   val_stat_interval: 100
   check_cluster_interval: 100
-  seed: 131
+  seed: 52306
   n_dup: 0
   visualizer_port:
