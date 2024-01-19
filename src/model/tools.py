@@ -9,6 +9,19 @@ from torch.nn import functional as F
 from torch.utils.data.dataloader import DataLoader
 
 
+def get_bbox_from_mask(binary_masks):
+    indices_y, indices_x = torch.where(binary_masks.view(binary_masks.shape[0], -1))
+
+    x_min = indices_x.min(dim=1).values
+    y_min = indices_y.min(dim=1).values
+    x_max = indices_x.max(dim=1).values
+    y_max = indices_y.max(dim=1).values
+
+    bounding_boxes = torch.stack([x_min, y_min, x_max - x_min, y_max - y_min], dim=1)
+
+    return bounding_boxes
+
+
 def copy_with_noise(t, noise_scale=0.0001):
     return t.detach().clone() + torch.randn(t.shape, device=t.device) * noise_scale
 

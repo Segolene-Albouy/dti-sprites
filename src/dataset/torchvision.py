@@ -99,7 +99,7 @@ class _AbstractTorchvisionDataset(TorchDataset):
 
     def __getitem__(self, idx):
         img, label = self.dataset[idx]
-        return img, label + self.label_shift, []
+        return img, label + self.label_shift, [], []
 
 
 class FashionMNISTDataset(_AbstractTorchvisionDataset):
@@ -136,7 +136,7 @@ class MNISTColorDataset(MNISTDataset):
     def __getitem__(self, idx):
         img, label = self.dataset[idx]
         img = ColorAugment.apply(img, seed=idx)
-        return img, label + self.label_shift, []
+        return img, label + self.label_shift, [], []
 
 
 class SVHNDataset(_AbstractTorchvisionDataset):

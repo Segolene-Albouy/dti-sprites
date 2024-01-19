@@ -455,7 +455,7 @@ class Trainer:
 
         for epoch in range(self.start_epoch, self.n_epoches + 1):
             batch_start = self.start_batch if epoch == self.start_epoch else 1
-            for batch, (images, labels, img_masks) in enumerate(
+            for batch, (images, labels, img_masks, _) in enumerate(
                 self.train_loader, start=1
             ):
                 if batch < batch_start:
@@ -876,7 +876,7 @@ class Trainer:
     @torch.no_grad()
     def run_val(self):
         self.model.eval()
-        for images, labels, _ in self.val_loader:
+        for images, labels, _, _ in self.val_loader:
             B, C, H, W = images.shape
             images = images.to(self.device)
             loss_val, distances = self.model(images)
@@ -1153,7 +1153,7 @@ class Trainer:
         paths = []
         distances = []
         ids = []
-        for images, labels, path in train_loader:
+        for images, _, _, path in train_loader:
             images = images.to(self.device)
             dist = self.model(images)[1]
             dist_min_by_sample, argmin_idx = map(lambda t: t.cpu().numpy(), dist.min(1))
@@ -1199,7 +1199,7 @@ class Trainer:
             prt_proto_averages = {
                 k: AverageTensorMeter() for k in range(self.n_prototypes)
             }
-            for images, labels, _ in train_loader:
+            for images, _, _, _ in train_loader:
                 images = images.to(self.device)
                 dist = self.model(images)[1]
                 dist_min_by_sample, argmin_idx = map(
@@ -1305,7 +1305,7 @@ class Trainer:
                     num_workers=self.n_workers,
                     shuffle=False,
                 )
-                for images, labels, path in train_loader:
+                for images, labels, _, path in train_loader:
                     images = images.to(self.device)
                     dist = self.model(images)[1]
                     dist_min_by_sample, argmin_idx = map(
@@ -1330,7 +1330,8 @@ class Trainer:
         average_losses = {k: AverageMeter() for k in range(self.n_prototypes)}
         average_ctr_losses = {k: AverageMeter() for k in range(self.n_prototypes)}
         subset_img = [np.array([]) for k in range(self.n_prototypes)]
-        for images, labels, path in train_loader:
+        cluster_by_path = []
+        for images, _, _, path in train_loader:
             images = images.to(self.device)
             dist = self.model(images)[1]
             if self.n_backgrounds > 1:
@@ -1346,6 +1347,11 @@ class Trainer:
             argmin_idx = argmin_idx.astype(np.int32)
             distances = np.hstack([distances, dist_min_by_sample])
             cluster_idx = np.hstack([cluster_idx, argmin_idx])
+            if hasattr(train_loader.dataset, "data_path"):
+                cluster_by_path += [
+                    (os.path.relpath(p, train_loader.dataset.data_path), argmin_idx[i])
+                    for i, p in enumerate(path)
+                ]
 
             dist_max_by_sample, argmax_idx_ = map(
                 lambda t: t.cpu().numpy(), dist.max(1)
@@ -1374,6 +1380,13 @@ class Trainer:
                     else 0.0
                 )
                 average_ctr_losses[k].update(avg_ctr_clus, n_ctr_clus)
+
+        # Save cluster_by_path as csv
+        if cluster_by_path:
+            cluster_by_path = pd.DataFrame(
+                cluster_by_path, columns=["path", "cluster_id"]
+            ).set_index("path")
+            cluster_by_path.to_csv(self.run_dir / "cluster_by_path.csv")
 
         self.print_and_log_info("final_loss: {:.5}".format(float(loss.avg)))
         self.print_and_log_info(
@@ -1408,7 +1421,7 @@ class Trainer:
         for k in range(self.n_prototypes):
             path = coerce_to_path_and_create_dir(cluster_path / f"cluster{k}")
             indices = np.where(cluster_idx == k)[0]
-            top_idx = np.argsort(distances[indices])  # [:N_CLUSTER_SAMPLES]
+            top_idx = np.argsort(distances[indices])[:N_CLUSTER_SAMPLES]
             for j, idx in enumerate(top_idx):
                 inp = dataset[indices[idx]][0].unsqueeze(0).to(self.device)
                 convert_to_img(inp).save(path / f"top{j}_raw.png")
@@ -1514,9 +1527,17 @@ class Trainer:
                         other_idxs.insert(0, idx)
                     dist_min_by_sample, argmin_idx = distances.min(1)
 
-                    target = self.model.transform(
-                        images, pred_semantic_labels=True
-                    ).cpu()
+                    if self.model.return_map_out:
+                        target, bboxes, class_ids = self.model.transform(
+                            images, pred_semantic_labels=True
+                        )
+                        target = target.cpu()
+                        # TODO: print and check what are they
+                        # keep bbox + class_id string
+                    else:
+                        target = self.model.transform(
+                            images, pred_semantic_labels=True
+                        ).cpu()
                     target = target.view(
                         B, *(self.n_prototypes,) * self.n_objects, H, W
                     )
@@ -1530,6 +1551,7 @@ class Trainer:
 
             loss.update(loss_val.item(), n=images.size(0))
 
+        # TODO: Save bboxes and class_ids
         scores = scores.compute()
         self.print_and_log_info("final_loss: {:.4f}".format(float(loss.avg)))
         self.print_and_log_info(
@@ -1797,7 +1819,7 @@ class Trainer:
         loader = DataLoader(
             dataset, batch_size=self.batch_size, num_workers=self.n_workers
         )
-        for images, labels, _ in loader:
+        for images, labels, _, _ in loader:
             B = images.size(0)
             images = images.to(self.device)
             distances = self.model(images)[1]

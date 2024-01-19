@@ -18,6 +18,7 @@ from .tools import (
     create_gaussian_weights,
     get_clamp_func,
     create_mlp,
+    get_bbox_from_mask,
 )
 from ..utils.logger import print_warning
 from .u_net import UNet
@@ -42,15 +43,15 @@ def init_linear(hidden, out, init, n_channels=3, std=5, freeze_frg=False, datase
             sample = torch.cat(
                 (
                     torch.full(
-                        size=(
-                            3 * h * h,
-                        ),  # int(out / (n_channels + 1)) * n_channels,),
+                        size=(3 * h * h,),
                         fill_value=0.9,
                     ),
                     mask.flatten(),
                 ),
             )
-        nn.init.constant_(linear.weight, 0.0001)
+        nn.init.constant_(
+            linear.weight, 1e-10
+        )  # a small value to avoid vanishing grads
         sample = torch.log(sample / (1 - sample))
         linear.bias.data.copy_(sample)
         return linear
@@ -92,6 +93,7 @@ class DTISprites(nn.Module):
 
         # Prototypes & masks
         size = kwargs.get("sprite_size", img_size)
+        self.return_map_out = kwargs.get("return_map_out", False)
         color_channels = kwargs.get("color_channels", 3)
         self.color_channels = color_channels
         self.add_empty_sprite = kwargs.get("add_empty_sprite", False)
@@ -124,7 +126,7 @@ class DTISprites(nn.Module):
             )
             self.prototype_params.requires_grad = False if freeze_frg else True
             self.mask_params = nn.Parameter(
-                self.init_masks(n_sprites, mask_init, size, std, value_mask)
+                self.init_masks(n_sprites, mask_init, size, std, value_mask, dataset)
             )
         else:
             if freeze_frg:
@@ -297,7 +299,7 @@ class DTISprites(nn.Module):
         self.inject_noise = kwargs.get("inject_noise", 0)
 
     @staticmethod
-    def init_masks(K, mask_init, size, std, value):
+    def init_masks(K, mask_init, size, std, value, dataset):
         if mask_init == "constant":
             masks = torch.full((K, 1, *size), value)
         elif mask_init == "gaussian":
@@ -306,8 +308,14 @@ class DTISprites(nn.Module):
             masks = mask.unsqueeze(0).expand(K, -1, -1, -1)
         elif mask_init == "random":
             masks = torch.rand(K, *size)
+        elif mask_init == "sample":
+            assert dataset
+            masks = torch.stack(
+                generate_data(dataset, K, init_type=mask_init, value=value)
+            )
+            assert masks.shape[1] == 1
         else:
-            raise NotImplementedError(f"unkwon mask_init: {mask_init}")
+            raise NotImplementedError(f"unknown mask_init: {mask_init}")
         return masks
 
     @staticmethod
@@ -319,7 +327,7 @@ class DTISprites(nn.Module):
         elif name == "mlp":
             linear = init_linear(
                 8 * latent_dim, out_channel, init, std=std, dataset=dataset
-            )
+            )  # freeze_frg = False by default
             model = nn.Sequential(
                 nn.Linear(latent_dim, 8 * latent_dim),
                 nn.GroupNorm(8, 8 * latent_dim),
@@ -750,7 +758,13 @@ class DTISprites(nn.Module):
                 true_occ_grid,
                 class_prob=class_oh,
             ).squeeze(1)
-            return target.clamp(0, self.n_sprites).long()
+            if self.return_map_out:
+                binary_masks = (tsf_masks > 0.5).long()
+                bboxes = get_bbox_from_mask(binary_masks)
+                class_ids = class_oh
+                return target.clamp(0, self.n_sprites).long(), bboxes, class_ids
+            else:
+                return target.clamp(0, self.n_sprites).long()
 
         elif pred_instance_labels:
             label_layers = (
@@ -858,11 +872,13 @@ class DTISprites(nn.Module):
             )
             params = [self.latent_params]
         else:
-            self.prototype_params[i].data.copy_(
-                copy_with_noise(self.prototype_params[j], NOISE_SCALE)
-            )
             self.mask_params[i].data.copy_(self.mask_params[j].detach().clone())
-            params = [self.mask_params, self.prototype_params]
+            params = [self.mask_params]
+            if not self.freeze_frg:
+                self.prototype_params[i].data.copy_(
+                    copy_with_noise(self.prototype_params[j], NOISE_SCALE)
+                )
+                params.extend([self.prototype_params])
         [
             tsf.restart_branch_from(i, j, noise_scale=0)
             for tsf in self.sprite_transformers

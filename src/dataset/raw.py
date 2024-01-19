@@ -72,7 +72,7 @@ class _AbstractCollectionDataset(TorchDataset):
             alpha = Image.new("L", (h, w), (255))
         inp = self.transform(img.convert("RGB"))
         alpha = self.transform(alpha)
-        return inp, self.labels[idx], alpha  # str(self.input_files[idx])
+        return inp, self.labels[idx], alpha, str(self.input_files[idx])
 
     @property
     @lru_cache()

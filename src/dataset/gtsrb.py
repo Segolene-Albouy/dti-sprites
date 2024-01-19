@@ -45,7 +45,7 @@ class GTSRB8Dataset(TorchDataset):
 
     def __getitem__(self, idx):
         inp = self.transform(Image.open(self.input_files[idx]).convert("RGB"))
-        return inp, self.labels[idx], []
+        return inp, self.labels[idx], [], []
 
     @property
     @lru_cache()
