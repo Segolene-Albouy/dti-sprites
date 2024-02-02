@@ -4,10 +4,11 @@ from PIL import Image
 
 import numpy as np
 from torch.utils.data.dataset import Dataset as TorchDataset
-from torchvision.transforms import ToTensor, Compose
+from torchvision.transforms import ToTensor, Compose, Resize
 
 from ..utils import coerce_to_path_and_check_exist, use_seed
 from ..utils.path import DATASETS_PATH
+import os
 
 
 class _AbstractMultiObjectDataset(TorchDataset):
@@ -25,6 +26,7 @@ class _AbstractMultiObjectDataset(TorchDataset):
         self.split = split
         self.eval_mode = kwargs.get("eval_mode", False) or split == "test"
         self.eval_semantic = kwargs.get("eval_semantic", False)
+        self.eval_qualitative = kwargs.get("eval_qualitative", False)
 
         if self.eval_mode:
             self.size = 320
@@ -51,13 +53,16 @@ class _AbstractMultiObjectDataset(TorchDataset):
                 * 255
             ).long()
         else:
-            label = (
-                self.transform_gt(
-                    Image.open(path / "masks" / f"{idx}.png").convert("L")
-                )
-                * 255
-            ).long()
-        return inp, label
+            if os.path.exists(path / "masks"):
+                label = (
+                    self.transform_gt(
+                        Image.open(path / "masks" / f"{idx}.png").convert("L")
+                    )
+                    * 255
+                ).long()
+            else:
+                label = -1
+        return inp, label, [], []
 
     @property
     @lru_cache()
@@ -92,7 +97,56 @@ class TetrominoesDataset(_AbstractMultiObjectDataset):
 
 
 class FleuronsCompDataset(_AbstractMultiObjectDataset):
-    name = "fleurons_compounds"
-    img_size = (256, 256)
+    name = "fleuron_compounds"
+    img_size = (64, 64)
     N = 100
-    n_classes = 73  # sprites + bkg
+    n_classes = 72  # sprites
+    pred_class = True
+
+    def __init__(self, split, subset, **kwargs):
+        super().__init__(split, subset, **kwargs)
+        path = self.data_path
+        self.files = os.listdir(str(path) + "/images_512")
+        self.seg_eval = kwargs.get("seg_eval", True)
+        self.instance_eval = kwargs.get("instance_eval", True)
+        self.tr = self.transform()
+        if self.split == "val":
+            self.size = 0
+
+    def __getitem__(self, idx):
+        inp = self.tr(
+            Image.open(self.data_path / "images_512" / self.files[idx]).convert("RGB")
+        )
+        return inp, -1, [], []
+
+    def transform(self):
+        transform = [Resize(self.img_size), ToTensor()]
+        return Compose(transform)
+
+
+class FleuronsCompSyntDataset(_AbstractMultiObjectDataset):
+    name = "fleuron_compounds_synt"
+    img_size = (128, 128)
+    N = 50436
+    n_classes = 72  # sprites
+    pred_class = True
+
+    def __init__(self, split, subset, **kwargs):
+        super().__init__(split, subset, **kwargs)
+        path = self.data_path
+        self.files = os.listdir(str(path) + "/img")
+        self.seg_eval = kwargs.get("seg_eval", True)
+        self.instance_eval = kwargs.get("instance_eval", True)
+        self.tr = self.transform()
+        if self.split == "val":
+            self.size = 0
+
+    def __getitem__(self, idx):
+        inp = self.tr(
+            Image.open(self.data_path / "img" / self.files[idx]).convert("RGB")
+        )
+        return inp, -1, [], []
+
+    def transform(self):
+        transform = [Resize(self.img_size), ToTensor()]
+        return Compose(transform)

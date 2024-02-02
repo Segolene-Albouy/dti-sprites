@@ -16,6 +16,7 @@ def get_dataset(dataset_name):
         TetrominoesDataset,
         CLEVR6Dataset,
         FleuronsCompDataset,
+        FleuronsCompSyntDataset,
     )
     from .instagram import InstagramDataset
     from .torchvision import (
@@ -40,7 +41,8 @@ def get_dataset(dataset_name):
         "clevr6": CLEVR6Dataset,
         "dsprites_gray": DSpritesGrayDataset,
         "tetrominoes": TetrominoesDataset,
-        "fleurons_compounds": FleuronsCompDataset,
+        "fleuron_compounds": FleuronsCompDataset,
+        "fleuron_compounds_synt": FleuronsCompSyntDataset,
         # Torchvision
         "fashion_mnist": FashionMNISTDataset,
         "mnist": MNISTDataset,
