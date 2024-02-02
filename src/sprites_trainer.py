@@ -267,7 +267,7 @@ class Trainer:
         # Train metrics
         metric_names = ["time/img", "loss"]
         metric_names += [f"prop_clus{i}" for i in range(self.n_clusters)]
-        metric_names += [f"loss_clus{i}" for i in range(self.n_prototypes)]
+        # metric_names += [f"loss_clus{i}" for i in range(self.n_prototypes)]
         train_iter_interval = cfg["training"]["train_stat_interval"]
         self.train_stat_interval = train_iter_interval
         self.train_metrics = Metrics(*metric_names)
@@ -452,7 +452,6 @@ class Trainer:
             subset = self.evaluate()
             self.print_and_log_info("Training run is over")
             return subset
-
         for epoch in range(self.start_epoch, self.n_epoches + 1):
             batch_start = self.start_batch if epoch == self.start_epoch else 1
             for batch, (images, labels, img_masks, _) in enumerate(
@@ -541,7 +540,7 @@ class Trainer:
                     if n_clus
                     else 0.0
                 )
-                average_losses[k] = avg_clus
+                # average_losses[k] = avg_clus
 
         self.train_metrics.update(
             {
@@ -552,9 +551,9 @@ class Trainer:
         self.train_metrics.update(
             {f"prop_clus{i}": p.item() for i, p in enumerate(proportions)}
         )
-        self.train_metrics.update(
-            {f"loss_clus{i}": average_losses[i] for i in range(self.n_prototypes)}
-        )
+        # self.train_metrics.update(
+        #    {f"loss_clus{i}": average_losses[i] for i in range(self.n_prototypes)}
+        # )
 
     @torch.no_grad()
     def log_images(self, cur_iter):
@@ -799,7 +798,7 @@ class Trainer:
         self.train_metrics.reset(
             *(
                 ["time/img", "loss"]
-                + [f"loss_clus{i}" for i in range(self.n_prototypes)]
+                # + [f"loss_clus{i}" for i in range(self.n_prototypes)]
             )
         )
 
@@ -1015,7 +1014,7 @@ class Trainer:
         self.save_transformed_images()
 
         # Train metrics
-        df_train = pd.read_csv(self.train_metrics_path, sep="\t", index_col=0)
+        df_train = pd.read_csv(self.train_metrics_path, sep="\t", index_col=False)  # 0)
         df_val = pd.read_csv(self.val_metrics_path, sep="\t", index_col=0)
         df_scores = pd.read_csv(self.val_scores_path, sep="\t", index_col=0)
         if len(df_train) == 0:
@@ -1124,12 +1123,17 @@ class Trainer:
         if empty_label:
             if recluster:
                 return self.distance_eval()
-            subset = self.qualitative_eval()
+            if self.seg_eval:
+                self.segmentation_qualitative_eval()
+            else:
+                subset = self.qualitative_eval()
         elif self.seg_eval or self.instance_eval:
             if (self.seg_eval and self.learn_masks) or self.eval_semantic:
                 self.segmentation_quantitative_eval()
                 self.segmentation_qualitative_eval()
-            if self.instance_eval and self.learn_masks:
+            elif (
+                self.instance_eval and self.learn_masks
+            ):  # NOTE: evaluate either semantic or instance
                 self.instance_seg_quantitative_eval()
                 self.instance_seg_qualitative_eval()
         else:
@@ -1527,17 +1531,9 @@ class Trainer:
                         other_idxs.insert(0, idx)
                     dist_min_by_sample, argmin_idx = distances.min(1)
 
-                    if self.model.return_map_out:
-                        target, bboxes, class_ids = self.model.transform(
-                            images, pred_semantic_labels=True
-                        )
-                        target = target.cpu()
-                        # TODO: print and check what are they
-                        # keep bbox + class_id string
-                    else:
-                        target = self.model.transform(
-                            images, pred_semantic_labels=True
-                        ).cpu()
+                    target = self.model.transform(
+                        images, pred_semantic_labels=True
+                    ).cpu()
                     target = target.view(
                         B, *(self.n_prototypes,) * self.n_objects, H, W
                     )
@@ -1551,7 +1547,6 @@ class Trainer:
 
             loss.update(loss_val.item(), n=images.size(0))
 
-        # TODO: Save bboxes and class_ids
         scores = scores.compute()
         self.print_and_log_info("final_loss: {:.4f}".format(float(loss.avg)))
         self.print_and_log_info(
@@ -1584,13 +1579,22 @@ class Trainer:
 
         iterator = iter(train_loader)
         for j in range(N):
-            images, labels = iterator.next()
+            images, labels, _, _ = iterator.next()
             images = images.to(self.device)
             if self.pred_class:
                 recons = self.model.transform(images, hard_occ_grid=True).cpu()
-                infer_seg = self.model.transform(
-                    images, pred_semantic_labels=True
-                ).cpu()
+                if self.model.return_map_out:
+                    (infer_seg, bboxes, class_ids) = self.model.transform(
+                        images, pred_semantic_labels=True
+                    )
+                    infer_seg = infer_seg.cpu()
+                    # TODO: print and check what are they
+                    # keep bbox + class_id string
+                else:
+                    infer_seg = self.model.transform(
+                        images, pred_semantic_labels=True
+                    ).cpu()
+
             else:
                 distances = self.model(images)[1].view(
                     B, *(self.n_prototypes,) * self.n_objects
