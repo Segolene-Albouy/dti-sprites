@@ -25,8 +25,8 @@ class PrototypeTransformationNetwork(nn.Module):
         super().__init__()
         self.n_prototypes = n_prototypes
         self.sequence_name = transformation_sequence
-        # if self.sequence_name in ["id", "identity"]:
-        #    return None
+        if self.sequence_name in ["id", "identity"]:
+            return None
 
         encoder = kwargs.get("encoder", None)
         if encoder is not None:
@@ -69,7 +69,7 @@ class PrototypeTransformationNetwork(nn.Module):
             )
 
     def get_parameters(self):
-        if self.shared_enc:
+        if not self.is_identity and self.shared_enc:
             return self.tsf_sequences.parameters()
         return self.parameters()
 
