@@ -3,7 +3,7 @@ dataset:
   img_size: 256
 model:
   name: dti_sprites
-  n_sprites: 36
+  n_sprites: 14 #36
   n_backgrounds: 1
   prototype:
     source: data
@@ -33,5 +33,5 @@ training:
   train_stat_interval: 50
   val_stat_interval: 100
   check_cluster_interval: 100
-  seed: 70620
+  seed: 26999
   visualizer_port:
