@@ -96,3 +96,7 @@ class GenericDataset(_AbstractCollectionDataset):
 
 class LettersDataset(_AbstractCollectionDataset):
     name = "Lettre_e"
+
+
+class CoADataset(_AbstractCollectionDataset):
+    name = "coa"
