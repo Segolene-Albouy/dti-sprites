@@ -11,14 +11,11 @@ model:
   inject_noise: 0 
   prototype:
     source: data # or generator
-    generator: unet # or mlp
+    generator: mlp
     data:
       init: [constant, constant, gaussian] # initializations of fg, bkg, mask in pixels space
       gaussian_weights_std: 25
       freeze: [True, False, False] # to freeze fg, bkg, mask
-      freeze_milestone: 0 # when to freeze
-    proba: False # or linear, network
-    shared_latent: False # shared latent for proba and generator
   encoder_name: resnet32
   transformation_sequence: color_affine_morpho_tps
   transformation_sequence_bkg: color_affine
