@@ -9,8 +9,6 @@ from ..utils import coerce_to_path_and_check_exist, get_files_from_dir
 from ..utils.image import IMG_EXTENSIONS
 from ..utils.path import DATASETS_PATH
 from pathlib import Path
-import numpy as np
-import torch
 
 
 class _AbstractCollectionDataset(TorchDataset):
@@ -55,11 +53,6 @@ class _AbstractCollectionDataset(TorchDataset):
             self.img_size = img_size
             self.crop = False
 
-        # if self.size > 0:
-        #    sample_size = Image.open(self.input_files[0]).size
-        #    if min(self.img_size) > min(sample_size):
-        #        raise ValueError("img_size too big compared to a sampled image size, adjust it or upscale dataset")
-
     def __len__(self):
         return self.size
 
@@ -96,3 +89,7 @@ class GenericDataset(_AbstractCollectionDataset):
 
 class LettersDataset(_AbstractCollectionDataset):
     name = "Lettre_e"
+
+
+class CoADataset(_AbstractCollectionDataset):
+    name = "coa_marion"

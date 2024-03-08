@@ -21,7 +21,7 @@ class _AbstractMultiObjectDataset(TorchDataset):
     N = NotImplementedError
     instance_eval = True
 
-    def __init__(self, split, subset, **kwargs):
+    def __init__(self, split, **kwargs):
         self.data_path = coerce_to_path_and_check_exist(self.root / self.name)
         self.split = split
         self.eval_mode = kwargs.get("eval_mode", False) or split == "test"
@@ -62,7 +62,7 @@ class _AbstractMultiObjectDataset(TorchDataset):
                 ).long()
             else:
                 label = -1
-        return inp, label, [], []
+        return inp, label, [], self.data_path / "images" / f"{idx}.png"
 
     @property
     @lru_cache()
@@ -100,41 +100,43 @@ class FleuronsCompDataset(_AbstractMultiObjectDataset):
     name = "fleuron_compounds"
     img_size = (64, 64)
     N = 100
-    n_classes = 72  # sprites
+    n_classes = 72
     pred_class = True
 
-    def __init__(self, split, subset, **kwargs):
-        super().__init__(split, subset, **kwargs)
-        path = self.data_path
-        self.files = os.listdir(str(path) + "/images_512")
+    def __init__(self, split, **kwargs):
+        super().__init__(split, **kwargs)
+        self.data_path = coerce_to_path_and_check_exist(self.root / self.name)
+        self.input_files = os.listdir(str(self.data_path) + "/images_512")
         self.seg_eval = kwargs.get("seg_eval", True)
         self.instance_eval = kwargs.get("instance_eval", True)
-        self.tr = self.transform()
         if self.split == "val":
-            self.size = 0
+            raise ValueError
 
     def __getitem__(self, idx):
-        inp = self.tr(
-            Image.open(self.data_path / "images_512" / self.files[idx]).convert("RGB")
+        inp = self.transform(
+            Image.open(self.data_path / "images_512" / self.input_files[idx]).convert(
+                "RGB"
+            )
         )
-        return inp, -1, [], []
+        return inp, -1, [], str(self.input_files[idx])
 
+    @property
+    @lru_cache()
     def transform(self):
-        transform = [Resize(self.img_size), ToTensor()]
-        return Compose(transform)
+        return Compose([Resize(self.img_size), ToTensor()])
 
 
 class FleuronsCompSyntDataset(_AbstractMultiObjectDataset):
     name = "fleuron_compounds_synt"
     img_size = (128, 128)
     N = 50436
-    n_classes = 72  # sprites
+    n_classes = 72
     pred_class = True
 
-    def __init__(self, split, subset, **kwargs):
-        super().__init__(split, subset, **kwargs)
-        path = self.data_path
-        self.files = os.listdir(str(path) + "/img")
+    def __init__(self, split, **kwargs):
+        super().__init__(split, **kwargs)
+        self.data_path = coerce_to_path_and_check_exist(self.root / self.name)
+        self.input_files = os.listdir(str(self.data_path) + "/img")
         self.seg_eval = kwargs.get("seg_eval", True)
         self.instance_eval = kwargs.get("instance_eval", True)
         self.tr = self.transform()
@@ -143,10 +145,11 @@ class FleuronsCompSyntDataset(_AbstractMultiObjectDataset):
 
     def __getitem__(self, idx):
         inp = self.tr(
-            Image.open(self.data_path / "img" / self.files[idx]).convert("RGB")
+            Image.open(self.data_path / "img" / self.input_files[idx]).convert("RGB")
         )
-        return inp, -1, [], []
+        return inp, -1, [], str(self.input_files[idx])
 
+    @property
+    @lru_cache()
     def transform(self):
-        transform = [Resize(self.img_size), ToTensor()]
-        return Compose(transform)
+        return Compose([Resize(self.img_size), ToTensor()])
