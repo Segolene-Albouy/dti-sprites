@@ -9,8 +9,6 @@ from ..utils import coerce_to_path_and_check_exist, get_files_from_dir
 from ..utils.image import IMG_EXTENSIONS
 from ..utils.path import DATASETS_PATH
 from pathlib import Path
-import numpy as np
-import torch
 
 
 class _AbstractCollectionDataset(TorchDataset):
