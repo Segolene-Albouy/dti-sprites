@@ -512,7 +512,7 @@ class DTISprites(nn.Module):
                 masks = out.reshape(-1, 1, self.sprite_size[0], self.sprite_size[1])
             else:
                 prototypes = out[
-                    :, : self.color_channels * self.prite_size[0] * self.sprite_size[1]
+                        :, : self.color_channels * self.sprite_size[0] * self.sprite_size[1]
                 ].reshape(
                     -1, self.color_channels, self.sprite_size[0], self.sprite_size[1]
                 )
@@ -901,7 +901,7 @@ class DTISprites(nn.Module):
             if proportions[i] < threshold:
                 self.restart_branch_from(i, idx)
                 reassigned.append(i)
-                break  # if one cluster is split, stop reassigning
+                # break  # if one cluster is split, stop reassigning
         if len(reassigned) > 0:
             self.restart_branch_from(idx, idx)
 

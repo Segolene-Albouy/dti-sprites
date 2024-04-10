@@ -1,22 +1,23 @@
 dataset:
-  name: gtsrb8
+  name: svhn
 model:
   name: dti_sprites
-  n_sprites: 8
+  n_sprites: 10
   n_backgrounds: 1
+  n_objects: 1
   inject_noise: 0.4
   prototype:
     source: data
     data:
       freeze: [False, False, False]
       init: ["constant", "mean", "gaussian"]
-      value: [0.9, 0., 0.]
-      gaussian_weights_std: 5
+      value: [0.9, 0, 0]
+      gaussian_weights_std: 8
   encoder_name: resnet32
   transformation_sequence: color_projective_tps
   transformation_sequence_bkg: color_projective_tps
-  curriculum_learning: [100, 350]
-  curriculum_learning_bkg: [100, 350]
+  curriculum_learning: [10, 35]
+  curriculum_learning_bkg: [10, 35]
 training:
   batch_size: 128
   n_workers: 4
@@ -29,12 +30,12 @@ training:
   scheduler:
     name: multi_step
     gamma: 0.1
-    milestones: [600]
-  n_epoches: 700
-  train_stat_interval: 1000
-  val_stat_interval: 2000
-  check_cluster_interval: 25
-  seed: 72928
+    milestones: [50]
+  n_epoches: 55
+  train_stat_interval: 400
+  val_stat_interval: 800
+  check_cluster_interval: 100
+  seed: 27303
   visualizer_port:
-  pretrained: 
-  resume: 
+  pretrained:
+  resume:

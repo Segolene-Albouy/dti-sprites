@@ -22,19 +22,18 @@ training:
   n_workers: 4
   optimizer:
     name: adam
-    lr: 5.0e-4
+    lr: 5.e-4
     transformer:
-      lr: 5.0e-3
       weight_decay: 1.0e-6
   scheduler:
     name: multi_step
     gamma: 0.1
     milestones: [600]
   n_epoches: 700
-  train_stat_interval: 1000
-  val_stat_interval: 2000
+  train_stat_interval: 100
+  val_stat_interval: 200
   check_cluster_interval: 25
-  seed: 72928
+  seed: 20395
   visualizer_port:
   pretrained: 
   resume: 

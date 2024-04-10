@@ -23,7 +23,7 @@ training:
   n_workers: 4
   optimizer:
     name: adam
-    lr: 1.0e-3
+    lr: 1.0e-2
     transformer:
       weight_decay: 1.0e-6
   scheduler:
@@ -34,7 +34,7 @@ training:
   train_stat_interval: 10000
   val_stat_interval: 10000
   check_cluster_interval: 100
-  seed: 82444
+  seed: 85313
   visualizer_port:
   pretrained:
   resume:

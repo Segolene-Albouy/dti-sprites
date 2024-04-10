@@ -481,7 +481,7 @@ class Trainer:
                         self.run_val()
                         self.log_val_metrics(cur_iter, epoch, batch)
                     self.save(epoch=epoch, batch=batch)
-                    self.log_images(cur_iter)
+                    #self.log_images(cur_iter)
 
             self.model.step()
             if self.scheduler_update_range == "epoch" and batch_start == 1:
@@ -1005,6 +1005,7 @@ class Trainer:
         self.model.eval()
         # Prototypes & transformation predictions
         size = MAX_GIF_SIZE if MAX_GIF_SIZE < max(self.img_size) else self.img_size
+        """
         self.save_prototypes()
         if self.learn_masks:
             self.save_masked_prototypes()
@@ -1012,7 +1013,7 @@ class Trainer:
         if self.learn_backgrounds:
             self.save_backgrounds()
         self.save_transformed_images()
-
+        """
         # Train metrics
         df_train = pd.read_csv(self.train_metrics_path, sep="\t", index_col=False)  # 0)
         df_val = pd.read_csv(self.val_metrics_path, sep="\t", index_col=0)
@@ -1056,6 +1057,7 @@ class Trainer:
                 )
                 fig.savefig(self.run_dir / "scores_by_cls.pdf")
 
+        """
         # Save gifs for prototypes
         for k in range(self.n_prototypes):
             save_gif(self.prototypes_path / f"proto{k}", f"prototype{k}.gif", size=size)
@@ -1113,7 +1115,7 @@ class Trainer:
                     shutil.rmtree(
                         str(self.transformation_path / f"img{i}" / f"bkg_tsf{k}")
                     )
-
+        """
         self.print_and_log_info("Metrics and plots saved")
 
     def evaluate(self, recluster=False):

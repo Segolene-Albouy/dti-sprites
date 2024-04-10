@@ -6,8 +6,7 @@ model:
   n_backgrounds: 1
   n_objects: 1
   prototype:
-    source: generator
-    generator: mlp
+    source: data
     data:
       freeze: [False, True, False]
       init: ["random", "constant", "random"]

@@ -20,7 +20,7 @@ model:
     source: generator
     generator: mlp
     data:
-      freeze: [1, 1, 30]
+      freeze: [1, 1, 40]
       init: ["constant", "constant", "gaussian"]
       value: [0., 0.9, 0.]
       gaussian_weights_std: 5
@@ -42,13 +42,13 @@ training:
   scheduler:
     name: multi_step
     gamma: [1, 0.1]
-    milestones: [31, 31] #[20, 25]
-  n_epoches: 30 
+    milestones: [50, 55]
+  n_epoches: 60 
   train_stat_interval: 500
   val_stat_interval: 500
-  check_cluster_interval: 50
+  check_cluster_interval: 500
   eval_with_bkg: True
   seed: 65176
   visualizer_port:
   pretrained: 
-  resume: 
+  resume: '0202_synt_local_0' 

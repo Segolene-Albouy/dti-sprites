@@ -20,33 +20,31 @@ model:
     source: generator
     generator: mlp
     data:
-      freeze: [1, 1, 10]
+      freeze: [1, 1, 30]
       init: ["constant", "constant", "gaussian"]
       value: [0., 0.9, 0.]
-      gaussian_weights_std: 5
+      gaussian_weights_std: 16
   init_latent_linear: gaussian
   sprite_size: [32, 32]
   pred_occlusion: False
   estimate_minimum: True
   greedy_algo_iter: 1
+  add_empty_sprite: True
+  lambda_empty_sprite: 1.0e-4
 training:
   batch_size: 32
   n_workers: 8
   optimizer:
     name: adam
-    lr: 1.0e-4
+    lr: 1.0e-3
     transformer:
       weight_decay: 1.0e-6
-  scheduler:
-    name: multi_step
-    gamma: [1, 0.1]
-    milestones: [20, 25]
   n_epoches: 30 
   train_stat_interval: 500
-  val_stat_interval: 100
-  check_cluster_interval: 1000
+  val_stat_interval: 500
+  check_cluster_interval: 50
   eval_with_bkg: True
-  seed: 65176
+  seed: 6259
   visualizer_port:
   pretrained: 
   resume: 

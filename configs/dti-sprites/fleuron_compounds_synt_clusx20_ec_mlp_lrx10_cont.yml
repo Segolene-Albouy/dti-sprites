@@ -29,24 +29,27 @@ model:
   pred_occlusion: False
   estimate_minimum: True
   greedy_algo_iter: 1
+  add_empty_sprite: True
+  lambda_empty_sprite: 1.0e-4
+  empty_cluster_threshold: 0.001
 training:
   batch_size: 32
   n_workers: 8
   optimizer:
     name: adam
-    lr: 1.0e-4
+    lr: 1.0e-3
     transformer:
       weight_decay: 1.0e-6
   scheduler:
     name: multi_step
     gamma: [1, 0.1]
-    milestones: [20, 25]
-  n_epoches: 30 
-  train_stat_interval: 500
-  val_stat_interval: 100
+    milestones: [30, 40]
+  n_epoches: 50 
+  train_stat_interval: 1000
+  val_stat_interval: 500
   check_cluster_interval: 1000
   eval_with_bkg: True
-  seed: 65176
+  seed: 77039
   visualizer_port:
   pretrained: 
-  resume: 
+  resume: "synt_pretrain"
