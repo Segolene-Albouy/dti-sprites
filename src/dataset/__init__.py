@@ -1,4 +1,4 @@
-from .raw import LettersDataset, GenericDataset
+from .raw import LettersDataset, GenericDataset, CoADataset
 
 
 def get_dataset(dataset_name):
@@ -10,7 +10,6 @@ def get_dataset(dataset_name):
     from .affnist import AffNISTTestDataset
     from .fleurons import FleuronsDataset
     from .hdf5 import FRGCDataset
-    from .coa import CoADataset
     from .multi_object import (
         DSpritesGrayDataset,
         TetrominoesDataset,
@@ -27,6 +26,7 @@ def get_dataset(dataset_name):
         MNISTColorDataset,
         MNIST1kDataset,
         USPSDataset,
+        CoADataset,
     )
 
     return {
@@ -63,12 +63,3 @@ def get_dataset(dataset_name):
         # Generic
         "generic": GenericDataset,
     }[dataset_name]
-
-
-def get_subset(dataset_name):
-    from .fleurons import FleuronsDataset
-
-    if dataset_name == "fleurons":
-        return FleuronsDataset
-    else:
-        raise NotImplementedError()

@@ -37,7 +37,7 @@ class _AbstractHDF5Dataset(TorchDataset):
     label_shift = -1
     transposed = False
 
-    def __init__(self, split, subset, **kwargs):
+    def __init__(self, split, **kwargs):
         self.data_path = coerce_to_path_and_check_exist(
             self.root / self.name / HDF5_FILE
         )
@@ -71,7 +71,13 @@ class _AbstractHDF5Dataset(TorchDataset):
         return self.size
 
     def __getitem__(self, idx):
-        return self.transform(self.data[idx]), self.labels[idx] + self.label_shift, []
+        # Return the idx instead of filename for hdf5 format
+        return (
+            self.transform(self.data[idx]),
+            self.labels[idx] + self.label_shift,
+            [],
+            str(idx),
+        )
 
     @property
     @lru_cache()
