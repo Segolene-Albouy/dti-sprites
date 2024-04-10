@@ -1370,7 +1370,7 @@ class Trainer:
     def instance_seg_quantitative_eval(self):
         """Run and save quantitative evaluation for instance segmentation"""
         dataset = get_dataset(self.dataset_name)(
-            "train", eval_mode=True, subset=None, **self.dataset_kwargs
+            "train", eval_mode=True, **self.dataset_kwargs
         )
         if 320 % self.batch_size == 0:
             N, B = 320 // self.batch_size, self.batch_size
@@ -1545,7 +1545,7 @@ class Trainer:
             f.write("loss\t" + "\t".join(scores.names) + "\n")
 
         dataset = get_dataset(self.dataset_name)(
-            "train", subset=None, eval_mode=True, **self.dataset_kwargs
+            "train", eval_mode=True, **self.dataset_kwargs
         )
         loader = DataLoader(
             dataset, batch_size=self.batch_size, num_workers=self.n_workers
