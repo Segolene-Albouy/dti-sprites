@@ -17,7 +17,7 @@ class GTSRB8Dataset(TorchDataset):
     n_classes = 8
     img_size = (28, 28)
 
-    def __init__(self, split, subset, **kwargs):
+    def __init__(self, split, **kwargs):
         self.data_path = coerce_to_path_and_check_exist(self.root / "GTSRB")
         self.split = split
         input_files = get_files_from_dir(
@@ -45,7 +45,7 @@ class GTSRB8Dataset(TorchDataset):
 
     def __getitem__(self, idx):
         inp = self.transform(Image.open(self.input_files[idx]).convert("RGB"))
-        return inp, self.labels[idx], []
+        return inp, self.labels[idx], [], str(self.input_files[idx])
 
     @property
     @lru_cache()

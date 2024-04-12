@@ -36,7 +36,7 @@ class InstagramDataset(TorchDataset):
 
     def __getitem__(self, idx):
         inp = self.transform(Image.open(self.input_files[idx]).convert("RGB"))
-        return inp, self.labels[idx]
+        return inp, self.labels[idx], [], str(self.input_files[idx])
 
     @property
     @lru_cache()

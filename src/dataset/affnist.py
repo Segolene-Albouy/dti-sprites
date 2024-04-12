@@ -17,7 +17,7 @@ class AffNISTTestDataset(TorchDataset):
     img_size = (40, 40)
     n_val = 1000
 
-    def __init__(self, split, subset, **kwargs):
+    def __init__(self, split, **kwargs):
         self.data_path = coerce_to_path_and_check_exist(self.root / "affNIST_test.mat")
         self.split = split
         data, labels = self.load_mat(self.data_path)
@@ -44,7 +44,13 @@ class AffNISTTestDataset(TorchDataset):
         return self.size
 
     def __getitem__(self, idx):
-        return self.transform(self.data[idx]), self.labels[idx], []
+        # Return idx as identifier instead of filename for mat format
+        return (
+            self.transform(self.data[idx]),
+            self.labels[idx],
+            [],
+            str(idx),
+        )
 
     @property
     @lru_cache()

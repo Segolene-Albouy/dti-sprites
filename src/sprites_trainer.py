@@ -17,7 +17,7 @@ try:
 except ModuleNotFoundError:
     pass
 
-from .dataset import get_dataset, get_subset
+from .dataset import get_dataset
 from .model import get_model
 from .model.tools import count_parameters, safe_model_state_dict
 from .optimizer import get_optimizer
@@ -68,9 +68,7 @@ class Trainer:
     """Pipeline to train a NN model using a certain dataset, both specified by an YML config."""
 
     @use_seed()
-    def __init__(
-        self, config_path, run_dir, subset=None, parent_model=None, recluster=False
-    ):
+    def __init__(self, config_path, run_dir):
         self.config_path = coerce_to_path_and_check_exist(config_path)
         self.run_dir = coerce_to_path_and_create_dir(run_dir)
         self.logger = get_logger(self.run_dir, name="trainer")
@@ -100,14 +98,9 @@ class Trainer:
         # Datasets and dataloaders
         self.dataset_kwargs = cfg["dataset"]
         self.dataset_name = self.dataset_kwargs.pop("name")
-        if not isinstance(subset, type(None)):
-            train_dataset = get_subset(self.dataset_name)(
-                "train", subset, **self.dataset_kwargs
-            )
-        else:
-            train_dataset = get_dataset(self.dataset_name)(
-                "train", None, **self.dataset_kwargs
-            )
+        train_dataset = get_dataset(self.dataset_name)(
+            "train", None, **self.dataset_kwargs
+        )
         val_dataset = get_dataset(self.dataset_name)("val", None, **self.dataset_kwargs)
 
         self.n_classes = train_dataset.n_classes
@@ -239,35 +232,14 @@ class Trainer:
         if checkpoint_path is not None:
             self.load_from_tag(checkpoint_path)
         elif checkpoint_path_resume is not None:
-            if recluster:
-                self.load_from_tag(self.run_dir, resume=True)
-            else:
-                self.load_from_tag(checkpoint_path_resume, resume=True)
+            self.load_from_tag(checkpoint_path_resume, resume=True)
         else:
             self.start_epoch, self.start_batch = 1, 1
 
-        self.parent_model = None
-        if not isinstance(subset, type(None)):
-            assert parent_model
-            self.parent_model = parent_model
-            if checkpoint_path_resume:
-                self.load_from_tag(self.run_dir, resume=True)
-            else:
-                self.load_from_tag(parent_model)
-            ss_id = run_dir.split("_")[-1][-1]
-            if not checkpoint_path_resume:
-                if ss_id == "0":
-                    self.model.prototypes[1].data.copy_(self.model.prototypes[0])
-                    self.model.mask_params[1].data.copy_(self.model.mask_params[0])
-                elif ss_id == "1":
-                    self.model.prototypes[0].data.copy_(self.model.prototypes[1])
-                    self.model.mask_params[0].data.copy_(self.model.mask_params[1])
-                else:
-                    ValueError("Invalid subset id")
         # Train metrics
         metric_names = ["time/img", "loss"]
         metric_names += [f"prop_clus{i}" for i in range(self.n_clusters)]
-        metric_names += [f"loss_clus{i}" for i in range(self.n_prototypes)]
+
         train_iter_interval = cfg["training"]["train_stat_interval"]
         self.train_stat_interval = train_iter_interval
         self.train_metrics = Metrics(*metric_names)
@@ -439,23 +411,19 @@ class Trainer:
         )
 
     @use_seed()
-    def run(self, recluster=False):
+    def run(self):
         cur_iter = (self.start_epoch - 1) * self.n_batches + self.start_batch - 1
         prev_train_stat_iter, prev_val_stat_iter = cur_iter, cur_iter
         prev_check_cluster_iter = cur_iter
         if self.start_epoch == self.n_epoches:
             self.print_and_log_info("No training, only evaluating")
             self.save_metric_plots()
-            if recluster:
-                distances = self.evaluate(recluster)
-                return distances
-            subset = self.evaluate()
+            self.evaluate()
             self.print_and_log_info("Training run is over")
-            return subset
-
+            return
         for epoch in range(self.start_epoch, self.n_epoches + 1):
             batch_start = self.start_batch if epoch == self.start_epoch else 1
-            for batch, (images, labels, img_masks) in enumerate(
+            for batch, (images, _, img_masks, _) in enumerate(
                 self.train_loader, start=1
             ):
                 if batch < batch_start:
@@ -490,9 +458,8 @@ class Trainer:
 
         self.save(epoch=epoch, batch=batch)
         self.save_metric_plots()
-        subset = self.evaluate()
+        self.evaluate()
         self.print_and_log_info("Training run is over")
-        return subset
 
     def update_scheduler(self, epoch, batch):
         self.scheduler.step()
@@ -535,13 +502,6 @@ class Trainer:
 
             for k in range(self.n_prototypes):
                 sample_per_clus = argmin_idx_ == k
-                n_clus = np.sum(sample_per_clus)
-                avg_clus = (
-                    np.sum(sample_per_clus * dist_min_by_sample) / n_clus
-                    if n_clus
-                    else 0.0
-                )
-                average_losses[k] = avg_clus
 
         self.train_metrics.update(
             {
@@ -551,9 +511,6 @@ class Trainer:
         )
         self.train_metrics.update(
             {f"prop_clus{i}": p.item() for i, p in enumerate(proportions)}
-        )
-        self.train_metrics.update(
-            {f"loss_clus{i}": average_losses[i] for i in range(self.n_prototypes)}
         )
 
     @torch.no_grad()
@@ -796,12 +753,7 @@ class Trainer:
             )
 
         self.update_visualizer_metrics(cur_iter, train=True)
-        self.train_metrics.reset(
-            *(
-                ["time/img", "loss"]
-                + [f"loss_clus{i}" for i in range(self.n_prototypes)]
-            )
-        )
+        self.train_metrics.reset(*(["time/img", "loss"]))
 
     def update_visualizer_metrics(self, cur_iter, train):
         if self.visualizer is None:
@@ -876,7 +828,7 @@ class Trainer:
     @torch.no_grad()
     def run_val(self):
         self.model.eval()
-        for images, labels, _ in self.val_loader:
+        for images, labels, _, _ in self.val_loader:
             B, C, H, W = images.shape
             images = images.to(self.device)
             loss_val, distances = self.model(images)
@@ -1015,7 +967,7 @@ class Trainer:
         self.save_transformed_images()
 
         # Train metrics
-        df_train = pd.read_csv(self.train_metrics_path, sep="\t", index_col=0)
+        df_train = pd.read_csv(self.train_metrics_path, sep="\t", index_col=False)  # 0)
         df_val = pd.read_csv(self.val_metrics_path, sep="\t", index_col=0)
         df_scores = pd.read_csv(self.val_scores_path, sep="\t", index_col=0)
         if len(df_train) == 0:
@@ -1117,29 +1069,32 @@ class Trainer:
 
         self.print_and_log_info("Metrics and plots saved")
 
-    def evaluate(self, recluster=False):
+    def evaluate(self):
         self.model.eval()
         label = self.train_loader.dataset[0][1]
         empty_label = isinstance(label, (int, np.integer)) and label == -1
         if empty_label:
-            if recluster:
-                return self.distance_eval()
-            subset = self.qualitative_eval()
+            if self.seg_eval:
+                self.segmentation_qualitative_eval()
+            elif self.instance_eval:
+                self.instance_seg_qualitative_eval()
+            else:
+                self.qualitative_eval()
         elif self.seg_eval or self.instance_eval:
             if (self.seg_eval and self.learn_masks) or self.eval_semantic:
                 self.segmentation_quantitative_eval()
                 self.segmentation_qualitative_eval()
-            if self.instance_eval and self.learn_masks:
+            elif (
+                self.instance_eval and self.learn_masks
+            ):  # NOTE: evaluate either semantic or instance
                 self.instance_seg_quantitative_eval()
                 self.instance_seg_qualitative_eval()
         else:
             self.quantitative_eval()
-            subset = self.qualitative_eval()
             if self.eval_qualitative:
-                self.segmentation_qualitative_eval()
+                self.qualitative_eval()
 
         self.print_and_log_info("Evaluation is over")
-        return subset
 
     @torch.no_grad()
     def distance_eval(self):
@@ -1153,7 +1108,7 @@ class Trainer:
         paths = []
         distances = []
         ids = []
-        for images, labels, path in train_loader:
+        for images, _, _, path in train_loader:
             images = images.to(self.device)
             dist = self.model(images)[1]
             dist_min_by_sample, argmin_idx = map(lambda t: t.cpu().numpy(), dist.min(1))
@@ -1181,9 +1136,6 @@ class Trainer:
                 f.write("clus_loss{" + str(k) + "}\n")
             for k in range(self.n_prototypes):
                 f.write("ctr_clus_loss{" + str(k) + "}\n")
-        if self.n_objects > 1:
-            self.segmentation_qualitative_eval()
-            return None
 
         cluster_path = coerce_to_path_and_create_dir(self.run_dir / "clusters")
         dataset = self.train_loader.dataset
@@ -1194,143 +1146,11 @@ class Trainer:
             shuffle=False,
         )
 
-        if self.n_prototypes == 2:
-            proto_averages = {k: AverageTensorMeter() for k in range(self.n_prototypes)}
-            prt_proto_averages = {
-                k: AverageTensorMeter() for k in range(self.n_prototypes)
-            }
-            for images, labels, _ in train_loader:
-                images = images.to(self.device)
-                dist = self.model(images)[1]
-                dist_min_by_sample, argmin_idx = map(
-                    lambda t: t.cpu().numpy(), dist.min(1)
-                )
-                transformed_imgs, mask = self.model.transform(
-                    images, with_composition=True
-                )
-                transformed_imgs = torch.cat([transformed_imgs, mask[1]], dim=2)
-                transformed_c0_p0 = transformed_imgs[argmin_idx == 0, 0, ...]
-                transformed_c0_p1 = transformed_imgs[argmin_idx == 0, 1, ...]
-                transformed_c1_p0 = transformed_imgs[argmin_idx == 1, 0, ...]
-                transformed_c1_p1 = transformed_imgs[argmin_idx == 1, 1, ...]
-
-                if self.parent_model:
-                    parent_model_sd = torch.load(
-                        self.parent_model + "/" + MODEL_FILE, map_location=self.device
-                    )
-                    parent_model = copy.deepcopy(self.model)
-                    parent_model.load_state_dict(parent_model_sd["model_state"])
-                    prt_transformed_imgs, mask = parent_model.transform(
-                        images, with_composition=True
-                    )
-                    prt_transformed_imgs = torch.cat(
-                        [prt_transformed_imgs, mask[1]], dim=2
-                    )
-
-                    prt_transformed_c0 = prt_transformed_imgs[
-                        argmin_idx == 0, int(str(self.run_dir).split("_")[-1][-1]), ...
-                    ]
-                    prt_transformed_c1 = prt_transformed_imgs[
-                        argmin_idx == 1, int(str(self.run_dir).split("_")[-1][-1]), ...
-                    ]
-                    prt_transform_diff_c0 = torch.where(
-                        transformed_c0_p0 - prt_transformed_c0 >= 0,
-                        transformed_c0_p0 - prt_transformed_c0,
-                        0,
-                    )
-                    prt_transform_diff_c1 = torch.where(
-                        transformed_c1_p1 - prt_transformed_c1 >= 0,
-                        transformed_c1_p1 - prt_transformed_c1,
-                        0,
-                    )
-                    if prt_transform_diff_c0.shape[0]:
-                        features = self.model.encoder(images[argmin_idx == 0])
-                        prt_proto_diff_c0 = self.model.transform(
-                            prt_transform_diff_c0, inverse=True, features=features
-                        )[:, 0, ...]
-                        prt_proto_averages[0].update(prt_proto_diff_c0.cpu())
-                    if prt_transform_diff_c1.shape[0]:
-                        features = self.model.encoder(images[argmin_idx == 1])
-                        prt_proto_diff_c1 = self.model.transform(
-                            prt_transform_diff_c1, inverse=True, features=features
-                        )[:, 1, ...]
-                        prt_proto_averages[1].update(prt_proto_diff_c1.cpu())
-                transform_diff_c0 = torch.where(
-                    transformed_c0_p0 - transformed_c0_p1 >= 0,
-                    transformed_c0_p0 - transformed_c0_p1,
-                    0,
-                )
-                transform_diff_c1 = torch.where(
-                    transformed_c1_p1 - transformed_c1_p0 >= 0,
-                    transformed_c1_p1 - transformed_c1_p0,
-                    0,
-                )
-
-                if transform_diff_c0.shape[0]:
-                    features = self.model.encoder(images[argmin_idx == 0])
-                    proto_diff_c0 = self.model.transform(
-                        transform_diff_c0, inverse=True, features=features
-                    )
-                    proto_averages[0].update(proto_diff_c0.cpu())
-                if transform_diff_c1.shape[0]:
-                    features = self.model.encoder(images[argmin_idx == 1])
-                    proto_diff_c1 = self.model.transform(
-                        transform_diff_c1, inverse=True, features=features
-                    )
-                    proto_averages[1].update(proto_diff_c1.cpu())
-
-            for k in range(2):
-                if isinstance(proto_averages[k].avg, torch.Tensor):
-                    convert_to_img(proto_averages[k].avg[0, ...]).save(
-                        self.run_dir / "rec_diff_tr0_{:d}.png".format(k)
-                    )
-                    convert_to_img(proto_averages[k].avg[1, ...]).save(
-                        self.run_dir / "rec_diff_tr1_{:d}.png".format(k)
-                    )
-                if self.parent_model and isinstance(
-                    proto_averages[k].avg, torch.Tensor
-                ):
-                    convert_to_img(prt_proto_averages[k].avg).save(
-                        self.run_dir / "prt_rec_diff_{:d}.png".format(k)
-                    )
-
-            leaf_id = str(self.run_dir).split("_")[-1]
-            if len(leaf_id) == 6:
-                leaf_id_by_sample = []
-                rec_err_by_sample = []
-                paths = []
-                train_loader = DataLoader(
-                    dataset,
-                    batch_size=self.batch_size,
-                    num_workers=self.n_workers,
-                    shuffle=False,
-                )
-                for images, labels, path in train_loader:
-                    images = images.to(self.device)
-                    dist = self.model(images)[1]
-                    dist_min_by_sample, argmin_idx = map(
-                        lambda t: t.cpu().numpy(), dist.min(1)
-                    )
-                    leaf_id_by_sample.extend([leaf_id + str(idx) for idx in argmin_idx])
-                    rec_err_by_sample.append(dist_min_by_sample)
-                    paths.append(path)
-
-                np.save(
-                    self.run_dir / "rec_err_by_sample.npy",
-                    np.concatenate(rec_err_by_sample, axis=0),
-                )
-                np.save(
-                    self.run_dir / "leaf_id_by_sample.npy", np.array(leaf_id_by_sample)
-                )
-                np.save(self.run_dir / "paths.npy", np.concatenate(paths, axis=0))
-
         # Compute results
         distances, cluster_idx = np.array([]), np.array([], dtype=np.int32)
         averages = {k: AverageTensorMeter() for k in range(self.n_prototypes)}
-        average_losses = {k: AverageMeter() for k in range(self.n_prototypes)}
-        average_ctr_losses = {k: AverageMeter() for k in range(self.n_prototypes)}
-        subset_img = [np.array([]) for k in range(self.n_prototypes)]
-        for images, labels, path in train_loader:
+        cluster_by_path = []
+        for images, _, _, path in train_loader:
             images = images.to(self.device)
             dist = self.model(images)[1]
             if self.n_backgrounds > 1:
@@ -1338,14 +1158,16 @@ class Trainer:
                     images.size(0), self.n_prototypes, self.n_backgrounds
                 ).min(2)[0]
             dist_min_by_sample, argmin_idx = map(lambda t: t.cpu().numpy(), dist.min(1))
-            # for cluster in range(self.n_prototypes):
-            #    subset_img[cluster] = np.hstack(
-            #        [subset_img[cluster], np.array(path)[argmin_idx == cluster]]
-            #    )
+
             loss.update(dist_min_by_sample.mean(), n=len(dist_min_by_sample))
             argmin_idx = argmin_idx.astype(np.int32)
             distances = np.hstack([distances, dist_min_by_sample])
             cluster_idx = np.hstack([cluster_idx, argmin_idx])
+            if hasattr(train_loader.dataset, "data_path"):
+                cluster_by_path += [
+                    (os.path.relpath(p, train_loader.dataset.data_path), argmin_idx[i])
+                    for i, p in enumerate(path)
+                ]
 
             dist_max_by_sample, argmax_idx_ = map(
                 lambda t: t.cpu().numpy(), dist.max(1)
@@ -1357,47 +1179,15 @@ class Trainer:
                 imgs = transformed_imgs[argmin_idx == k, k]
                 averages[k].update(imgs)
 
-                sample_per_clus = argmin_idx == k
-                n_clus = np.sum(sample_per_clus)
-                avg_clus = (
-                    np.sum(sample_per_clus * dist_min_by_sample) / n_clus
-                    if n_clus
-                    else 0.0
-                )
-                average_losses[k].update(avg_clus, n=n_clus)
-
-                ctr_sample_per_clus = argmax_idx_ == k
-                n_ctr_clus = np.sum(ctr_sample_per_clus)
-                avg_ctr_clus = (
-                    np.sum(ctr_sample_per_clus * dist_max_by_sample) / n_ctr_clus
-                    if n_ctr_clus
-                    else 0.0
-                )
-                average_ctr_losses[k].update(avg_ctr_clus, n_ctr_clus)
+        # Save cluster_by_path as csv
+        if cluster_by_path:
+            cluster_by_path = pd.DataFrame(
+                cluster_by_path, columns=["path", "cluster_id"]
+            ).set_index("path")
+            cluster_by_path.to_csv(self.run_dir / "cluster_by_path.csv")
 
         self.print_and_log_info("final_loss: {:.5}".format(float(loss.avg)))
-        self.print_and_log_info(
-            "".join(
-                [
-                    "final_clus_loss{:d}: {:.5} ".format(
-                        k, float(average_losses[k].avg)
-                    )
-                    if average_losses[k].avg
-                    else "final_clus_loss{:d}: 0. ".format(k)
-                    for k in range(self.n_prototypes)
-                ]
-            )
-        )
-        with open(scores_path, mode="a") as f:
-            f.write("{:.5}\n".format(float(loss.avg)))
-            for k in range(self.n_prototypes):
-                f.write(
-                    "{:.5}\n".format(float(average_losses[k].avg))
-                ) if average_losses[k].avg else f.write("0.\n")
-            for k in range(self.n_prototypes):
-                f.write(
-                    "{:.5}\n".format(float(average_ctr_losses[k].avg))
-                ) if average_ctr_losses[k].avg else f.write("0.\n")
+
         # Save results
         with open(cluster_path / "cluster_counts.tsv", mode="w") as f:
             f.write("\t".join([str(k) for k in range(self.n_prototypes)]) + "\n")
@@ -1408,67 +1198,23 @@ class Trainer:
         for k in range(self.n_prototypes):
             path = coerce_to_path_and_create_dir(cluster_path / f"cluster{k}")
             indices = np.where(cluster_idx == k)[0]
-            top_idx = np.argsort(distances[indices])  # [:N_CLUSTER_SAMPLES]
+            top_idx = np.argsort(distances[indices])[:N_CLUSTER_SAMPLES]
             for j, idx in enumerate(top_idx):
                 inp = dataset[indices[idx]][0].unsqueeze(0).to(self.device)
                 convert_to_img(inp).save(path / f"top{j}_raw.png")
                 convert_to_img(self.model.transform(inp)[0, k]).save(
                     path / f"top{j}_tsf.png"
                 )
-                # convert_to_img(self.model.transform(inp, inverse=True)[0, k]).save(path / f'top{j}_tsf_inp.png')
             if len(indices) <= N_CLUSTER_SAMPLES:
                 random_idx = indices
             else:
                 random_idx = np.random.choice(indices, N_CLUSTER_SAMPLES, replace=False)
             for j, idx in enumerate(random_idx):
                 inp = dataset[idx][0].unsqueeze(0).to(self.device)
-                # convert_to_img(inp).save(path / f"random{j}_raw.png")
-                # convert_to_img(self.model.transform(inp)[0, k]).save(
-                #    path / f"random{j}_tsf.png"
-                # )
-                # convert_to_img(self.model.transform(inp, inverse=True)[0, k]).save(path / f'random{j}_tsf_inp.png')
             try:
                 convert_to_img(averages[k].avg).save(path / "avg.png")
             except AssertionError:
                 print_warning(f"no image found in cluster {k}")
-
-        if self.parent_model != None:
-            scores_path = self.run_dir / "parent_scores.tsv"
-            with open(scores_path, mode="w") as f:
-                f.write("loss\n")
-
-                for set in subset_img:
-                    sub_dataset = get_subset(self.dataset_name)(
-                        "train", set, **self.dataset_kwargs
-                    )
-                    sub_train_loader = DataLoader(
-                        sub_dataset,
-                        batch_size=self.batch_size,
-                        num_workers=self.n_workers,
-                        shuffle=False,
-                    )
-                    parent_model_sd = torch.load(
-                        self.parent_model + "/" + MODEL_FILE, map_location=self.device
-                    )
-                    parent_model = copy.deepcopy(self.model)
-                    parent_model.load_state_dict(parent_model_sd["model_state"])
-                    loss = AverageMeter()
-                    for images, labels, _ in sub_train_loader:
-                        images = images.to(self.device)
-                        dist = parent_model(images)[1]
-                        dist_min_by_sample, argmin_idx = map(
-                            lambda t: t.cpu().numpy(), dist.min(1)
-                        )
-
-                        loss.update(
-                            dist_min_by_sample.mean(), n=len(dist_min_by_sample)
-                        )
-                    self.print_and_log_info(
-                        "parent_loss: {:.5}".format(float(loss.avg))
-                    )
-                    f.write("{:.5}\n".format(float(loss.avg)))
-
-        return subset_img
 
     @torch.no_grad()
     def segmentation_quantitative_eval(self):
@@ -1488,7 +1234,7 @@ class Trainer:
         with open(scores_path, mode="w") as f:
             f.write("loss\t" + "\t".join(scores.names) + "\n")
 
-        for images, labels in train_loader:
+        for images, labels, _, _ in train_loader:
             images = images.to(self.device)
             loss_val, distances = self.model(images)
             B, C, H, W = images.shape
@@ -1562,13 +1308,20 @@ class Trainer:
 
         iterator = iter(train_loader)
         for j in range(N):
-            images, labels = iterator.next()
+            images, _, _, _ = iterator.next()
             images = images.to(self.device)
             if self.pred_class:
                 recons = self.model.transform(images, hard_occ_grid=True).cpu()
-                infer_seg = self.model.transform(
-                    images, pred_semantic_labels=True
-                ).cpu()
+                if self.model.return_map_out:
+                    (infer_seg, bboxes, class_ids) = self.model.transform(
+                        images, pred_semantic_labels=True
+                    )
+                    infer_seg = infer_seg.cpu()
+                else:
+                    infer_seg = self.model.transform(
+                        images, pred_semantic_labels=True
+                    ).cpu()
+
             else:
                 distances = self.model(images)[1].view(
                     B, *(self.n_prototypes,) * self.n_objects
@@ -1797,7 +1550,7 @@ class Trainer:
         loader = DataLoader(
             dataset, batch_size=self.batch_size, num_workers=self.n_workers
         )
-        for images, labels, _ in loader:
+        for images, labels, _, _ in loader:
             B = images.size(0)
             images = images.to(self.device)
             distances = self.model(images)[1]
@@ -1857,29 +1610,5 @@ if __name__ == "__main__":
 
     run_dir = RUNS_PATH / dataset / args.tag
     run_dir = str(run_dir)
-    n_dup = cfg["training"].get("n_dup", 0)
-    subsets = {}
-    for n in range(n_dup + 1):
-        if subsets:
-            keys = list(subsets.keys())
-            for i, subset in enumerate(keys):
-                assert len(subsets[subset]) > 0
-                if len(subset) >= n_dup + 1:
-                    subsets.pop(subset, None)
-                    continue
-                trainer = Trainer(
-                    config,
-                    run_dir + "_" + subset,
-                    seed=seed,
-                    subset=subsets[subset],
-                    parent_model=run_dir + "_" + subset[:-1],
-                )
-                temp = trainer.run(seed=seed)
-                subsets[subset + "0"] = temp[0]
-                subsets[subset + "1"] = temp[1]
-                subsets.pop(subset, None)
-        else:
-            trainer = Trainer(config, run_dir + "_0", seed=seed)
-            temp = trainer.run(seed=seed)
-            subsets["00"] = temp[0]
-            subsets["01"] = temp[1]
+    trainer = Trainer(config, run_dir, seed=seed)
+    temp = trainer.run(seed=seed)

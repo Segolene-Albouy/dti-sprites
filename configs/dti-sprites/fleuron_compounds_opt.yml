@@ -1,19 +1,14 @@
 dataset:
-  name: tetrominoes
+  name: fleuron_compounds
+  seg_eval: False
+  instance_eval: False
+  image_size: 128
 model:
   name: dti_sprites
-  n_sprites: 19
-  n_backgrounds: 0
-  n_objects: 3
-  freeze_sprite: 1
+  n_sprites: 72
+  n_backgrounds: 1
+  n_objects: 15 # more than average
   inject_noise: 0.4
-  prototype:
-    source: data
-    data:
-      freeze: [1, 1, 1]
-      init: ["constant", "constant", "gaussian"]
-      value: [0.9, 0.9, 0.]
-      gaussian_weights_std: 5
   encoder_name: resnet32
   transformation_sequence: identity
   transformation_sequence_bkg: color
@@ -21,10 +16,22 @@ model:
   curriculum_learning: False
   curriculum_learning_bkg: False
   curriculum_learning_layer: False
-  sprite_size: [24, 24]
+  prototype:
+    source: generator
+    generator: mlp
+    data:
+      freeze: [1, 1, 1750]
+      init: ["constant", "constant", "gaussian"]
+      value: [0.1, 0.9, 0.]
+      gaussian_weights_std: 5
+  init_latent_linear: gaussian
+  sprite_size: [32, 32]
   pred_occlusion: False
   estimate_minimum: True
   greedy_algo_iter: 1
+  empty_cluster_threshold: 0.001
+  add_empty_sprite: True
+  lambda_empty_sprite: 1.0e-3
 training:
   batch_size: 32
   n_workers: 8
@@ -36,13 +43,12 @@ training:
   scheduler:
     name: multi_step
     gamma: [1, 0.1]
-    milestones: [100, 200]
-  n_epoches: 210
+    milestones: [4500, 4750]
+  n_epoches: 5000
   train_stat_interval: 500
-  val_stat_interval: 1000
-  check_cluster_interval: 50
+  val_stat_interval: 100 # plotting for gifs
+  check_cluster_interval: 1000 # give time to learn before reassignment
   eval_with_bkg: True
-  eval_semantic: True
   seed: 65176
   visualizer_port:
   pretrained: 

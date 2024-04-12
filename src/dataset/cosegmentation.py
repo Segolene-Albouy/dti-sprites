@@ -34,7 +34,7 @@ class WeizmannHorseDataset(TorchDataset):
     def __getitem__(self, idx):
         inp = self.transform(Image.open(self.input_files[idx]).convert("RGB"))
         label = self.transform_gt(Image.open(self.label_files[idx]))
-        return inp, label
+        return inp, label, [], str(self.input_files[idx])
 
     @property
     @lru_cache()

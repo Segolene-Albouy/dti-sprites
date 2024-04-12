@@ -11,6 +11,7 @@ model:
     data:
       freeze: [False, False, False]
       init: ["constant", "mean", "gaussian"]
+      value: [0.9, 0, 0]
       gaussian_weights_std: 8
   encoder_name: resnet32
   transformation_sequence: color_projective_tps
@@ -33,7 +34,7 @@ training:
   train_stat_interval: 400
   val_stat_interval: 800
   check_cluster_interval: 100
-  seed: 2971
+  seed: 26474
   visualizer_port:
   pretrained:
   resume:

@@ -10,7 +10,7 @@ import pandas as pd
 import torch
 from torch.utils.data import DataLoader
 
-from .dataset import get_subset, get_dataset
+from .dataset import get_dataset
 from .model import get_model
 from .model.tools import count_parameters, safe_model_state_dict
 from .optimizer import get_optimizer
@@ -52,9 +52,7 @@ class Trainer:
     """Pipeline to train a NN model using a certain dataset, both specified by an YML config."""
 
     @use_seed()
-    def __init__(
-        self, config_path, run_dir, subset=None, parent_model=None, recluster=False
-    ):
+    def __init__(self, config_path, run_dir, parent_model=None, recluster=False):
         self.config_path = coerce_to_path_and_check_exist(config_path)
         self.run_dir = coerce_to_path_and_create_dir(run_dir)
         self.logger = get_logger(self.run_dir, name="trainer")
@@ -84,14 +82,9 @@ class Trainer:
         # Datasets and dataloaders
         self.dataset_kwargs = cfg["dataset"]
         self.dataset_name = self.dataset_kwargs.pop("name")
-        if not isinstance(subset, type(None)):
-            train_dataset = get_subset(self.dataset_name)(
-                "train", subset, **self.dataset_kwargs
-            )
-        else:
-            train_dataset = get_dataset(self.dataset_name)(
-                "train", None, **self.dataset_kwargs
-            )
+        train_dataset = get_dataset(self.dataset_name)(
+            "train", None, **self.dataset_kwargs
+        )
         val_dataset = get_dataset(self.dataset_name)("val", None, **self.dataset_kwargs)
 
         self.n_classes = train_dataset.n_classes
@@ -158,27 +151,27 @@ class Trainer:
 
         # Optimizer
         self.opt_params = cfg["training"]["optimizer"] or {}
-        # self.sprite_opt_params = cfg["training"].get("sprite_optimizer", {})
+        self.sprite_opt_params = cfg["training"].get("sprite_optimizer", {})
         self.optimizer_name = self.opt_params.pop("name")
         self.cluster_kwargs = self.opt_params.pop("cluster", {})
         self.tsf_kwargs = self.opt_params.pop("transformer", {})
-        # self.sprite_optimizer_name = self.sprite_opt_params.pop("name", None)
-        # if self.sprite_optimizer_name in ["SGD", "sgd"]:
-        #     self.sprite_optimizer = get_optimizer(self.sprite_optimizer_name)(
-        #         [dict(params=self.model.cluster_parameters(), **self.cluster_kwargs)],
-        #         **self.sprite_opt_params,
-        #     )
-        #     self.optimizer = get_optimizer(self.optimizer_name)(
-        #        [dict(params=self.model.transformer_parameters(), **self.tsf_kwargs)],
-        #         **self.opt_params,
-        #     )
-        #     self.model.set_optimizer(self.optimizer, self.sprite_optimizer)
-        # else:
-        self.optimizer = get_optimizer(self.optimizer_name)(
-            [dict(params=self.model.cluster_parameters(), **self.cluster_kwargs)]
-            + [dict(params=self.model.transformer_parameters(), **self.tsf_kwargs)],
-            **self.opt_params,
-        )
+        self.sprite_optimizer_name = self.sprite_opt_params.pop("name", None)
+        if self.sprite_optimizer_name in ["SGD", "sgd"]:
+            self.sprite_optimizer = get_optimizer(self.sprite_optimizer_name)(
+                [dict(params=self.model.cluster_parameters(), **self.cluster_kwargs)],
+                **self.sprite_opt_params,
+            )
+            self.optimizer = get_optimizer(self.optimizer_name)(
+                [dict(params=self.model.transformer_parameters(), **self.tsf_kwargs)],
+                **self.opt_params,
+            )
+            self.model.set_optimizer(self.optimizer, self.sprite_optimizer)
+        else:
+            self.optimizer = get_optimizer(self.optimizer_name)(
+                [dict(params=self.model.cluster_parameters(), **self.cluster_kwargs)]
+                + [dict(params=self.model.transformer_parameters(), **self.tsf_kwargs)],
+                **self.opt_params,
+            )
         self.model.set_optimizer(self.optimizer)
         self.print_and_log_info(
             "Using optimizer {} with kwargs {}".format(
@@ -221,35 +214,15 @@ class Trainer:
         if checkpoint_path is not None:
             self.load_from_tag(checkpoint_path)
         elif checkpoint_path_resume is not None:
-            # if recluster:
-            #     self.load_from_tag(self.run_dir, resume=True)
-            # else:
             self.load_from_tag(checkpoint_path_resume, resume=True)
         else:
             self.start_epoch, self.start_batch = 1, 1
 
         self.parent_model = None
-        """
-        if not isinstance(subset, type(None)):
-            assert parent_model
-            self.parent_model = parent_model
-            if checkpoint_path_resume:
-                self.load_from_tag(self.run_dir, resume=True)
-            else:
-                self.load_from_tag(parent_model)
-            ss_id = run_dir.split("_")[-1][-1]
-            if not checkpoint_path_resume:
-                if ss_id == "0":
-                    self.model.prototypes[1].data.copy_(self.model.prototypes[0])
-                elif ss_id == "1":
-                    self.model.prototypes[0].data.copy_(self.model.prototypes[1])
-                else:
-                    ValueError("Invalid subset id")
-        """
+
         # Train metrics & check_cluster interval
         metric_names = ["time/img", "loss"]
         metric_names += [f"prop_clus{i}" for i in range(self.n_prototypes)]
-        # metric_names += [f"loss_clus{i}" for i in range(self.n_prototypes)]
         train_iter_interval = cfg["training"]["train_stat_interval"]
         self.train_stat_interval = train_iter_interval
         self.train_metrics = Metrics(*metric_names)
@@ -382,22 +355,20 @@ class Trainer:
         )
 
     @use_seed()
-    def run(self, recluster=False):
+    def run(self):
         cur_iter = (self.start_epoch - 1) * self.n_batches + self.start_batch - 1
         prev_train_stat_iter, prev_val_stat_iter = cur_iter, cur_iter
         prev_check_cluster_iter = cur_iter
         if self.start_epoch == self.n_epoches + 1:
             self.print_and_log_info("No training, only evaluating")
-            # if recluster:
-            #     distances = self.evaluate(recluster)
-            #     return distances
+
             self.evaluate()
             self.print_and_log_info("Training run is over")
-            return None  # subset
+            return
 
         for epoch in range(self.start_epoch, self.n_epoches + 1):
             batch_start = self.start_batch if epoch == self.start_epoch else 1
-            for batch, (images, labels, _) in enumerate(self.train_loader, start=1):
+            for batch, (images, _, _, _) in enumerate(self.train_loader, start=1):
                 if batch < batch_start:
                     continue
                 cur_iter += 1
@@ -432,7 +403,6 @@ class Trainer:
         self.evaluate()
 
         self.print_and_log_info("Training run is over")
-        # return subset
 
     def update_scheduler(self, epoch, batch):
         self.scheduler.step()
@@ -443,62 +413,6 @@ class Trainer:
                 PRINT_LR_UPD_FMT(epoch, self.n_epoches, batch, self.n_batches, lr)
             )
 
-    '''
-    def duplicate(self):
-        # Model
-        self.model.duplicate(self.device)
-        self.n_prototypes = self.model.n_prototypes
-        self.print_and_log_info(
-            "Model is duplicated. Current number of prototypes: {}".format(
-                self.n_prototypes
-            )
-        )
-
-        """
-        #Optimizer
-        self.optimizer = get_optimizer(self.optimizer_name)([
-            dict(params=self.model.cluster_parameters(), **self.cluster_kwargs),
-            dict(params=self.model.transformer_parameters(), **self.tsf_kwargs)],
-            **self.opt_params)
-        self.model.set_optimizer(self.optimizer)
-        #Scheduler
-        self.scheduler = get_scheduler(self.scheduler_name)(self.optimizer, **self.scheduler_params)
-        self.cur_lr = self.scheduler.get_last_lr()[0]
-        """
-
-        # Train metrics & check_cluster interval
-        metric_names = [
-            f"prop_clus{i}" for i in range(self.n_prototypes // 2, self.n_prototypes)
-        ]
-        metric_names += [
-            f"loss_clus{i}" for i in range(self.n_prototypes // 2, self.n_prototypes)
-        ]
-        self.train_metrics.add(*metric_names)
-        with open(self.train_metrics_path, mode="a") as f:
-            f.write(
-                "iteration\tepoch\tbatch\t" + "\t".join(self.train_metrics.names) + "\n"
-            )
-
-        # Prototypes & Variances
-        self.prototypes_path = coerce_to_path_and_create_dir(
-            self.run_dir / "prototypes"
-        )
-        [
-            coerce_to_path_and_create_dir(self.prototypes_path / f"proto{k}")
-            for k in range(self.n_prototypes // 2, self.n_prototypes)
-        ]
-        if self.is_gmm:
-            NotImplementedError("Model duplication is not implemented for DTI-GMM.")
-
-        # Transformation predictions
-        for k in range(self.images_to_tsf.size(0)):
-            out = coerce_to_path_and_create_dir(self.transformation_path / f"img{k}")
-            [
-                coerce_to_path_and_create_dir(out / f"tsf{k}")
-                for k in range(self.n_prototypes // 2, self.n_prototypes)
-            ]
-    '''
-
     def single_train_batch_run(self, images):
         start_time = time.time()
         B = images.size(0)
@@ -506,16 +420,13 @@ class Trainer:
         images = images.to(self.device)
 
         self.optimizer.zero_grad()
-        # loss, dist_min_by_sample, argmin_idx = self.model(images)
         loss, distances = self.model(images)
         loss.backward()
         self.optimizer.step()
 
-        # if hasattr(self, "sprite_optimizer"):
-        #    # torch.nn.utils.clip_grad_value_(self.model.prototype_params, 0.1)
-        #    self.sprite_optimizer.step()
+        if hasattr(self, "sprite_optimizer"):
+            self.sprite_optimizer.step()
 
-        average_losses = np.zeros(self.n_prototypes)
         with torch.no_grad():
             argmin_idx = distances.min(1)[1]
             mask = torch.zeros(B, self.n_prototypes, device=self.device).scatter(
@@ -523,21 +434,11 @@ class Trainer:
             )
             proportions = mask.sum(0).cpu().numpy() / B
 
-            # dist_min_by_sample, argmin_idx = (
-            #     dist_min_by_sample.cpu().numpy(),
-            #     argmin_idx.cpu().numpy(),
-            # )
-            # argmin_idx = argmin_idx.astype(np.int32)
+            dist_min_by_sample, argmin_idx = (
+                dist_min_by_sample.cpu().numpy(),
+                argmin_idx.cpu().numpy(),
+            )
 
-            # for k in range(self.n_prototypes):
-            #    sample_per_clus = argmin_idx == k
-            #    n_clus = np.sum(sample_per_clus)
-            #    avg_clus = (
-            #        np.sum(sample_per_clus * dist_min_by_sample) / n_clus
-            #        if n_clus
-            #        else 0.0
-            #    )
-            #    average_losses[k] = avg_clus
         self.train_metrics.update(
             {
                 "time/img": (time.time() - start_time) / B,
@@ -547,9 +448,6 @@ class Trainer:
         self.train_metrics.update(
             {f"prop_clus{i}": p for i, p in enumerate(proportions)}
         )
-        # self.train_metrics.update(
-        #     {f"loss_clus{i}": average_losses[i] for i in range(self.n_prototypes)}
-        # )
 
     @torch.no_grad()
     def log_images(self, cur_iter):
@@ -652,12 +550,6 @@ class Trainer:
 
         self.update_visualizer_metrics(cur_iter, train=True)
         self.train_metrics.reset("time/img", "loss")
-        # self.train_metrics.reset(
-        #    *(
-        #        ["time/img", "loss"]
-        #        + [f"loss_clus{i}" for i in range(self.n_prototypes)]
-        #    )
-        # )
 
     def update_visualizer_metrics(self, cur_iter, train):
         if self.visualizer is None:
@@ -732,11 +624,10 @@ class Trainer:
     @torch.no_grad()
     def run_val(self):
         self.model.eval()
-        for images, labels, _ in self.val_loader:
+        for images, labels, _, _ in self.val_loader:
             images = images.to(self.device)
             distances = self.model(images)[1]
             dist_min_by_sample, argmin_idx = distances.min(1)
-            # dist_min_by_sample, argmin_idx = self.model(images)[1:]
             loss_val = dist_min_by_sample.mean()
 
             self.val_metrics.update({"loss_val": loss_val.item()})
@@ -781,8 +672,8 @@ class Trainer:
             "optimizer_state": self.optimizer.state_dict(),
             "scheduler_state": self.scheduler.state_dict(),
         }
-        # if hasattr(self, "sprite_optimizer"):
-        #   state["sprite_optimizer_state"] = self.sprite_optimizer.state_dict()
+        if hasattr(self, "sprite_optimizer"):
+            state["sprite_optimizer_state"] = self.sprite_optimizer.state_dict()
         save_path = self.run_dir / MODEL_FILE
         torch.save(state, save_path)
         self.print_and_log_info("Model saved at {}".format(save_path))
@@ -855,52 +746,14 @@ class Trainer:
 
         self.print_and_log_info("Training metrics and visuals saved")
 
-    def evaluate(self, recluster=False):
+    def evaluate(self):
         self.model.eval()
         no_label = self.train_loader.dataset[0][1] == -1
         if no_label:
             self.qualitative_eval()
-            # if recluster:
-            #     return self.distance_eval()
-            # subset = self.qualitative_eval()
-            # return subset
         else:
             self.quantitative_eval()
-            # subset = self.qualitative_eval()
         self.print_and_log_info("Evaluation is over")
-
-    """
-    @torch.no_grad()
-    def distance_eval(self):
-        dataset = self.train_loader.dataset
-        train_loader = DataLoader(
-            dataset,
-            batch_size=self.batch_size,
-            num_workers=self.n_workers,
-            shuffle=False,
-        )
-
-        paths = []
-        distances = []
-        ids = []
-        for images, labels, path in train_loader:
-            images = images.to(self.device)
-            out = self.model(images)[1:]
-            dist_min_by_sample, argmin_idx = map(lambda t: t.cpu().numpy(), out)
-            paths.append(path)
-            distances.append(dist_min_by_sample)
-            ids.append(argmin_idx)
-
-        paths = np.concatenate(paths)
-        distances = np.concatenate(distances)
-        ids = np.concatenate(ids)
-
-        ret_val = []
-        for p, d, i in zip(paths, distances, ids):
-            ret_val.append((p, d, i))
-
-        return np.array(ret_val)
-    """
 
     @torch.no_grad()
     def qualitative_eval(self):
@@ -909,10 +762,7 @@ class Trainer:
         scores_path = self.run_dir / FINAL_SCORES_FILE
         with open(scores_path, mode="w") as f:
             f.write("loss\n")
-            # for k in range(self.n_prototypes):
-            #     f.write("clus_loss{" + str(k) + "}\n")
-            # for k in range(self.n_prototypes):
-            #     f.write("ctr_clus_loss{" + str(k) + "}\n")
+
         cluster_path = coerce_to_path_and_create_dir(self.run_dir / "clusters")
         dataset = self.train_loader.dataset
         train_loader = DataLoader(
@@ -921,181 +771,25 @@ class Trainer:
             num_workers=self.n_workers,
             shuffle=False,
         )
-        """
-        # Compute difference (for hierarchical clustering)
-        if self.n_prototypes == 2:
-            error_averages = {k: AverageTensorMeter() for k in range(self.n_prototypes)}
-            proto_averages = {k: AverageTensorMeter() for k in range(self.n_prototypes)}
-            for images, labels, path in train_loader:
-                images = images.to(self.device)
-                out = self.model(images)[1:]
-                dist_min_by_sample, argmin_idx = map(lambda t: t.cpu().numpy(), out)
-
-                transformed_imgs = self.model.transform(images)
-                transformed_c0_p0 = transformed_imgs[
-                    argmin_idx == 0, 0, ...
-                ]  # Transformed p0 for images in c0
-                transformed_c0_p1 = transformed_imgs[
-                    argmin_idx == 0, 1, ...
-                ]  # Transformed p1 for images in c0
-                transformed_c1_p0 = transformed_imgs[
-                    argmin_idx == 1, 0, ...
-                ]  # Transformed p0 for images in c1
-                transformed_c1_p1 = transformed_imgs[
-                    argmin_idx == 1, 1, ...
-                ]  # Transformed p1 for images in c1
-
-                transform_diff_c0 = torch.where(
-                    transformed_c0_p0 - transformed_c0_p1 >= 0,
-                    transformed_c0_p0 - transformed_c0_p1,
-                    0,
-                )
-                transform_diff_c1 = torch.where(
-                    transformed_c1_p0 - transformed_c1_p1 >= 0,
-                    transformed_c1_p0 - transformed_c1_p1,
-                    0,
-                )
-
-                if transform_diff_c0.shape[0]:
-                    proto_diff_c0 = self.model.transform(
-                        transform_diff_c0, inverse=True
-                    )
-                    proto_averages[0].update(proto_diff_c0.cpu())
-                if transform_diff_c1.shape[0]:
-                    proto_diff_c1 = self.model.transform(
-                        transform_diff_c1, inverse=True
-                    )
-                    proto_averages[1].update(proto_diff_c1.cpu())
-
-                error_averages[1].update(
-                    abs(images[argmin_idx == 0] - transformed_c0_p1).cpu()
-                )
-                error_averages[0].update(
-                    abs(images[argmin_idx == 1] - transformed_c1_p0).cpu()
-                )
-            for k in range(2):
-                convert_to_img(error_averages[k].avg).save(
-                    self.run_dir / "err_diff_avg_{:d}.png".format(k)
-                )
-                convert_to_img(proto_averages[k].avg[:, 0, ...]).save(
-                    self.run_dir / "rec_diff_tr0_{:d}.png".format(k)
-                )
-                convert_to_img(proto_averages[k].avg[:, 1, ...]).save(
-                    self.run_dir / "rec_diff_tr1_{:d}.png".format(k)
-                )
-
-            # Save the leaf index the image is clustered in and the reconstruction error
-            leaf_id = str(self.run_dir).split("_")[-1]
-            if len(leaf_id) == 6:
-                leaf_id_by_sample = []
-                rec_err_by_sample = []
-                paths = []
-                train_loader = DataLoader(
-                    dataset,
-                    batch_size=self.batch_size,
-                    num_workers=self.n_workers,
-                    shuffle=False,
-                )
-                for images, labels, path in train_loader:
-                    images = images.to(self.device)
-                    out = self.model(images)[1:]
-                    dist_min_by_sample, argmin_idx = map(lambda t: t.cpu().numpy(), out)
-                    leaf_id_by_sample.extend([leaf_id + str(idx) for idx in argmin_idx])
-                    rec_err_by_sample.append(dist_min_by_sample)
-                    paths.append(path)
-                np.save(
-                    self.run_dir / "rec_err_by_sample.npy",
-                    np.concatenate(rec_err_by_sample, axis=0),
-                )
-                np.save(
-                    self.run_dir / "leaf_id_by_sample.npy", np.array(leaf_id_by_sample)
-                )
-                np.save(self.run_dir / "paths.npy", np.concatenate(paths, axis=0))
-        """
         # Compute results
         distances, cluster_idx = np.array([]), np.array([], dtype=np.int32)
         averages = {k: AverageTensorMeter() for k in range(self.n_prototypes)}
-        # average_losses = {k: AverageMeter() for k in range(self.n_prototypes)}
-        # average_ctr_losses = {k: AverageMeter() for k in range(self.n_prototypes)}
-        # subset_img = [np.array([]) for k in range(self.n_prototypes)]
-        for images, labels, path in train_loader:
+        for images, _, path, _ in train_loader:
             images = images.to(self.device)
             out = self.model(images)[1]
             dist_min_by_sample, argmin_idx = map(lambda t: t.cpu().numpy(), out.min(1))
-
-            # for cluster in range(self.n_prototypes):
-            #    subset_img[cluster] = np.hstack(
-            #        [subset_img[cluster], np.array(path)[argmin_idx == cluster]]
-            #    )
 
             loss.update(dist_min_by_sample.mean(), n=len(dist_min_by_sample))
             argmin_idx = argmin_idx.astype(np.int32)
             distances = np.hstack([distances, dist_min_by_sample])
             cluster_idx = np.hstack([cluster_idx, argmin_idx])
-            """
-            #dist_max_by_sample, argmax_idx_ = map(
-            #    lambda t: t.cpu().numpy(), dist.max(1)
-            #)
-            #argmax_idx_ = argmax_idx_.astype(np.int32)
-            """
+
             transformed_imgs = self.model.transform(images).cpu()
             for k in range(self.n_prototypes):
                 imgs = transformed_imgs[argmin_idx == k, k]
                 averages[k].update(imgs)
-                """
-                sample_per_clus = argmin_idx == k
-                n_clus = np.sum(sample_per_clus)
-                avg_clus = (
-                    np.sum(sample_per_clus * dist_min_by_sample) / n_clus
-                    if n_clus
-                    else 0.0
-                )
-                average_losses[k].update(avg_clus, n=n_clus)
 
-                ctr_sample_per_clus = argmax_idx_ == k
-                n_ctr_clus = np.sum(ctr_sample_per_clus)
-                avg_ctr_clus = (
-                    np.sum(ctr_sample_per_clus * dist_max_by_sample) / n_ctr_clus
-                    if n_ctr_clus
-                    else 0.0
-                )
-                average_ctr_losses[k].update(avg_ctr_clus, n_ctr_clus)
-                """
         self.print_and_log_info("final_loss: {:.5}".format(loss.avg))
-        """
-        self.print_and_log_info(
-            "".join(
-                [
-                    "final_clus_loss{:d}: {:.5} ".format(k, average_losses[k].avg)
-                    if average_losses[k].avg
-                    else "final_clus_loss{:d}: 0. ".format(k)
-                    for k in range(self.n_prototypes)
-                ]
-            )
-        )
-        self.print_and_log_info(
-            "".join(
-                [
-                    "final_ctr_clus_loss{:d}: {:.5} ".format(
-                        k, average_ctr_losses[k].avg
-                    )
-                    if average_ctr_losses[k].avg
-                    else "final_ctr_clus_loss{:d}: 0. ".format(k)
-                    for k in range(self.n_prototypes)
-                ]
-            )
-        )
-        with open(scores_path, mode="a") as f:
-            f.write("{:.5}\n".format(loss.avg))
-            for k in range(self.n_prototypes):
-                f.write("{:.5}\n".format(average_losses[k].avg)) if average_losses[
-                    k
-                ].avg else f.write("0.\n")
-            for k in range(self.n_prototypes):
-                f.write(
-                    "{:.5}\n".format(average_ctr_losses[k].avg)
-                ) if average_ctr_losses[k].avg else f.write("0.\n")
-        """
 
         # Save results
         with open(cluster_path / "cluster_counts.tsv", mode="w") as f:
@@ -1131,44 +825,6 @@ class Trainer:
             except AssertionError:
                 print_warning(f"no image found in cluster {k}")
 
-        """
-        if self.parent_model != None:
-            scores_path = self.run_dir / "parent_scores.tsv"
-            with open(scores_path, mode="w") as f:
-                f.write("loss\n")
-
-                for set in subset_img:
-                    sub_dataset = get_subset(self.dataset_name)(
-                        "train", set, **self.dataset_kwargs
-                    )
-                    sub_train_loader = DataLoader(
-                        sub_dataset,
-                        batch_size=self.batch_size,
-                        num_workers=self.n_workers,
-                        shuffle=False,
-                    )
-                    parent_model_sd = torch.load(
-                        self.parent_model + "/" + MODEL_FILE, map_location=self.device
-                    )
-                    parent_model = copy.deepcopy(self.model)
-                    parent_model.load_state_dict(parent_model_sd["model_state"])
-                    loss = AverageMeter()
-                    for images, labels, path in sub_train_loader:
-                        images = images.to(self.device)
-                        dist = parent_model(images)[1]
-                        dist_min_by_sample, argmin_idx = map(
-                            lambda t: t.cpu().numpy(), dist.min(1)
-                        )
-
-                        loss.update(
-                            dist_min_by_sample.mean(), n=len(dist_min_by_sample)
-                        )
-                    self.print_and_log_info("parent_loss: {:.5}".format(loss.avg))
-                    f.write("{:.5}\n".format(loss.avg))
-
-        return subset_img
-        """
-
     @torch.no_grad()
     def quantitative_eval(self):
         """Routine to save quantitative results: loss + scores"""
@@ -1179,16 +835,16 @@ class Trainer:
             f.write("loss\t" + "\t".join(scores.names) + "\n")
 
         dataset = get_dataset(self.dataset_name)(
-            "train", eval_mode=True, subset=None, **self.dataset_kwargs
+            "train", eval_mode=True, **self.dataset_kwargs
         )
         loader = DataLoader(
             dataset, batch_size=self.batch_size, num_workers=self.n_workers
         )
-        for images, labels, _ in loader:
+        for images, labels, _, _ in loader:
             images = images.to(self.device)
             distances = self.model(images)[1]
             dist_min_by_sample, argmin_idx = distances.min(1)
-            # dist_min_by_sample, argmin_idx = self.model(images)[1:]
+
             loss.update(dist_min_by_sample.mean(), n=len(dist_min_by_sample))
             scores.update(labels.long().numpy(), argmin_idx.cpu().numpy())
 
@@ -1233,30 +889,3 @@ if __name__ == "__main__":
     run_dir = RUNS_PATH / dataset / args.tag
     trainer = Trainer(config, run_dir, seed=seed)
     trainer.run(seed=seed)
-    """
-    run_dir = str(run_dir)
-    n_dup = cfg["training"].get("n_dup", 0)
-    subsets = {}
-    for n in range(n_dup + 1):
-        if subsets:
-            keys = list(subsets.keys())
-            for i, subset in enumerate(keys):
-                assert len(subsets[subset]) > 0
-                trainer = Trainer(
-                    config,
-                    run_dir + "_" + subset,
-                    seed=seed,
-                    subset=subsets[subset],
-                    parent_model=run_dir + "_" + subset[:-1],
-                )
-                temp = trainer.run(seed=seed)
-                subsets[subset + "0"] = temp[0]
-                subsets[subset + "1"] = temp[1]
-                subsets.pop(subset, None)
-        else:
-            trainer = Trainer(config, run_dir + "_0", seed=seed)
-            temp = trainer.run(seed=seed)
-            if temp:
-                subsets["00"] = temp[0]
-                subsets["01"] = temp[1]
-    """

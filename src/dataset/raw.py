@@ -54,11 +54,6 @@ class _AbstractCollectionDataset(TorchDataset):
             self.img_size = img_size
             self.crop = False
 
-        # if self.size > 0:
-        #    sample_size = Image.open(self.input_files[0]).size
-        #    if min(self.img_size) > min(sample_size):
-        #        raise ValueError("img_size too big compared to a sampled image size, adjust it or upscale dataset")
-
     def __len__(self):
         return self.size
 
@@ -71,9 +66,7 @@ class _AbstractCollectionDataset(TorchDataset):
             alpha = Image.new("L", (h, w), (255))
         inp = self.transform(img.convert("RGB"))
         alpha = self.transform(alpha)
-        if self.output_paths:
-            return inp, self.labels[idx], alpha, str(self.input_files[idx])
-        return inp, self.labels[idx], alpha  # str(self.input_files[idx])
+        return inp, self.labels[idx], alpha, str(self.input_files[idx])
 
     @property
     @lru_cache()
@@ -97,3 +90,7 @@ class GenericDataset(_AbstractCollectionDataset):
 
 class LettersDataset(_AbstractCollectionDataset):
     name = "Lettre_e"
+
+
+class CoADataset(_AbstractCollectionDataset):
+    name = "coa_marion"
