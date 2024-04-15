@@ -434,11 +434,6 @@ class Trainer:
             )
             proportions = mask.sum(0).cpu().numpy() / B
 
-            dist_min_by_sample, argmin_idx = (
-                dist_min_by_sample.cpu().numpy(),
-                argmin_idx.cpu().numpy(),
-            )
-
         self.train_metrics.update(
             {
                 "time/img": (time.time() - start_time) / B,
