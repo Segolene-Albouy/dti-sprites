@@ -800,8 +800,7 @@ class DTISprites(nn.Module):
                 class_prob=class_oh,
             ).squeeze(1)
             if self.return_map_out:
-                binary_masks = (tsf_masks > 0.5).long()
-                bboxes = get_bbox_from_mask(binary_masks)
+                bboxes = get_bbox_from_mask(tsf_masks)
                 class_ids = class_oh
                 return target.clamp(0, self.n_sprites).long(), bboxes, class_ids
             else:

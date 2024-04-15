@@ -17,7 +17,7 @@ class FleuronsDataset(TorchDataset):
 
     def __init__(self, split=None, **kwargs) -> None:
         self.data_path = coerce_to_path_and_check_exist(self.root / "fleurons")
-        self.split = None
+        self.split = split
         self.n_classes = kwargs.get("n_classes", 36)
 
         self.img_size = kwargs.get("img_size", 128)

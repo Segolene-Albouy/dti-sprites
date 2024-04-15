@@ -3,7 +3,7 @@ dataset:
   img_size: 256
 model:
   name: dtikmeans
-  n_prototypes: 14 #36
+  n_prototypes: 36
   prototype:
     source: data
     data:

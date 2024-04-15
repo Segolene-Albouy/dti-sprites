@@ -6,23 +6,20 @@ model:
   prototype:
     source: generator
     generator: mlp
-    proba: True
-    proba_type: marionette
-    proba_weight: weight_sprite
-    lambda_freq: 0.
-    shared_latent: True
   encoder_name: resnet20
   color_channels: 1
-  transformation_sequence: identity_affine_morpho_tps
-  curriculum_learning: [5, 15, 20]
+  transformation_sequence: identity #_affine_morpho_tps
+  curriculum_learning: False # [5, 15, 20]
   grid_size: 4
   kernel_size: 7
-  reassign_cluster: False 
+  proba: True
+  proba_weighting: diff 
+  proba_type: linear
 training:
   batch_size: 128
   optimizer:
     name: adam
-    lr: 1.e-3 
+    lr: 1.0e-3
     transformer:
       weight_decay: 1.0e-6
   scheduler:
@@ -34,5 +31,5 @@ training:
   train_stat_interval: 25
   val_stat_interval: 50
   check_cluster_interval: 50
-  seed: 27388
-  visualizer_port:
+  seed: 103
+  visualizer_port: 

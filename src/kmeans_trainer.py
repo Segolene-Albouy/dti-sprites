@@ -82,10 +82,8 @@ class Trainer:
         # Datasets and dataloaders
         self.dataset_kwargs = cfg["dataset"]
         self.dataset_name = self.dataset_kwargs.pop("name")
-        train_dataset = get_dataset(self.dataset_name)(
-            "train", None, **self.dataset_kwargs
-        )
-        val_dataset = get_dataset(self.dataset_name)("val", None, **self.dataset_kwargs)
+        train_dataset = get_dataset(self.dataset_name)("train", **self.dataset_kwargs)
+        val_dataset = get_dataset(self.dataset_name)("val", **self.dataset_kwargs)
 
         self.n_classes = train_dataset.n_classes
         self.is_val_empty = len(val_dataset) == 0
@@ -420,7 +418,7 @@ class Trainer:
         images = images.to(self.device)
 
         self.optimizer.zero_grad()
-        loss, distances = self.model(images)
+        loss, distances, probas = self.model(images)
         loss.backward()
         self.optimizer.step()
 
@@ -428,16 +426,15 @@ class Trainer:
             self.sprite_optimizer.step()
 
         with torch.no_grad():
-            argmin_idx = distances.min(1)[1]
+            if hasattr(self.model, "proba"):
+                argmin_idx = probas.argmax(1)
+            else:
+                argmin_idx = distances.min(1)[1]
             mask = torch.zeros(B, self.n_prototypes, device=self.device).scatter(
                 1, argmin_idx[:, None], 1
             )
             proportions = mask.sum(0).cpu().numpy() / B
-
-            dist_min_by_sample, argmin_idx = (
-                dist_min_by_sample.cpu().numpy(),
-                argmin_idx.cpu().numpy(),
-            )
+            argmin_idx = argmin_idx.cpu().numpy()
 
         self.train_metrics.update(
             {
@@ -528,7 +525,11 @@ class Trainer:
         proportions = [
             self.train_metrics[f"prop_clus{i}"].avg for i in range(self.n_prototypes)
         ]
-        reassigned, idx = self.model.reassign_empty_clusters(proportions)
+        if epoch > 20:
+            reassigned, idx = self.model.reassign_empty_clusters(proportions)
+        else:
+            reassigned = []
+            idx = 0
         msg = PRINT_CHECK_CLUSTERS_FMT(
             epoch, self.n_epoches, batch, self.n_batches, reassigned, idx
         )
@@ -626,8 +627,13 @@ class Trainer:
         self.model.eval()
         for images, labels, _, _ in self.val_loader:
             images = images.to(self.device)
-            distances = self.model(images)[1]
-            dist_min_by_sample, argmin_idx = distances.min(1)
+            if hasattr(self.model, "proba"):
+                _, out, probas = self.model(images)
+                argmin_idx = probas.argmax(1)
+                dist_min_by_sample = out[:, argmin_idx]
+            else:
+                distances = self.model(images)[1]
+                dist_min_by_sample, argmin_idx = distances.min(1)
             loss_val = dist_min_by_sample.mean()
 
             self.val_metrics.update({"loss_val": loss_val.item()})
@@ -752,6 +758,7 @@ class Trainer:
         if no_label:
             self.qualitative_eval()
         else:
+            # self.qualitative_eval()
             self.quantitative_eval()
         self.print_and_log_info("Evaluation is over")
 
@@ -774,20 +781,39 @@ class Trainer:
         # Compute results
         distances, cluster_idx = np.array([]), np.array([], dtype=np.int32)
         averages = {k: AverageTensorMeter() for k in range(self.n_prototypes)}
-        for images, _, path, _ in train_loader:
+        cluster_by_path = []
+        for images, _, _, path in train_loader:
             images = images.to(self.device)
-            out = self.model(images)[1]
-            dist_min_by_sample, argmin_idx = map(lambda t: t.cpu().numpy(), out.min(1))
+
+            if hasattr(self.model, "proba"):
+                _, out, probas = self.model(images)
+                argmin_idx = probas.argmax(1)
+                argmin_idx = argmin_idx.cpu().numpy()
+                dist_min_by_sample = out[:, argmin_idx].cpu().numpy()
+            else:
+                out = self.model(images)[1]
+                dist_min_by_sample, argmin_idx = map(
+                    lambda t: t.cpu().numpy(), out.min(1)
+                )
 
             loss.update(dist_min_by_sample.mean(), n=len(dist_min_by_sample))
             argmin_idx = argmin_idx.astype(np.int32)
             distances = np.hstack([distances, dist_min_by_sample])
             cluster_idx = np.hstack([cluster_idx, argmin_idx])
-
+            if hasattr(train_loader.dataset, "data_path"):
+                cluster_by_path += [
+                    (os.path.relpath(p, train_loader.dataset.data_path), argmin_idx[i])
+                    for i, p in enumerate(path)
+                ]
             transformed_imgs = self.model.transform(images).cpu()
             for k in range(self.n_prototypes):
                 imgs = transformed_imgs[argmin_idx == k, k]
                 averages[k].update(imgs)
+        if cluster_by_path:
+            cluster_by_path = pd.DataFrame(
+                cluster_by_path, columns=["path", "cluster_id"]
+            ).set_index("path")
+            cluster_by_path.to_csv(self.run_dir / "cluster_by_path.csv")
 
         self.print_and_log_info("final_loss: {:.5}".format(loss.avg))
 
@@ -842,8 +868,13 @@ class Trainer:
         )
         for images, labels, _, _ in loader:
             images = images.to(self.device)
-            distances = self.model(images)[1]
-            dist_min_by_sample, argmin_idx = distances.min(1)
+            if hasattr(self.model, "proba"):
+                _, out, probas = self.model(images)
+                argmin_idx = probas.argmax(1)
+                dist_min_by_sample = out[:, argmin_idx]
+            else:
+                distances = self.model(images)[1]
+                dist_min_by_sample, argmin_idx = distances.min(1)
 
             loss.update(dist_min_by_sample.mean(), n=len(dist_min_by_sample))
             scores.update(labels.long().numpy(), argmin_idx.cpu().numpy())

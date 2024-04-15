@@ -9,7 +9,14 @@ from torch.nn import functional as F
 from torch.utils.data.dataloader import DataLoader
 
 
-def get_bbox_from_mask(binary_masks):
+def get_bbox_from_mask(masks):
+    from scipy import ndimage
+
+    k = np.ones((3, 3)) / 9
+    masks = ndimage.convolve(masks, k, mode="constant", cval=0.0)
+
+    binary_masks = (masks > 0.5).long()
+
     indices_y, indices_x = torch.where(binary_masks.view(binary_masks.shape[0], -1))
 
     x_min = indices_x.min(dim=1).values

@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from torch.optim import Adam
+import torch.nn.functional as F
 import numpy as np
 from itertools import chain
 
@@ -13,6 +14,7 @@ from .u_net import UNet
 NOISE_SCALE = 0.0001
 EMPTY_CLUSTER_THRESHOLD = 0.2
 LATENT_SIZE = 128
+EPSILON = 1e-10
 
 
 class DTIKmeans(nn.Module):
@@ -70,6 +72,24 @@ class DTIKmeans(nn.Module):
             "empty_cluster_threshold", EMPTY_CLUSTER_THRESHOLD / n_prototypes
         )
         self._reassign_cluster = kwargs.get("reassign_cluster", True)
+
+        proba = kwargs.get("proba", False)
+        if proba:
+            self.weighting = kwargs.get("proba_weighting", "tr_sprite")
+            self.proba_type = kwargs.get("proba_type", "marionette")
+            self.out_ch = self.transformer.enc_out_channels
+            if self.proba_type == "linear":
+                self.proba = nn.Sequential(
+                    nn.Linear(self.out_ch, 10),
+                    nn.LayerNorm(10, elementwise_affine=False),
+                )
+            else:
+                self.proba = nn.Sequential(
+                    nn.Linear(LATENT_SIZE, self.out_ch),
+                    nn.LayerNorm(self.out_ch, elementwise_affine=False),
+                )
+            self._reassign_cluster = False
+
         use_gaussian_weights = kwargs.get("gaussian_weights", False)
         if use_gaussian_weights:
             std = kwargs.get("gaussian_weights_std")
@@ -81,9 +101,14 @@ class DTIKmeans(nn.Module):
             self.loss_weights = None
 
     def cluster_parameters(self):
+        out = []
         if hasattr(self, "generator"):
-            return list(chain(*[self.generator.parameters()])) + [self.latent_params]
-        return [self.prototype_params]
+            out += list(chain(*[self.generator.parameters()])) + [self.latent_params]
+        else:
+            out += [self.prototype_params]
+        if hasattr(self, "proba"):
+            out += list(chain(*[self.proba.parameters()]))
+        return out
 
     def transformer_parameters(self):
         return self.transformer.parameters()
@@ -116,6 +141,15 @@ class DTIKmeans(nn.Module):
         else:
             return self.prototype_params
 
+    def estimate_logits(self, features):
+        if self.proba_type == "marionette":
+            proba_theta = self.proba(self.latent_params)
+            logits = (1.0 / np.sqrt(self.out_ch)) * (features @ proba_theta.T)
+            return logits
+        elif self.proba_type == "linear":
+            logits = self.proba(features)
+            return logits
+
     def forward(self, x):
         if self.proto_source == "generator":
             params = self.generator(self.latent_params)
@@ -126,13 +160,61 @@ class DTIKmeans(nn.Module):
         else:
             params = self.prototype_params
         prototypes = params.unsqueeze(1).expand(-1, x.size(0), x.size(1), -1, -1)
-        inp, target = self.transformer(x, prototypes)
-        distances = (inp - target) ** 2
-        if self.loss_weights is not None:
-            distances = distances * self.loss_weights
-        distances = distances.flatten(2).mean(2)
-        dist_min = distances.min(1)[0]
-        return dist_min.mean(), distances
+
+        if hasattr(self, "proba"):
+            # Weight sprites
+            if self.weighting == "sprite":
+                with torch.no_grad():
+                    inp, target_inf, features = self.transformer(x, prototypes)
+                    dist_inf = (inp - target_inf) ** 2
+                    dist_inf = dist_inf.flatten(2).mean(2)
+                logits = self.estimate_logits(features)
+                probas = F.softmax(logits, dim=-1)
+                prototypes = (
+                    (prototypes.transpose(0, 1) * probas[..., None, None, None])
+                    .sum(1)
+                    .unsqueeze(1)
+                    .transpose(0, 1)
+                )
+                inp, target, features = self.transformer(x, prototypes)
+                distances = (inp[:, 0, ...] - target) ** 2
+                distances = distances.flatten(2).mean(2)
+                return distances.mean(), dist_inf, probas
+            # Weight transposed sprites and sum
+            elif self.weighting == "tr_sprite":
+                inp, target, features = self.transformer(x, prototypes)
+                logits = self.estimate_logits(features)
+                probas = F.softmax(logits, dim=-1)
+
+                distances = (
+                    inp[:, 0, ...] - (probas[..., None, None, None] * target).sum(1)
+                ) ** 2
+                samplewise_distances = (inp - target) ** 2
+                samplewise_distances = samplewise_distances.flatten(2).mean(2)
+                distances = distances.flatten(1).mean(1)
+                return distances.mean(), samplewise_distances, probas
+
+            # Weight differences
+            elif self.weighting == "diff":
+                inp, target, features = self.transformer(x, prototypes)
+                logits = self.estimate_logits(features)
+                probas = F.softmax(logits, dim=-1)
+                distances = (inp - target) ** 2
+                distances = distances.flatten(2).mean(2)
+                dist_min = (distances * probas).sum(1)
+                return dist_min.mean(), distances, probas
+
+            else:
+                raise ValueError("Probability weighting is not implemented.")
+
+        else:
+            inp, target, features = self.transformer(x, prototypes)
+            distances = (inp - target) ** 2
+            if self.loss_weights is not None:
+                distances = distances * self.loss_weights
+            distances = distances.flatten(2).mean(2)
+            dist_min = distances.min(1)[0]
+            return dist_min.mean(), distances, None
 
     @torch.no_grad()
     def transform(self, x, inverse=False):
@@ -167,18 +249,22 @@ class DTIKmeans(nn.Module):
     def reassign_empty_clusters(self, proportions):
         if not self._reassign_cluster:
             return [], 0
-
         idx = np.argmax(proportions)
         reassigned = []
         for i in range(self.n_prototypes):
             if proportions[i] < self.empty_cluster_threshold:
                 self.restart_branch_from(i, idx)
                 reassigned.append(i)
+        # to add noise to reassigned class with max number of samples
         if len(reassigned) > 0:
             self.restart_branch_from(idx, idx)
         return reassigned, idx
 
     def restart_branch_from(self, i, j):
+        # if hasattr(self, "proba"):
+        #    noise_scale = NOISE_SCALE * 2
+        # else:
+        noise_scale = NOISE_SCALE
         if hasattr(self, "generator"):
             self.latent_params[i].data.copy_(
                 copy_with_noise(self.latent_params[j], NOISE_SCALE)
@@ -189,6 +275,16 @@ class DTIKmeans(nn.Module):
                 copy_with_noise(self.prototype_params[j], NOISE_SCALE)
             )
             param = self.prototype_params
+
+        if hasattr(self, "proba") and self.proba_type == "linear":
+            self.proba[0].weight[i, :].data.copy_(
+                copy_with_noise(self.proba[0].weight[j, :], noise_scale)
+            )
+            self.proba[0].bias[i].data.copy_(
+                copy_with_noise(self.proba[0].bias[j], noise_scale)
+            )
+            proba_params = [self.proba[0].weight, self.proba[0].bias]
+
         self.transformer.restart_branch_from(i, j, noise_scale=0)
 
         if hasattr(self, "optimizer"):
@@ -196,6 +292,19 @@ class DTIKmeans(nn.Module):
             if isinstance(opt, (Adam,)):
                 opt.state[param]["exp_avg"][i] = opt.state[param]["exp_avg"][j]
                 opt.state[param]["exp_avg_sq"][i] = opt.state[param]["exp_avg_sq"][j]
+                if hasattr(self, "proba"):
+                    opt.state[proba_params[0]]["exp_avg"][i, :] = opt.state[
+                        proba_params[0]
+                    ]["exp_avg"][j, :]
+                    opt.state[proba_params[0]]["exp_avg_sq"][i, :] = opt.state[
+                        proba_params[0]
+                    ]["exp_avg_sq"][j, :]
+                    opt.state[proba_params[1]]["exp_avg"][i] = opt.state[
+                        proba_params[1]
+                    ]["exp_avg"][j]
+                    opt.state[proba_params[1]]["exp_avg_sq"][i] = opt.state[
+                        proba_params[1]
+                    ]["exp_avg_sq"][j]
             else:
                 raise NotImplementedError(
                     "unknown optimizer: you should define how to reinstanciate statistics if any"

@@ -484,7 +484,6 @@ class Trainer:
         loss.backward()
         self.optimizer.step()
 
-        average_losses = np.zeros(self.n_prototypes)
         with torch.no_grad():
             if self.pred_class:
                 proportions = (1 - distances).mean(0)
@@ -499,9 +498,6 @@ class Trainer:
                 lambda t: t.cpu().numpy(), distances.min(1)
             )
             argmin_idx_ = argmin_idx_.astype(np.int32)
-
-            for k in range(self.n_prototypes):
-                sample_per_clus = argmin_idx_ == k
 
         self.train_metrics.update(
             {

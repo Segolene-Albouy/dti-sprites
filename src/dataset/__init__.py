@@ -26,7 +26,6 @@ def get_dataset(dataset_name):
         MNISTColorDataset,
         MNIST1kDataset,
         USPSDataset,
-        CoADataset,
     )
 
     return {
@@ -58,8 +57,8 @@ def get_dataset(dataset_name):
         "Lettre_a": LettersDataset,
         "Lettre_e": LettersDataset,
         "Lettre_i": LettersDataset,
-        # CoA
-        "coa": CoADataset,
         # Generic
         "generic": GenericDataset,
+        # CoA
+        "coa_marion": CoADataset,
     }[dataset_name]

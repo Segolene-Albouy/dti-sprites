@@ -25,8 +25,8 @@ class PrototypeTransformationNetwork(nn.Module):
         super().__init__()
         self.n_prototypes = n_prototypes
         self.sequence_name = transformation_sequence
-        if self.sequence_name in ["id", "identity"]:
-            return None
+        # if self.sequence_name in ["id", "identity"]:
+        #    return None
 
         encoder = kwargs.get("encoder", None)
         if encoder is not None:
@@ -79,11 +79,11 @@ class PrototypeTransformationNetwork(nn.Module):
 
     def forward(self, x, prototypes, features=None):
         # x shape is BCHW, prototypes list of K elements of size BCHW
+        features = self.encoder(x) if features is None else features
         if self.is_identity:
             inp = x.unsqueeze(1).expand(-1, self.n_prototypes, -1, -1, -1)
             target = prototypes.permute(1, 0, 2, 3, 4)
         else:
-            features = self.encoder(x) if features is None else features
             inp = x.unsqueeze(1).expand(-1, self.n_prototypes, -1, -1, -1)
             if self.shared_t:
                 target = [self.tsf_sequences(proto, features) for proto in prototypes]
@@ -93,7 +93,7 @@ class PrototypeTransformationNetwork(nn.Module):
                     for tsf_seq, proto in zip(self.tsf_sequences, prototypes)
                 ]
             target = torch.stack(target, dim=1)
-        return inp, target
+        return inp, target, features
 
     @torch.no_grad()
     def inverse_transform(self, x, features=None):

@@ -1,6 +1,8 @@
 dataset:
   name: fleurons
   img_size: 256
+  annotation_path: filtered_metadata_3.tsv
+  n_classes: 36
 model:
   name: dtikmeans
   n_prototypes: 36
@@ -10,23 +12,24 @@ model:
       init: gaussian
       gaussian_weights_std: 25
   encoder_name: resnet20
-  transformation_sequence: identity_color #_projective
-  curriculum_learning: [300]
+  transformation_sequence: identity_color_affine
+  curriculum_learning: [300, 600]
 training:
-  batch_size: 8
+  batch_size: 16
   optimizer:
     name: adam
-    lr: 2.0e-3
+    lr: 1.0e-3
     transformer:
       weight_decay: 1.0e-6
   scheduler:
     name: multi_step
     gamma: 0.1
-    milestones: [350]
+    milestones: [950]
     update_range: epoch
-  n_epoches: 400
+  n_epoches: 1000
   train_stat_interval: 50
   val_stat_interval: 100
   check_cluster_interval: 100
-  seed: 81341
+  seed: 77280
   visualizer_port:
+  resume: 0318_baseline_b16_color_aff_2 
