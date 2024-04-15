@@ -81,7 +81,7 @@ def generate_data(
             ]
     else:
         for _ in range(K):
-            if init_type == "soup":
+            if init_type == "random":
                 noise_scale = noise_scale or 1
                 sample = torch.rand(dataset[0][0].shape)
                 if value is not None:

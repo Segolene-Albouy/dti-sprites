@@ -20,7 +20,7 @@ model:
     source: generator
     generator: mlp
     data:
-      freeze: [True, True, False]
+      freeze: [1, 1, 10]
       init: ["constant", "constant", "gaussian"]
       value: [0., 0.9, 0.]
       gaussian_weights_std: 5
