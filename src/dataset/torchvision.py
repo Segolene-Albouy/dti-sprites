@@ -28,7 +28,7 @@ class _AbstractTorchvisionDataset(TorchDataset):
     label_shift = 0
     n_samples = None
 
-    def __init__(self, split, subset, **kwargs):
+    def __init__(self, split, **kwargs):
         super().__init__()
         self.split = split
         self.eval_mode = kwargs.get("eval_mode", False)

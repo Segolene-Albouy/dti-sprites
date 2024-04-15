@@ -313,7 +313,7 @@ class DTISprites(nn.Module):
             mask = create_gaussian_weights(size, 1, std)
             masks = mask.unsqueeze(0).expand(K, -1, -1, -1)
         elif mask_init == "random":
-            masks = torch.rand(K, *size)
+            masks = torch.rand(K, 1, *size)
         elif mask_init == "sample":
             assert dataset
             masks = torch.stack(

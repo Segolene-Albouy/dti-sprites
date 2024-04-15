@@ -26,7 +26,6 @@ def get_dataset(dataset_name):
         MNISTColorDataset,
         MNIST1kDataset,
         USPSDataset,
-        CoADataset,
     )
 
     return {
