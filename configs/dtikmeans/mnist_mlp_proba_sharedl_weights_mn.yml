@@ -9,11 +9,13 @@ model:
   encoder_name: resnet20
   color_channels: 1
   transformation_sequence: identity_affine_morpho_tps
-  curriculum_learning: [5, 15, 20]
+  curriculum_learning: [20, 30, 35]
   grid_size: 4
   kernel_size: 7
   proba: True
-  proba_weighting: sprite
+  proba_weighting: tr_sprite
+  proba_type: marionette
+  reassign_cluster: False
 training:
   batch_size: 128
   optimizer:
@@ -24,12 +26,11 @@ training:
   scheduler:
     name: multi_step
     gamma: 0.1
-    milestones: [35]
+    milestones: [50]
     update_range: epoch
-  n_epoches: 40
+  n_epoches: 55
   train_stat_interval: 25
   val_stat_interval: 50
   check_cluster_interval: 50
-  seed: 57058
+  seed: 98007
   visualizer_port: 
-  resume: 0327_proba_weight_diff

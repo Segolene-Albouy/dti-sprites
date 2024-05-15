@@ -13,9 +13,8 @@ model:
   grid_size: 4
   kernel_size: 7
   proba: True
-  proba_weighting: diff
-  proba_type: marionette
-  reassign_cluster: False
+  proba_weighting: diff 
+  proba_type: linear
 training:
   batch_size: 128
   optimizer:
@@ -29,8 +28,8 @@ training:
     milestones: [50]
     update_range: epoch
   n_epoches: 55
-  train_stat_interval: 25
+  train_stat_interval: 5
   val_stat_interval: 50
   check_cluster_interval: 50
-  seed: 85118
+  seed: 96916
   visualizer_port: 

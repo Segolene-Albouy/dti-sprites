@@ -1,21 +1,21 @@
 dataset:
-  name: mnist
+  name: frgc
 model:
   name: dtikmeans
-  n_prototypes: 10
+  n_prototypes: 20
   prototype:
     source: generator
     generator: mlp
   encoder_name: resnet20
-  color_channels: 1
-  transformation_sequence: identity_affine_morpho_tps
-  curriculum_learning: [20, 30, 35]
+  transformation_sequence: identity_color_affine_tps
+  curriculum_learning: [150, 300, 500] # +100
   grid_size: 4
-  kernel_size: 7
   proba: True
   proba_weighting: diff
-  proba_type: marionette
+  proba_type: linear
   reassign_cluster: False
+  freq_weight: 0.1
+  empty_cluster_threshold: 0.025
 training:
   batch_size: 128
   optimizer:
@@ -26,11 +26,11 @@ training:
   scheduler:
     name: multi_step
     gamma: 0.1
-    milestones: [50]
+    milestones: [750]
     update_range: epoch
-  n_epoches: 55
-  train_stat_interval: 25
-  val_stat_interval: 50
-  check_cluster_interval: 50
-  seed: 85118
+  n_epoches: 800
+  train_stat_interval: 10
+  val_stat_interval: 20
+  check_cluster_interval: 20
+  seed: 23818
   visualizer_port: 

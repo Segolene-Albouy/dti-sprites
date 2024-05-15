@@ -1,5 +1,5 @@
 dataset:
-  name: mnist
+  name: fashion_mnist
 model:
   name: dtikmeans
   n_prototypes: 10
@@ -8,14 +8,14 @@ model:
     generator: mlp
   encoder_name: resnet20
   color_channels: 1
-  transformation_sequence: identity_affine_morpho_tps
-  curriculum_learning: [20, 30, 35]
+  transformation_sequence: identity_color_affine_tps
+  curriculum_learning: [20, 30, 40] # + 15
   grid_size: 4
-  kernel_size: 7
   proba: True
   proba_weighting: diff
-  proba_type: marionette
+  proba_type: linear
   reassign_cluster: False
+  freq_weight: 0
 training:
   batch_size: 128
   optimizer:
@@ -32,5 +32,5 @@ training:
   train_stat_interval: 25
   val_stat_interval: 50
   check_cluster_interval: 50
-  seed: 85118
-  visualizer_port: 
+  seed: 97784
+  visualizer_port:
