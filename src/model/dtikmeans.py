@@ -75,20 +75,34 @@ class DTIKmeans(nn.Module):
 
         proba = kwargs.get("proba", False)
         if proba:
+            # proba regularization loss weight
+            self.freq_weight = kwargs.get("freq_weight", 0)
+            # what to weight with probabilities
             self.weighting = kwargs.get("proba_weighting", "tr_sprite")
+            if self.weighting == "sprite":
+                assert kwargs.get("shared_t", False)
+
+            # how to generate probabilities
             self.proba_type = kwargs.get("proba_type", "marionette")
             self.out_ch = self.transformer.enc_out_channels
-            if self.proba_type == "linear":
-                self.proba = nn.Sequential(
-                    nn.Linear(self.out_ch, 10),
-                    nn.LayerNorm(10, elementwise_affine=False),
-                )
-            else:
+            if self.proba_type == "linear":  # linear mapping
+                self.proba = nn.Linear(self.out_ch, n_prototypes)
+            else:  # marionette-like
                 self.proba = nn.Sequential(
                     nn.Linear(LATENT_SIZE, self.out_ch),
                     nn.LayerNorm(self.out_ch, elementwise_affine=False),
                 )
-            self._reassign_cluster = False
+                self.shared_l = kwargs.get("shared_l", True)
+                if not self.shared_l:
+                    self.proba_latent_params = nn.Parameter(
+                        torch.stack(
+                            [
+                                torch.normal(mean=0.0, std=1.0, size=latent_dims)
+                                for k in range(n_prototypes)
+                            ],
+                            dim=0,
+                        )
+                    )
 
         use_gaussian_weights = kwargs.get("gaussian_weights", False)
         if use_gaussian_weights:
@@ -108,6 +122,8 @@ class DTIKmeans(nn.Module):
             out += [self.prototype_params]
         if hasattr(self, "proba"):
             out += list(chain(*[self.proba.parameters()]))
+            if hasattr(self, "shared_l") and (not self.shared_l):
+                out += [self.proba_latent_params]
         return out
 
     def transformer_parameters(self):
@@ -143,7 +159,10 @@ class DTIKmeans(nn.Module):
 
     def estimate_logits(self, features):
         if self.proba_type == "marionette":
-            proba_theta = self.proba(self.latent_params)
+            if not self.shared_l:
+                proba_theta = self.proba(self.proba_latent_params)
+            else:
+                proba_theta = self.proba(self.latent_params)
             logits = (1.0 / np.sqrt(self.out_ch)) * (features @ proba_theta.T)
             return logits
         elif self.proba_type == "linear":
@@ -162,7 +181,7 @@ class DTIKmeans(nn.Module):
         prototypes = params.unsqueeze(1).expand(-1, x.size(0), x.size(1), -1, -1)
 
         if hasattr(self, "proba"):
-            # Weight sprites
+            # Weight sprites and transform
             if self.weighting == "sprite":
                 with torch.no_grad():
                     inp, target_inf, features = self.transformer(x, prototypes)
@@ -180,30 +199,41 @@ class DTIKmeans(nn.Module):
                 distances = (inp[:, 0, ...] - target) ** 2
                 distances = distances.flatten(2).mean(2)
                 return distances.mean(), dist_inf, probas
-            # Weight transposed sprites and sum
-            elif self.weighting == "tr_sprite":
-                inp, target, features = self.transformer(x, prototypes)
-                logits = self.estimate_logits(features)
-                probas = F.softmax(logits, dim=-1)
 
-                distances = (
-                    inp[:, 0, ...] - (probas[..., None, None, None] * target).sum(1)
-                ) ** 2
+            inp, target, features = self.transformer(x, prototypes)
+            logits = self.estimate_logits(features)
+            probas = F.softmax(logits, dim=-1)
+
+            freqs = probas.mean(dim=0)
+            freqs = freqs / freqs.sum()
+            freq_loss = freqs.clamp(max=(self.empty_cluster_threshold))
+
+            # Weight transformed sprites and sum
+            if self.weighting == "tr_sprite":
+                weighted_target = (probas[..., None, None, None] * target).sum(1)
+                distances = (inp[:, 0, ...] - weighted_target) ** 2
+                distances = distances.flatten(1).mean(1)
+
+                # distances of input from transformed sprites
                 samplewise_distances = (inp - target) ** 2
                 samplewise_distances = samplewise_distances.flatten(2).mean(2)
-                distances = distances.flatten(1).mean(1)
-                return distances.mean(), samplewise_distances, probas
 
+                return (
+                    distances.mean() + self.freq_weight * (1 - freq_loss.sum()),
+                    samplewise_distances,
+                    probas,
+                )
             # Weight differences
             elif self.weighting == "diff":
-                inp, target, features = self.transformer(x, prototypes)
-                logits = self.estimate_logits(features)
-                probas = F.softmax(logits, dim=-1)
                 distances = (inp - target) ** 2
                 distances = distances.flatten(2).mean(2)
                 dist_min = (distances * probas).sum(1)
-                return dist_min.mean(), distances, probas
 
+                return (
+                    dist_min.mean() + self.freq_weight * (1 - freq_loss.sum()),
+                    distances,
+                    probas,
+                )
             else:
                 raise ValueError("Probability weighting is not implemented.")
 
@@ -261,10 +291,6 @@ class DTIKmeans(nn.Module):
         return reassigned, idx
 
     def restart_branch_from(self, i, j):
-        # if hasattr(self, "proba"):
-        #    noise_scale = NOISE_SCALE * 2
-        # else:
-        noise_scale = NOISE_SCALE
         if hasattr(self, "generator"):
             self.latent_params[i].data.copy_(
                 copy_with_noise(self.latent_params[j], NOISE_SCALE)
@@ -276,15 +302,22 @@ class DTIKmeans(nn.Module):
             )
             param = self.prototype_params
 
-        if hasattr(self, "proba") and self.proba_type == "linear":
-            self.proba[0].weight[i, :].data.copy_(
-                copy_with_noise(self.proba[0].weight[j, :], noise_scale)
-            )
-            self.proba[0].bias[i].data.copy_(
-                copy_with_noise(self.proba[0].bias[j], noise_scale)
-            )
-            proba_params = [self.proba[0].weight, self.proba[0].bias]
-
+        if hasattr(self, "proba"):
+            if self.proba_type == "linear":
+                self.proba.weight[i].data.copy_(
+                    copy_with_noise(self.proba.weight[j], noise_scale=0)
+                )
+                self.proba.bias[i].data.copy_(
+                    copy_with_noise(self.proba.bias[j], noise_scale=0)
+                )
+                proba_params = [self.proba.weight, self.proba.bias]
+            elif not self.shared_l:
+                self.proba_latent_params[i].data.copy_(
+                    copy_with_noise(self.proba_latent_params[j], NOISE_SCALE)
+                )
+                proba_params = [self.proba_latent_params]
+            else:
+                proba_params = []
         self.transformer.restart_branch_from(i, j, noise_scale=0)
 
         if hasattr(self, "optimizer"):
@@ -293,18 +326,9 @@ class DTIKmeans(nn.Module):
                 opt.state[param]["exp_avg"][i] = opt.state[param]["exp_avg"][j]
                 opt.state[param]["exp_avg_sq"][i] = opt.state[param]["exp_avg_sq"][j]
                 if hasattr(self, "proba"):
-                    opt.state[proba_params[0]]["exp_avg"][i, :] = opt.state[
-                        proba_params[0]
-                    ]["exp_avg"][j, :]
-                    opt.state[proba_params[0]]["exp_avg_sq"][i, :] = opt.state[
-                        proba_params[0]
-                    ]["exp_avg_sq"][j, :]
-                    opt.state[proba_params[1]]["exp_avg"][i] = opt.state[
-                        proba_params[1]
-                    ]["exp_avg"][j]
-                    opt.state[proba_params[1]]["exp_avg_sq"][i] = opt.state[
-                        proba_params[1]
-                    ]["exp_avg_sq"][j]
+                    for p_ in proba_params:
+                        opt.state[p_]["exp_avg"][i] = opt.state[p_]["exp_avg"][j]
+                        opt.state[p_]["exp_avg_sq"][i] = opt.state[p_]["exp_avg_sq"][j]
             else:
                 raise NotImplementedError(
                     "unknown optimizer: you should define how to reinstanciate statistics if any"
