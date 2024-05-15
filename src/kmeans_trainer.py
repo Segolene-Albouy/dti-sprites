@@ -221,6 +221,7 @@ class Trainer:
         # Train metrics & check_cluster interval
         metric_names = ["time/img", "loss"]
         metric_names += [f"prop_clus{i}" for i in range(self.n_prototypes)]
+        metric_names += [f"proba_clus{i}" for i in range(self.n_prototypes)]
         train_iter_interval = cfg["training"]["train_stat_interval"]
         self.train_stat_interval = train_iter_interval
         self.train_metrics = Metrics(*metric_names)
@@ -366,14 +367,14 @@ class Trainer:
 
         for epoch in range(self.start_epoch, self.n_epoches + 1):
             batch_start = self.start_batch if epoch == self.start_epoch else 1
-            for batch, (images, _, _, _) in enumerate(self.train_loader, start=1):
+            for batch, (images, labels, _, _) in enumerate(self.train_loader, start=1):
                 if batch < batch_start:
                     continue
                 cur_iter += 1
                 if cur_iter > self.n_iterations:
                     break
 
-                self.single_train_batch_run(images)
+                self.single_train_batch_run(images, labels)
                 if self.scheduler_update_range == "batch":
                     self.update_scheduler(epoch, batch=batch)
 
@@ -411,7 +412,7 @@ class Trainer:
                 PRINT_LR_UPD_FMT(epoch, self.n_epoches, batch, self.n_batches, lr)
             )
 
-    def single_train_batch_run(self, images):
+    def single_train_batch_run(self, images, labels):
         start_time = time.time()
         B = images.size(0)
         self.model.train()
@@ -427,24 +428,34 @@ class Trainer:
 
         with torch.no_grad():
             if hasattr(self.model, "proba"):
-                argmin_idx = probas.argmax(1)
+                argmin_idx = probas.argmax(1)  # probas: B, K
             else:
                 argmin_idx = distances.min(1)[1]
             mask = torch.zeros(B, self.n_prototypes, device=self.device).scatter(
                 1, argmin_idx[:, None], 1
             )
+
+            if hasattr(self.model, "proba"):
+                winners = probas * mask
+                probabilities = winners.sum(0).cpu().numpy() / mask.sum(0).cpu().numpy()
+                isnan = np.isnan(probabilities)
+                probabilities[isnan] = 0
+                self.train_metrics.update(
+                    {f"proba_clus{i}": p for i, p in enumerate(probabilities)}
+                )
+
             proportions = mask.sum(0).cpu().numpy() / B
             argmin_idx = argmin_idx.cpu().numpy()
 
-        self.train_metrics.update(
-            {
-                "time/img": (time.time() - start_time) / B,
-                "loss": loss.item(),
-            }
-        )
-        self.train_metrics.update(
-            {f"prop_clus{i}": p for i, p in enumerate(proportions)}
-        )
+            self.train_metrics.update(
+                {
+                    "time/img": (time.time() - start_time) / B,
+                    "loss": loss.item(),
+                }
+            )
+            self.train_metrics.update(
+                {f"prop_clus{i}": p for i, p in enumerate(proportions)}
+            )
 
     @torch.no_grad()
     def log_images(self, cur_iter):
@@ -525,16 +536,13 @@ class Trainer:
         proportions = [
             self.train_metrics[f"prop_clus{i}"].avg for i in range(self.n_prototypes)
         ]
-        if epoch > 20:
-            reassigned, idx = self.model.reassign_empty_clusters(proportions)
-        else:
-            reassigned = []
-            idx = 0
+        reassigned, idx = self.model.reassign_empty_clusters(proportions)
         msg = PRINT_CHECK_CLUSTERS_FMT(
             epoch, self.n_epoches, batch, self.n_batches, reassigned, idx
         )
         self.print_and_log_info(msg)
         self.train_metrics.reset(*[f"prop_clus{i}" for i in range(self.n_prototypes)])
+        self.train_metrics.reset(*[f"proba_clus{i}" for i in range(self.n_prototypes)])
 
     def log_train_metrics(self, cur_iter, epoch, batch):
         # Print & write metrics to file
@@ -694,8 +702,9 @@ class Trainer:
 
         # Losses
         losses = list(filter(lambda s: s.startswith("loss"), self.train_metrics.names))
-        df = df_train.join(df_val[["loss_val"]], how="outer")
-        fig = plot_lines(df, losses + ["loss_val"], title="Loss")
+        # df = df_train.join(df_val[["loss_val"]], how="outer")
+        df = df_train
+        fig = plot_lines(df, losses, title="Loss")  # + ["loss_val"], title="Loss")
         fig.savefig(self.run_dir / "loss.pdf")
 
         # Cluster proportions
@@ -706,6 +715,11 @@ class Trainer:
         s.index = list(map(lambda n: n.replace("prop_clus", ""), names))
         fig = plot_bar(s, title="Final cluster proportions")
         fig.savefig(self.run_dir / "cluster_proportions_final.pdf")
+
+        # Cluster probabilities
+        names = list(filter(lambda s: s.startswith("proba_"), self.train_metrics.names))
+        fig = plot_lines(df, names, title="Cluster Probabilities")
+        fig.savefig(self.run_dir / "cluster_probabilities.pdf")
 
         # Validation
         if not self.is_val_empty:
