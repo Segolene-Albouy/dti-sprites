@@ -1,29 +1,28 @@
 dataset:
-  name: clevr6
+  name: dsprites_gray
 model:
   name: dti_sprites
-  n_sprites: 6
+  n_sprites: 3
   n_backgrounds: 1
-  n_objects: 6
+  n_objects: 5
   prototype:
-    source: data
+    source: generator
+    generator: mlp
     data:
-      freeze: [0, 0, 40]
-      init: ["constant", "mean", "gaussian"]
-      value: [0.9, 0., 0.]
-      gaussian_weights_std: 10
-  init_bkg_linear: mean
-  init_latent_linear: gaussian
+      freeze: [1, 1, 40]
+      init: ["constant", "constant", "gaussian"]
+      gaussian_weights_std: 7
+      value: [0.9, 0.5, 0.]
   inject_noise: 0.4
-  encoder_name: resnet18
-  with_pool: [2, 2]
-  transformation_sequence: identity_projective
+  encoder_name: resnet32
+  with_pool: [4, 4]
+  transformation_sequence: identity_similarity
   transformation_sequence_bkg: color
   transformation_sequence_layer: color_position
-  curriculum_learning: [150]
+  curriculum_learning: [80]
   curriculum_learning_bkg: False
   curriculum_learning_layer: False
-  sprite_size: [40, 40]
+  sprite_size: [28, 28]
   pred_occlusion: True
   estimate_minimum: True
   greedy_algo_iter: 3
@@ -40,14 +39,13 @@ training:
   scheduler:
     name: multi_step
     gamma: [1, 0.1]
-    milestones: [250, 400]
-  n_epoches: 450
-  train_stat_interval: 1000
-  val_stat_interval: 2000
-  check_cluster_interval: 250
+    milestones: [1000, 2000]
+  n_epoches: 2040
+  train_stat_interval: 2000
+  val_stat_interval: 40000 #4000
+  check_cluster_interval: 100
   eval_with_bkg: True
   eval_semantic: True
-  seed: 4502
+  seed: 92721
   visualizer_port:
   pretrained: 
-  resume: 

@@ -6,14 +6,15 @@ model:
   n_backgrounds: 1
   n_objects: 6
   prototype:
-    source: data
+    source: generator
+    generator: mlp
     data:
-      freeze: [0, 0, 40]
+      freeze: [0, 0, 10]
       init: ["constant", "mean", "gaussian"]
       value: [0.9, 0., 0.]
       gaussian_weights_std: 10
-  init_bkg_linear: mean
   init_latent_linear: gaussian
+  init_bkg_linear: mean
   inject_noise: 0.4
   encoder_name: resnet18
   with_pool: [2, 2]
@@ -29,6 +30,13 @@ model:
   greedy_algo_iter: 3
   add_empty_sprite: True
   lambda_empty_sprite: 1.0e-4
+  empty_cluster_threshold: 0.0833
+  proba: True
+  proba_weighting: tr_sprite
+  proba_type: linear
+  reassign_cluster: False
+  bin_weight: 0.0
+  freq_weight: 0.0
 training:
   batch_size: 32
   n_workers: 4
@@ -43,11 +51,10 @@ training:
     milestones: [250, 400]
   n_epoches: 450
   train_stat_interval: 1000
-  val_stat_interval: 2000
+  val_stat_interval: 500
   check_cluster_interval: 250
   eval_with_bkg: True
   eval_semantic: True
-  seed: 4502
+  seed: 27667
   visualizer_port:
   pretrained: 
-  resume: 

@@ -1329,7 +1329,7 @@ class Trainer:
 
         iterator = iter(train_loader)
         for j in range(N):
-            images, _, _, _ = iterator.next()
+            images, _, _, _ = next(iterator)
             images = images.to(self.device)
             if self.pred_class:
                 recons = self.model.transform(images, hard_occ_grid=True).cpu()
@@ -1409,7 +1409,7 @@ class Trainer:
 
         iterator = iter(train_loader)
         for k in range(N):
-            images, labels = iterator.next()
+            images, labels = next(iterator)
             images = images.to(self.device)
             loss_val, distances, class_prob = self.model(images)
             if self.n_objects == 1:
@@ -1495,7 +1495,7 @@ class Trainer:
 
         iterator = iter(train_loader)
         for j in range(N):
-            images, labels = iterator.next()
+            images, labels = next(iterator)
             images = images.to(self.device)
             if self.pred_class:
                 recons = self.model.transform(images, hard_occ_grid=True).cpu()
