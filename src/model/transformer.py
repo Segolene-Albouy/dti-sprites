@@ -8,6 +8,7 @@ from torch import nn
 from torch.nn import functional as F
 from torch.optim import Adam, RMSprop
 from torchvision.models import vgg16_bn
+from torchvision.transforms.functional import resize
 
 from .mini_resnet import get_resnet_model as get_mini_resnet_model
 from .resnet import get_resnet_model
@@ -41,8 +42,11 @@ class PrototypeTransformationNetwork(nn.Module):
                 "img_size": img_size,
                 "with_pool": kwargs.get("with_pool", True),
             }
+            encoder_name = encoder_kwargs["encoder_name"]
             self.encoder = Encoder(**encoder_kwargs)
-            self.enc_out_channels = get_output_size(in_channels, img_size, self.encoder)
+            self.enc_out_channels = get_output_size(
+                in_channels, img_size, self.encoder, encoder_name
+            )
         tsf_kwargs = {
             "freeze_frg": kwargs.get("freeze_frg", False),
             "in_channels": self.enc_out_channels,
@@ -223,6 +227,9 @@ class Encoder(nn.Module):
             ]
         elif encoder_name == "vgg16":
             seq = [vgg16_bn(pretrained=False).features]
+        elif encoder_name == "dinov2":
+            dino = torch.hub.load("facebookresearch/dinov2", "dinov2_vits14").eval()
+            seq = [dino]
         else:
             try:
                 resnet = get_resnet_model(encoder_name)(
@@ -256,11 +263,16 @@ class Encoder(nn.Module):
         self.encoder = nn.Sequential(*seq)
         img_size = kwargs.get("img_size", None)
         if img_size is not None:
-            self.out_ch = get_output_size(in_channels, img_size, self.encoder)
+            self.out_ch = get_output_size(
+                in_channels, img_size, self.encoder, encoder_name
+            )
         else:
             None
+        self.encoder_name = encoder_name
 
     def forward(self, x):
+        if self.encoder_name == "dinov2":
+            x = resize(x, (28, 28))
         return self.encoder(x).flatten(1)
 
 

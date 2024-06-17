@@ -5,17 +5,17 @@ model:
   n_sprites: 6
   n_backgrounds: 1
   n_objects: 6
+  inject_noise: 0.4
   prototype:
     source: generator
-    generator: mlp
+    generator: mlp 
     data:
-      freeze: [0, 0, 10]
+      freeze: [0, 0, 40]
       init: ["constant", "mean", "gaussian"]
       value: [0.9, 0., 0.]
       gaussian_weights_std: 10
   init_latent_linear: gaussian
   init_bkg_linear: mean
-  inject_noise: 0.4
   encoder_name: resnet18
   with_pool: [2, 2]
   transformation_sequence: identity_projective
@@ -44,11 +44,11 @@ training:
     milestones: [250, 400]
   n_epoches: 450
   train_stat_interval: 1000
-  val_stat_interval: 500
+  val_stat_interval: 2000
   check_cluster_interval: 250
   eval_with_bkg: True
   eval_semantic: True
-  seed: 1889
+  seed: 66156
   visualizer_port:
   pretrained: 
-  resume: 0611_time-mlp_22922 
+  resume: 

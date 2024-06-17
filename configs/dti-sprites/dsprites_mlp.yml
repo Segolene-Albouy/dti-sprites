@@ -5,15 +5,16 @@ model:
   n_sprites: 3
   n_backgrounds: 1
   n_objects: 5
+  inject_noise: 0.4
   prototype:
-    source: generator
+    source: generator 
     generator: mlp
     data:
-      freeze: [1, 1, 10]
+      freeze: [0, 0, 10]
       init: ["constant", "constant", "gaussian"]
-      gaussian_weights_std: 7
       value: [0.9, 0.5, 0.]
-  inject_noise: 0.4
+      gaussian_weights_std: 7
+  init_latent_linear: gaussian
   encoder_name: resnet32
   with_pool: [4, 4]
   transformation_sequence: identity_similarity
@@ -42,10 +43,11 @@ training:
     milestones: [250, 500]
   n_epoches: 510
   train_stat_interval: 2000
-  val_stat_interval: 4000
+  val_stat_interval: 400
   check_cluster_interval: 100
   eval_with_bkg: True
   eval_semantic: True
-  seed: 30152
+  seed: 55912
   visualizer_port:
   pretrained: 
+  resume: 

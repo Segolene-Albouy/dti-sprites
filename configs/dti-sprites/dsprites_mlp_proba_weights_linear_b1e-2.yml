@@ -33,7 +33,7 @@ model:
   proba_weighting: tr_sprite
   proba_type: linear
   reassign_cluster: False
-  bin_weight: 0.0
+  bin_weight: 0.01
   freq_weight: 0.0
   empty_cluster_threshold: 0.1667
 training:
@@ -54,7 +54,7 @@ training:
   check_cluster_interval: 100
   eval_with_bkg: True
   eval_semantic: True
-  seed: 21412
+  seed: 57819
   visualizer_port:
   pretrained: 
-  resume: 1002_dsprites-proba 
+  resume: 1001_proba-b1e-2

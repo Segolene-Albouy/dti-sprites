@@ -11,12 +11,6 @@ model:
   curriculum_learning: [16, 144]
   gaussian_weights: True
   gaussian_weights_std: 7
-  proba: True
-  proba_weighting: tr_sprite
-  proba_type: linear
-  reassign_cluster: False
-  freq_weight: 1.
-  empty_cluster_threshold: 0.05
 training:
   batch_size: 128
   optimizer:
@@ -33,5 +27,6 @@ training:
   train_stat_interval: 500
   val_stat_interval: 1000
   check_cluster_interval: 100
-  seed: 69625
+  seed: 75323
   visualizer_port:
+  resume: 0916_svhn_mlp_x8_4

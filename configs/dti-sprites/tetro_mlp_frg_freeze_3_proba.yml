@@ -10,10 +10,11 @@ model:
     source: generator
     generator: mlp
     data:
-      freeze: [0, 0, 1]
+      freeze: [3, 0, 1]
       init: ["constant", "constant", "gaussian"]
       value: [0.9, 0., 0.]
       gaussian_weights_std: 5
+  init_latent_linear: gaussian 
   encoder_name: resnet32
   transformation_sequence: identity
   transformation_sequence_bkg: color
@@ -21,7 +22,6 @@ model:
   curriculum_learning: False
   curriculum_learning_bkg: False
   curriculum_learning_layer: False
-  init_latent_linear: gaussian
   sprite_size: [24, 24]
   pred_occlusion: False
   estimate_minimum: True
@@ -43,12 +43,13 @@ training:
     name: multi_step
     gamma: [1, 0.1]
     milestones: [100, 200]
-  n_epoches: 2 #210
+  n_epoches: 210
   train_stat_interval: 500
-  val_stat_interval: 1000
+  val_stat_interval: 100
   check_cluster_interval: 50
   eval_with_bkg: True
   eval_semantic: True
-  seed: 7889
+  seed: 93477
   visualizer_port:
   pretrained: 
+  resume:

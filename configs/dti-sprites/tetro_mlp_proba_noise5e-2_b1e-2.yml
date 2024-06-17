@@ -5,12 +5,12 @@ model:
   n_sprites: 19
   n_backgrounds: 0
   n_objects: 3
-  inject_noise: 0.4
+  inject_noise: 0.05
   prototype:
     source: generator
     generator: mlp
     data:
-      freeze: [0, 0, 4]
+      freeze: [0, 0, 1]
       init: ["constant", "constant", "gaussian"]
       value: [0.9, 0., 0.]
       gaussian_weights_std: 5
@@ -27,10 +27,12 @@ model:
   estimate_minimum: True
   reassign_cluster: False
   proba: True
+  proba_weighting: tr_sprite
   proba_type: linear
-  freq_weight: 0.1
-  bin_weight: 0.0
-  empty_cluster_threshold: 0.025
+  reassign_cluster: False
+  bin_weight: 0.01
+  freq_weight: 0.0
+  empty_cluster_threshold: 0.026
 training:
   batch_size: 32
   n_workers: 8
@@ -42,14 +44,14 @@ training:
   scheduler:
     name: multi_step
     gamma: [1, 0.1]
-    milestones: [400, 800]
-  n_epoches: 840
+    milestones: [100, 200]
+  n_epoches: 210
   train_stat_interval: 500
   val_stat_interval: 1000
   check_cluster_interval: 50
   eval_with_bkg: True
   eval_semantic: True
-  seed: 71458
+  seed: 61055
   visualizer_port:
   pretrained: 
-  resume: 0816_tetro-mlp-proba-b0 
+  resume:
