@@ -1,5 +1,5 @@
 dataset:
-  name: mnist_color
+  name: mnist
 model:
   name: dtikmeans
   n_prototypes: 10
@@ -7,15 +7,16 @@ model:
     source: generator
     generator: mlp
   encoder_name: resnet20
-  transformation_sequence: identity_color_affine_tps
-  curriculum_learning: [10, 30, 60]
+  color_channels: 1
+  transformation_sequence: identity_affine_morpho_tps
+  curriculum_learning: [20, 30, 35]
   grid_size: 4
+  kernel_size: 7
   proba: True
-  proba_weighting: diff
-  proba_type: linear
+  proba_weighting: tr_sprite
+  proba_type: marionette
   reassign_cluster: False
-  freq_weight: 1
-  empty_cluster_threshold: 0.05
+  shared_l: False
 training:
   batch_size: 128
   optimizer:
@@ -26,11 +27,11 @@ training:
   scheduler:
     name: multi_step
     gamma: 0.1
-    milestones: [90]
+    milestones: [50]
     update_range: epoch
-  n_epoches: 100
+  n_epoches: 55
   train_stat_interval: 25
   val_stat_interval: 50
   check_cluster_interval: 50
-  seed: 73440
-  visualizer_port:
+  seed: 28519
+  visualizer_port: 

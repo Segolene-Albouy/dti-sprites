@@ -9,7 +9,7 @@ model:
   encoder_name: resnet20
   color_channels: 1
   transformation_sequence: identity_color_affine_tps
-  curriculum_learning: [20, 30, 40] # + 15
+  curriculum_learning: [10, 30, 50]
   grid_size: 4
   proba: True
   proba_weighting: diff
@@ -27,11 +27,11 @@ training:
   scheduler:
     name: multi_step
     gamma: 0.1
-    milestones: [50]
+    milestones: [70]
     update_range: epoch
-  n_epoches: 55
+  n_epoches: 80
   train_stat_interval: 25
   val_stat_interval: 50
   check_cluster_interval: 50
-  seed: 20370
+  seed: 25723
   visualizer_port:

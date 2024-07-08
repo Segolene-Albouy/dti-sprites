@@ -14,7 +14,7 @@ model:
   proba_weighting: diff
   proba_type: linear
   reassign_cluster: False
-  freq_weight: 1
+  freq_weight: 0.01
   empty_cluster_threshold: 0.05
 training:
   batch_size: 128
@@ -32,5 +32,5 @@ training:
   train_stat_interval: 25
   val_stat_interval: 50
   check_cluster_interval: 50
-  seed: 73440
+  seed: 10268
   visualizer_port:

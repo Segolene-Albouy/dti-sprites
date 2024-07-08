@@ -8,12 +8,14 @@ model:
     generator: mlp
   encoder_name: resnet20
   transformation_sequence: identity_color_affine_tps
-  curriculum_learning: [20, 45, 60] # + 15, +15
+  curriculum_learning: [10, 30, 60]
   grid_size: 4
+  proba: True
   proba_weighting: diff
   proba_type: linear
   reassign_cluster: False
   freq_weight: 0
+  empty_cluster_threshold: 0.05
 training:
   batch_size: 128
   optimizer:
@@ -24,11 +26,11 @@ training:
   scheduler:
     name: multi_step
     gamma: 0.1
-    milestones: [75]
+    milestones: [90]
     update_range: epoch
-  n_epoches: 80
+  n_epoches: 100
   train_stat_interval: 25
   val_stat_interval: 50
   check_cluster_interval: 50
-  seed: 81568
+  seed: 79789
   visualizer_port:
