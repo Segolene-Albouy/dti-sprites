@@ -222,6 +222,8 @@ class Trainer:
         metric_names = ["time/img", "loss"]
         metric_names += [f"prop_clus{i}" for i in range(self.n_prototypes)]
         metric_names += [f"proba_clus{i}" for i in range(self.n_prototypes)]
+        self.bin_edges = np.arange(0, 1.1, 0.1)
+        self.bin_counts = np.zeros(len(self.bin_edges) - 1)
         train_iter_interval = cfg["training"]["train_stat_interval"]
         self.train_stat_interval = train_iter_interval
         self.train_metrics = Metrics(*metric_names)
@@ -436,14 +438,15 @@ class Trainer:
             )
 
             if hasattr(self.model, "proba"):
-                winners = probas * mask
-                probabilities = winners.sum(0).cpu().numpy() / mask.sum(0).cpu().numpy()
+                winners = probas * mask  # B, K
+                probabilities = (
+                    winners.sum(0).cpu().numpy() / mask.sum(0).cpu().numpy()
+                )  # K
                 isnan = np.isnan(probabilities)
                 probabilities[isnan] = 0
                 self.train_metrics.update(
                     {f"proba_clus{i}": p for i, p in enumerate(probabilities)}
                 )
-
             proportions = mask.sum(0).cpu().numpy() / B
             argmin_idx = argmin_idx.cpu().numpy()
 
@@ -886,6 +889,8 @@ class Trainer:
                 _, out, probas = self.model(images)
                 argmin_idx = probas.argmax(1)
                 dist_min_by_sample = out[:, argmin_idx]
+                hist, _ = np.histogram(probas.cpu().numpy(), bins=self.bin_edges)
+                self.bin_counts += hist
             else:
                 distances = self.model(images)[1]
                 dist_min_by_sample, argmin_idx = distances.min(1)
@@ -894,6 +899,7 @@ class Trainer:
             scores.update(labels.long().numpy(), argmin_idx.cpu().numpy())
 
         scores = scores.compute()
+        self.print_and_log_info("bin_counts: " + str(self.bin_counts))
         self.print_and_log_info("final_loss: {:.5}".format(loss.avg))
         self.print_and_log_info(
             "final_scores: "
