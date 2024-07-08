@@ -8,14 +8,15 @@ model:
     generator: mlp
   encoder_name: resnet20
   transformation_sequence: identity_color_projective
-  curriculum_learning: [4, 36] # x2
+  curriculum_learning: [8, 72] 
   gaussian_weights: True
   gaussian_weights_std: 7
   proba: True
-  proba_weighting: diff
+  proba_weighting: tr_sprite
   proba_type: linear
   reassign_cluster: False
-  freq_weight: 0
+  freq_weight: 0.1
+  empty_cluster_threshold: 0.05
 training:
   batch_size: 128
   optimizer:
@@ -26,11 +27,12 @@ training:
   scheduler:
     name: multi_step
     gamma: 0.1
-    milestones: [60]
+    milestones: [120]
     update_range: epoch
-  n_epoches: 66
+  n_epoches: 132
   train_stat_interval: 500
   val_stat_interval: 1000
   check_cluster_interval: 100
-  seed: 29675
+  seed: 61512
   visualizer_port:
+  resume: 0627_svhn_proba-weights-linear-f1e-1
