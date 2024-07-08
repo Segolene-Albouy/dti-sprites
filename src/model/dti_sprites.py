@@ -306,7 +306,9 @@ class DTISprites(nn.Module):
 
         proba = kwargs.get("proba", False)
         if proba:
-            self.proba = nn.Linear(self.out_ch, n_sprites * n_objects)
+            self.proba = nn.Linear(self.encoder.out_ch, n_sprites * n_objects)
+            self.freq_weight = kwargs.get("freq_weight", 0)
+        self.estimate_proba = proba
 
     @staticmethod
     def init_masks(K, mask_init, size, std, value, dataset):
@@ -464,10 +466,8 @@ class DTISprites(nn.Module):
             if self.learn_backgrounds and not self.freeze_bkg:
                 params.append(self.latent_bkg_params)
                 params.extend(list(chain(*[self.bkg_generator.parameters()])))
-        if hasattr(self, "proba"):
+        if self.estimate_proba:
             params.extend(list(chain(*[self.proba.parameters()])))
-            if hasattr(self, "shared_l") and (not self.shared_l):
-                out += [self.proba_latent_params]
         return iter(params)
 
     def transformer_parameters(self):
@@ -497,21 +497,29 @@ class DTISprites(nn.Module):
             distances = self.criterion(x, target, weights=img_masks)
             loss = distances.min(1)[0].mean()
         else:
-            if hasattr(self, "proba"):
-                pass
-                # TODO: Create every possible transformation and weight diff
+            target = self.compose(
+                tsf_layers, tsf_masks, occ_grid, tsf_bkgs, class_prob
+            )  # BCHW
+            if img_masks != None:
+                img_masks = img_masks.unsqueeze(1)
+            if self.estimate_proba:
+                freqs = class_prob.mean(dim=0).mean(dim=0)  # B
+                freqs = freqs / freqs.sum()
+                freq_loss = freqs.clamp(max=(self.empty_cluster_threshold))
+                loss = self.criterion(
+                    x.unsqueeze(1), target.unsqueeze(1), weights=img_masks
+                ).mean() + self.freq_weight * (1 - freq_loss.sum())
+                class_oh = torch.zeros(class_prob.shape, device=x.device).scatter_(
+                    1, class_prob.argmax(1, keepdim=True), 1
+                )
+                distances = 1 - class_oh.permute(2, 0, 1).flatten(1)  # B(L*K)
             else:
-                target = self.compose(
-                    tsf_layers, tsf_masks, occ_grid, tsf_bkgs, class_prob
-                )  # BCHW
-                if img_masks != None:
-                    img_masks = img_masks.unsqueeze(1)
                 loss = self.criterion(
                     x.unsqueeze(1), target.unsqueeze(1), weights=img_masks
                 ).mean()
-            distances = 1 - class_prob.permute(2, 0, 1).flatten(1)  # B(L*K)
+                distances = 1 - class_prob.permute(2, 0, 1).flatten(1)  # B(L*K)
 
-        return loss, distances
+        return loss, distances, class_prob
 
     def predict(self, x, epoch=None):
         B, C, H, W = x.size()
@@ -617,9 +625,11 @@ class DTISprites(nn.Module):
 
         occ_grid = self.predict_occlusion_grid(x, features)  # LLB
 
-        if hasattr(self, "proba"):
-            logits = self.proba(features)
-            class_prob = torch.nn.functional.softmax(logits, dim=-1)
+        if self.estimate_proba:
+            logits = self.proba(features).reshape(B, L, K)
+            class_prob = torch.nn.functional.softmax(logits, dim=-1).permute(
+                1, 2, 0
+            )  # LKB
         else:
             if self.estimate_minimum:
                 class_prob = self.greedy_algo_selection(
