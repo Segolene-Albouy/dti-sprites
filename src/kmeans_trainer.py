@@ -52,7 +52,9 @@ class Trainer:
     """Pipeline to train a NN model using a certain dataset, both specified by an YML config."""
 
     @use_seed()
-    def __init__(self, config_path, run_dir, parent_model=None, recluster=False):
+    def __init__(
+        self, config_path, run_dir, parent_model=None, recluster=False, save=False
+    ):
         self.config_path = coerce_to_path_and_check_exist(config_path)
         self.run_dir = coerce_to_path_and_create_dir(run_dir)
         self.logger = get_logger(self.run_dir, name="trainer")
@@ -393,7 +395,8 @@ class Trainer:
                     if not self.is_val_empty:
                         self.run_val()
                         self.log_val_metrics(cur_iter, epoch, batch)
-                    self.log_images(cur_iter)
+                    if self.save:
+                        self.log_images(cur_iter)
                     self.save(epoch=epoch, batch=batch)
 
             self.model.step()
@@ -739,33 +742,40 @@ class Trainer:
             fig.savefig(self.run_dir / "scores_by_cls.pdf")
 
         # Prototypes & Variances
-        size = MAX_GIF_SIZE if MAX_GIF_SIZE < max(self.img_size) else self.img_size
-        with torch.no_grad():
-            self.save_prototypes()
-        if self.is_gmm:
-            self.save_variances()
-        for k in range(self.n_prototypes):
-            save_gif(self.prototypes_path / f"proto{k}", f"prototype{k}.gif", size=size)
-            shutil.rmtree(str(self.prototypes_path / f"proto{k}"))
+        if self.save:
+            size = MAX_GIF_SIZE if MAX_GIF_SIZE < max(self.img_size) else self.img_size
+            with torch.no_grad():
+                self.save_prototypes()
             if self.is_gmm:
-                save_gif(self.variances_path / f"var{k}", f"variance{k}.gif", size=size)
-                shutil.rmtree(str(self.variances_path / f"var{k}"))
-
-        # Transformation predictions
-        if self.model.transformer.is_identity:
-            # no need to keep transformation predictions
-            shutil.rmtree(str(self.transformation_path))
-            coerce_to_path_and_create_dir(self.transformation_path)
-        else:
-            self.save_transformed_images()
-            for i in range(self.images_to_tsf.size(0)):
-                for k in range(self.n_prototypes):
+                self.save_variances()
+            for k in range(self.n_prototypes):
+                save_gif(
+                    self.prototypes_path / f"proto{k}", f"prototype{k}.gif", size=size
+                )
+                shutil.rmtree(str(self.prototypes_path / f"proto{k}"))
+                if self.is_gmm:
                     save_gif(
-                        self.transformation_path / f"img{i}" / f"tsf{k}",
-                        f"tsf{k}.gif",
-                        size=size,
+                        self.variances_path / f"var{k}", f"variance{k}.gif", size=size
                     )
-                    shutil.rmtree(str(self.transformation_path / f"img{i}" / f"tsf{k}"))
+                    shutil.rmtree(str(self.variances_path / f"var{k}"))
+
+            # Transformation predictions
+            if self.model.transformer.is_identity:
+                # no need to keep transformation predictions
+                shutil.rmtree(str(self.transformation_path))
+                coerce_to_path_and_create_dir(self.transformation_path)
+            else:
+                self.save_transformed_images()
+                for i in range(self.images_to_tsf.size(0)):
+                    for k in range(self.n_prototypes):
+                        save_gif(
+                            self.transformation_path / f"img{i}" / f"tsf{k}",
+                            f"tsf{k}.gif",
+                            size=size,
+                        )
+                        shutil.rmtree(
+                            str(self.transformation_path / f"img{i}" / f"tsf{k}")
+                        )
 
         self.print_and_log_info("Training metrics and visuals saved")
 
@@ -928,6 +938,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "-c", "--config", nargs="?", type=str, required=True, help="Config file name"
     )
+    parser.add_argument("--save", action="store_true")
+    parser.set_defaults(save=False)
     args = parser.parse_args()
 
     assert args.tag is not None and args.config is not None
@@ -938,5 +950,5 @@ if __name__ == "__main__":
     dataset = cfg["dataset"]["name"]
 
     run_dir = RUNS_PATH / dataset / args.tag
-    trainer = Trainer(config, run_dir, seed=seed)
+    trainer = Trainer(config, run_dir, seed=seed, save=save)
     trainer.run(seed=seed)
