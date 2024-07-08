@@ -14,7 +14,7 @@ from .u_net import UNet
 NOISE_SCALE = 0.0001
 EMPTY_CLUSTER_THRESHOLD = 0.2
 LATENT_SIZE = 128
-EPSILON = 1e-10
+EPSILON = 1e-6
 
 
 class DTIKmeans(nn.Module):
@@ -77,6 +77,9 @@ class DTIKmeans(nn.Module):
         if proba:
             # proba regularization loss weight
             self.freq_weight = kwargs.get("freq_weight", 0)
+            self.beta_dist = torch.distributions.Beta(
+                torch.Tensor([2.0]).to("cuda"), torch.Tensor([2.0]).to("cuda")
+            )
             # what to weight with probabilities
             self.weighting = kwargs.get("proba_weighting", "tr_sprite")
             if self.weighting == "sprite":
@@ -169,6 +172,17 @@ class DTIKmeans(nn.Module):
             logits = self.proba(features)
             return logits
 
+    def reg_func(self, probas, type="freq"):
+        if type == "freq":
+            freqs = probas.mean(dim=0)
+            freqs = freqs / freqs.sum()
+            return freqs.clamp(max=(self.empty_cluster_threshold))
+        elif type == "bin":
+            p = probas.clamp(min=EPSILON, max=1 - EPSILON)
+            return torch.exp(self.beta_dist.log_prob(p))
+        else:
+            raise ValueError("undefined regularizer")
+
     def forward(self, x):
         if self.proto_source == "generator":
             params = self.generator(self.latent_params)
@@ -204,28 +218,34 @@ class DTIKmeans(nn.Module):
             logits = self.estimate_logits(features)
             probas = F.softmax(logits, dim=-1)
 
-            freqs = probas.mean(dim=0)
-            freqs = freqs / freqs.sum()
-            freq_loss = freqs.clamp(max=(self.empty_cluster_threshold))
+            freq_loss = self.reg_func(probas, type="freq")
 
             # Weight transformed sprites and sum
             if self.weighting == "tr_sprite":
                 weighted_target = (probas[..., None, None, None] * target).sum(1)
                 distances = (inp[:, 0, ...] - weighted_target) ** 2
+                if self.loss_weights is not None:
+                    distances = distances * self.loss_weights
                 distances = distances.flatten(1).mean(1)
 
                 # distances of input from transformed sprites
                 samplewise_distances = (inp - target) ** 2
                 samplewise_distances = samplewise_distances.flatten(2).mean(2)
 
+                bin_loss = self.reg_func(probas, type="bin")
+
                 return (
-                    distances.mean() + self.freq_weight * (1 - freq_loss.sum()),
+                    distances.mean()
+                    + self.freq_weight * (1 - freq_loss.sum())
+                    + 0.1 * (bin_loss.mean()),
                     samplewise_distances,
                     probas,
                 )
             # Weight differences
             elif self.weighting == "diff":
                 distances = (inp - target) ** 2
+                if self.loss_weights is not None:
+                    distances = distances * self.loss_weights
                 distances = distances.flatten(2).mean(2)
                 dist_min = (distances * probas).sum(1)
 
