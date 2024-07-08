@@ -36,4 +36,3 @@ training:
   seed: 9725
   visualizer_port:
   pretrained: 
-  resume: 

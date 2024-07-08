@@ -62,7 +62,7 @@ class _AbstractMultiObjectDataset(TorchDataset):
                 ).long()
             else:
                 label = -1
-        return inp, label, [], self.data_path / "images" / f"{idx}.png"
+        return inp, label, [], str(self.data_path / "images" / f"{idx}.png")
 
     @property
     @lru_cache()

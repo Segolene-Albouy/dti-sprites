@@ -52,7 +52,9 @@ class Trainer:
     """Pipeline to train a NN model using a certain dataset, both specified by an YML config."""
 
     @use_seed()
-    def __init__(self, config_path, run_dir, parent_model=None, recluster=False):
+    def __init__(
+        self, config_path, run_dir, parent_model=None, recluster=False, save=False
+    ):
         self.config_path = coerce_to_path_and_check_exist(config_path)
         self.run_dir = coerce_to_path_and_create_dir(run_dir)
         self.logger = get_logger(self.run_dir, name="trainer")
@@ -222,6 +224,8 @@ class Trainer:
         metric_names = ["time/img", "loss"]
         metric_names += [f"prop_clus{i}" for i in range(self.n_prototypes)]
         metric_names += [f"proba_clus{i}" for i in range(self.n_prototypes)]
+        self.bin_edges = np.arange(0, 1.1, 0.1)
+        self.bin_counts = np.zeros(len(self.bin_edges) - 1)
         train_iter_interval = cfg["training"]["train_stat_interval"]
         self.train_stat_interval = train_iter_interval
         self.train_metrics = Metrics(*metric_names)
@@ -391,7 +395,8 @@ class Trainer:
                     if not self.is_val_empty:
                         self.run_val()
                         self.log_val_metrics(cur_iter, epoch, batch)
-                    self.log_images(cur_iter)
+                    if self.save:
+                        self.log_images(cur_iter)
                     self.save(epoch=epoch, batch=batch)
 
             self.model.step()
@@ -436,14 +441,15 @@ class Trainer:
             )
 
             if hasattr(self.model, "proba"):
-                winners = probas * mask
-                probabilities = winners.sum(0).cpu().numpy() / mask.sum(0).cpu().numpy()
+                winners = probas * mask  # B, K
+                probabilities = (
+                    winners.sum(0).cpu().numpy() / mask.sum(0).cpu().numpy()
+                )  # K
                 isnan = np.isnan(probabilities)
                 probabilities[isnan] = 0
                 self.train_metrics.update(
                     {f"proba_clus{i}": p for i, p in enumerate(probabilities)}
                 )
-
             proportions = mask.sum(0).cpu().numpy() / B
             argmin_idx = argmin_idx.cpu().numpy()
 
@@ -736,33 +742,40 @@ class Trainer:
             fig.savefig(self.run_dir / "scores_by_cls.pdf")
 
         # Prototypes & Variances
-        size = MAX_GIF_SIZE if MAX_GIF_SIZE < max(self.img_size) else self.img_size
-        with torch.no_grad():
-            self.save_prototypes()
-        if self.is_gmm:
-            self.save_variances()
-        for k in range(self.n_prototypes):
-            save_gif(self.prototypes_path / f"proto{k}", f"prototype{k}.gif", size=size)
-            shutil.rmtree(str(self.prototypes_path / f"proto{k}"))
+        if self.save:
+            size = MAX_GIF_SIZE if MAX_GIF_SIZE < max(self.img_size) else self.img_size
+            with torch.no_grad():
+                self.save_prototypes()
             if self.is_gmm:
-                save_gif(self.variances_path / f"var{k}", f"variance{k}.gif", size=size)
-                shutil.rmtree(str(self.variances_path / f"var{k}"))
-
-        # Transformation predictions
-        if self.model.transformer.is_identity:
-            # no need to keep transformation predictions
-            shutil.rmtree(str(self.transformation_path))
-            coerce_to_path_and_create_dir(self.transformation_path)
-        else:
-            self.save_transformed_images()
-            for i in range(self.images_to_tsf.size(0)):
-                for k in range(self.n_prototypes):
+                self.save_variances()
+            for k in range(self.n_prototypes):
+                save_gif(
+                    self.prototypes_path / f"proto{k}", f"prototype{k}.gif", size=size
+                )
+                shutil.rmtree(str(self.prototypes_path / f"proto{k}"))
+                if self.is_gmm:
                     save_gif(
-                        self.transformation_path / f"img{i}" / f"tsf{k}",
-                        f"tsf{k}.gif",
-                        size=size,
+                        self.variances_path / f"var{k}", f"variance{k}.gif", size=size
                     )
-                    shutil.rmtree(str(self.transformation_path / f"img{i}" / f"tsf{k}"))
+                    shutil.rmtree(str(self.variances_path / f"var{k}"))
+
+            # Transformation predictions
+            if self.model.transformer.is_identity:
+                # no need to keep transformation predictions
+                shutil.rmtree(str(self.transformation_path))
+                coerce_to_path_and_create_dir(self.transformation_path)
+            else:
+                self.save_transformed_images()
+                for i in range(self.images_to_tsf.size(0)):
+                    for k in range(self.n_prototypes):
+                        save_gif(
+                            self.transformation_path / f"img{i}" / f"tsf{k}",
+                            f"tsf{k}.gif",
+                            size=size,
+                        )
+                        shutil.rmtree(
+                            str(self.transformation_path / f"img{i}" / f"tsf{k}")
+                        )
 
         self.print_and_log_info("Training metrics and visuals saved")
 
@@ -886,6 +899,8 @@ class Trainer:
                 _, out, probas = self.model(images)
                 argmin_idx = probas.argmax(1)
                 dist_min_by_sample = out[:, argmin_idx]
+                hist, _ = np.histogram(probas.cpu().numpy(), bins=self.bin_edges)
+                self.bin_counts += hist
             else:
                 distances = self.model(images)[1]
                 dist_min_by_sample, argmin_idx = distances.min(1)
@@ -894,6 +909,7 @@ class Trainer:
             scores.update(labels.long().numpy(), argmin_idx.cpu().numpy())
 
         scores = scores.compute()
+        self.print_and_log_info("bin_counts: " + str(self.bin_counts))
         self.print_and_log_info("final_loss: {:.5}".format(loss.avg))
         self.print_and_log_info(
             "final_scores: "
@@ -922,6 +938,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "-c", "--config", nargs="?", type=str, required=True, help="Config file name"
     )
+    parser.add_argument("--save", action="store_true")
+    parser.set_defaults(save=False)
     args = parser.parse_args()
 
     assert args.tag is not None and args.config is not None
@@ -932,5 +950,5 @@ if __name__ == "__main__":
     dataset = cfg["dataset"]["name"]
 
     run_dir = RUNS_PATH / dataset / args.tag
-    trainer = Trainer(config, run_dir, seed=seed)
+    trainer = Trainer(config, run_dir, seed=seed, save=save)
     trainer.run(seed=seed)

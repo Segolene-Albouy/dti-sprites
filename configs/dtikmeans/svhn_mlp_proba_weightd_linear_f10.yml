@@ -8,7 +8,7 @@ model:
     generator: mlp
   encoder_name: resnet20
   transformation_sequence: identity_color_projective
-  curriculum_learning: [16, 144]
+  curriculum_learning: [16, 144] 
   gaussian_weights: True
   gaussian_weights_std: 7
   proba: True
@@ -33,5 +33,5 @@ training:
   train_stat_interval: 500
   val_stat_interval: 1000
   check_cluster_interval: 100
-  seed: 42730
+  seed: 48808
   visualizer_port:

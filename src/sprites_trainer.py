@@ -98,9 +98,7 @@ class Trainer:
         # Datasets and dataloaders
         self.dataset_kwargs = cfg["dataset"]
         self.dataset_name = self.dataset_kwargs.pop("name")
-        train_dataset = get_dataset(self.dataset_name)(
-            "train", **self.dataset_kwargs
-        )
+        train_dataset = get_dataset(self.dataset_name)("train", **self.dataset_kwargs)
         val_dataset = get_dataset(self.dataset_name)("val", **self.dataset_kwargs)
 
         self.n_classes = train_dataset.n_classes
@@ -179,6 +177,7 @@ class Trainer:
             )
         self.learn_masks = getattr(self.model, "learn_masks", False)
         self.learn_backgrounds = getattr(self.model, "learn_backgrounds", False)
+        self.learn_proba = getattr(self.model, "proba", False)
 
         # Optimizer
         opt_params = cfg["training"]["optimizer"] or {}
@@ -450,7 +449,7 @@ class Trainer:
                         self.run_val()
                         self.log_val_metrics(cur_iter, epoch, batch)
                     self.save(epoch=epoch, batch=batch)
-                    #self.log_images(cur_iter)
+                    self.log_images(cur_iter)
 
             self.model.step()
             if self.scheduler_update_range == "epoch" and batch_start == 1:
@@ -480,24 +479,26 @@ class Trainer:
         else:
             masks = None
         self.optimizer.zero_grad()
-        loss, distances = self.model(images, masks, epoch=epoch)
+        loss, distances, class_prob = self.model(images, masks, epoch=epoch)
         loss.backward()
         self.optimizer.step()
 
         with torch.no_grad():
-            if self.pred_class:
-                proportions = (1 - distances).mean(0)
-            else:
-                argmin_idx = distances.min(1)[1]
-                one_hot = torch.zeros(B, distances.size(1), device=self.device).scatter(
-                    1, argmin_idx[:, None], 1
+            if self.learn_proba:
+                class_oh = class_prob.permute(2, 0, 1).flatten(1)  # B(L*K)
+                one_hot = torch.zeros(class_oh.shape, device=self.device).scatter(
+                    1, class_oh.argmax(1, keepdim=True), 1
                 )
                 proportions = one_hot.sum(0) / B
-
-            dist_min_by_sample, argmin_idx_ = map(
-                lambda t: t.cpu().numpy(), distances.min(1)
-            )
-            argmin_idx_ = argmin_idx_.astype(np.int32)
+            else:
+                if self.pred_class:  # distances B(L*K), discovery
+                    proportions = (1 - distances).mean(0)
+                else:  # distances B(K**L*M), clustering
+                    argmin_idx = distances.argmin(1)
+                    one_hot = torch.zeros(
+                        B, distances.size(1), device=self.device
+                    ).scatter(1, argmin_idx[:, None], 1)
+                    proportions = one_hot.sum(0) / B
 
         self.train_metrics.update(
             {
@@ -827,14 +828,16 @@ class Trainer:
         for images, labels, _, _ in self.val_loader:
             B, C, H, W = images.shape
             images = images.to(self.device)
-            loss_val, distances = self.model(images)
+            loss_val, distances, class_prob = self.model(images)
 
-            if not self.pred_class:
+            if not self.pred_class:  # clustering
                 if self.n_backgrounds > 1:
+                    assert class_prob is None
                     distances, bkg_idx = distances.view(
                         B, self.n_prototypes, self.n_backgrounds
                     ).min(2)
                 if self.n_objects > 1:
+                    assert class_prob is None
                     distances = distances.view(
                         B, *(self.n_prototypes,) * self.n_objects
                     )
@@ -842,10 +845,14 @@ class Trainer:
                     for k in range(self.n_objects, 1, -1):
                         distances, idx = distances.min(k)
                         other_idxs.insert(0, idx)
-                dist_min_by_sample, argmin_idx = distances.min(1)
+                if self.learn_proba:
+                    class_oh = class_prob.permute(2, 0, 1).flatten(1)
+                    argmin_idx = class_oh.argmax(1)
+                else:
+                    argmin_idx = distances.argmin(1)
 
             self.val_metrics.update({"loss_val": loss_val.item()})
-            if self.seg_eval:
+            if self.seg_eval:  # we account for probabilities within model.transform
                 if self.n_objects == 1:
                     masks = self.model.transform(images, with_composition=True)[1][1]
                     masks = masks[torch.arange(B), argmin_idx]
@@ -870,7 +877,9 @@ class Trainer:
                         labels.long().numpy(), target.long().cpu().numpy()
                     )
 
-            elif self.instance_eval:
+            elif (
+                self.instance_eval
+            ):  # we account for probabilities within model.transform
                 if self.n_objects == 1:
                     masks = self.model.transform(images, with_composition=True)[1][1]
                     self.val_scores.update(
@@ -954,7 +963,6 @@ class Trainer:
         self.model.eval()
         # Prototypes & transformation predictions
         size = MAX_GIF_SIZE if MAX_GIF_SIZE < max(self.img_size) else self.img_size
-        """
         self.save_prototypes()
         if self.learn_masks:
             self.save_masked_prototypes()
@@ -962,7 +970,6 @@ class Trainer:
         if self.learn_backgrounds:
             self.save_backgrounds()
         self.save_transformed_images()
-        """
         # Train metrics
         df_train = pd.read_csv(self.train_metrics_path, sep="\t", index_col=False)  # 0)
         df_val = pd.read_csv(self.val_metrics_path, sep="\t", index_col=0)
@@ -1006,7 +1013,6 @@ class Trainer:
                 )
                 fig.savefig(self.run_dir / "scores_by_cls.pdf")
 
-        """
         # Save gifs for prototypes
         for k in range(self.n_prototypes):
             save_gif(self.prototypes_path / f"proto{k}", f"prototype{k}.gif", size=size)
@@ -1064,7 +1070,6 @@ class Trainer:
                     shutil.rmtree(
                         str(self.transformation_path / f"img{i}" / f"bkg_tsf{k}")
                     )
-        """
         self.print_and_log_info("Metrics and plots saved")
 
     def evaluate(self):
@@ -1150,12 +1155,17 @@ class Trainer:
         cluster_by_path = []
         for images, _, _, path in train_loader:
             images = images.to(self.device)
-            dist = self.model(images)[1]
+            _, dist, class_prob = self.model(images)
             if self.n_backgrounds > 1:
+                assert class_prob is None
                 dist = dist.view(
                     images.size(0), self.n_prototypes, self.n_backgrounds
                 ).min(2)[0]
+
             dist_min_by_sample, argmin_idx = map(lambda t: t.cpu().numpy(), dist.min(1))
+            if self.learn_proba:
+                class_oh = class_prob.permute(2, 0, 1).flatten(1)
+                argmin_idx = class_oh.argmax(1)
 
             loss.update(dist_min_by_sample.mean(), n=len(dist_min_by_sample))
             argmin_idx = argmin_idx.astype(np.int32)
@@ -1166,11 +1176,6 @@ class Trainer:
                     (os.path.relpath(p, train_loader.dataset.data_path), argmin_idx[i])
                     for i, p in enumerate(path)
                 ]
-
-            dist_max_by_sample, argmax_idx_ = map(
-                lambda t: t.cpu().numpy(), dist.max(1)
-            )
-            argmax_idx_ = argmax_idx_.astype(np.int32)
 
             transformed_imgs = self.model.transform(images).cpu()
             for k in range(self.n_prototypes):
@@ -1234,12 +1239,16 @@ class Trainer:
 
         for images, labels, _, _ in train_loader:
             images = images.to(self.device)
-            loss_val, distances = self.model(images)
+            loss_val, distances, class_prob = self.model(images)
             B, C, H, W = images.shape
             if self.n_objects == 1:
                 masks = self.model.transform(images, with_composition=True)[1][1]
                 if masks.size(1) > 1:
-                    argmin_idx = self.model(images)[1].min(1)[1]
+                    if self.learn_proba:
+                        class_oh = class_prob.permute(2, 0, 1).flatten(1)
+                        argmin_idx = class_oh.argmax(1)
+                    else:
+                        argmin_idx = distances.argmin(1)
                     masks = masks[torch.arange(B), argmin_idx]
                 scores.update(labels.long().numpy(), (masks > 0.5).long().cpu().numpy())
             else:
@@ -1249,14 +1258,15 @@ class Trainer:
                     ).cpu()
                     scores.update(labels.long().numpy(), target.long().numpy())
                 else:
-                    distances = self.model(images)[1].view(
+                    assert class_prob is None
+                    distances = distances.view(
                         B, *(self.n_prototypes,) * self.n_objects
                     )
                     other_idxs = []
                     for k in range(self.n_objects, 1, -1):
                         distances, idx = distances.min(k)
                         other_idxs.insert(0, idx)
-                    dist_min_by_sample, argmin_idx = distances.min(1)
+                    argmin_idx = distances.argmin(1)
 
                     target = self.model.transform(
                         images, pred_semantic_labels=True
@@ -1321,9 +1331,9 @@ class Trainer:
                     ).cpu()
 
             else:
-                distances = self.model(images)[1].view(
-                    B, *(self.n_prototypes,) * self.n_objects
-                )
+                # TODO: proba segmentation
+                _, distances, class_prob = self.model(images)
+                distances = distances.view(B, *(self.n_prototypes,) * self.n_objects)
                 other_idxs = []
                 for k in range(self.n_objects, 1, -1):
                     distances, idx = distances.min(k)
@@ -1387,7 +1397,7 @@ class Trainer:
         for k in range(N):
             images, labels = iterator.next()
             images = images.to(self.device)
-            loss_val, distances = self.model(images)
+            loss_val, distances, class_prob = self.model(images)
             if self.n_objects == 1:
                 masks = self.model.transform(images, with_composition=True)[1][1]
                 scores.update(labels.long().numpy(), (masks > 0.5).long().cpu().numpy())
@@ -1399,6 +1409,7 @@ class Trainer:
                     scores.update(labels.long().numpy(), target.long().numpy())
 
                 else:
+                    # TODO: proba segmentation
                     distances = distances.view(
                         B, *(self.n_prototypes,) * self.n_objects
                     )
@@ -1477,9 +1488,9 @@ class Trainer:
                     images, pred_instance_labels=True, with_bkg=self.eval_with_bkg
                 ).cpu()
             else:
-                distances = self.model(images)[1].view(
-                    B, *(self.n_prototypes,) * self.n_objects
-                )
+                # TODO: proba segmentation
+                _, distances, class_prob = self.model(images)
+                distances = distances.view(B, *(self.n_prototypes,) * self.n_objects)
                 other_idxs = []
                 for k in range(self.n_objects, 1, -1):
                     distances, idx = distances.min(k)
@@ -1551,8 +1562,9 @@ class Trainer:
         for images, labels, _, _ in loader:
             B = images.size(0)
             images = images.to(self.device)
-            distances = self.model(images)[1]
+            _, distances, class_prob = self.model(images)
             if self.n_backgrounds > 1:
+                assert class_prob is None
                 distances, bkg_idx = distances.view(
                     B, self.n_prototypes, self.n_backgrounds
                 ).min(2)
@@ -1562,7 +1574,11 @@ class Trainer:
                 for k in range(self.n_objects, 1, -1):
                     distances, idx = distances.min(k)
                     other_idxs.insert(0, idx)
+
             dist_min_by_sample, argmin_idx = distances.min(1)
+            if self.learn_proba:
+                class_oh = class_prob.permute(2, 0, 1).flatten(1)
+                argmin_idx = class_oh.argmax(1)
 
             loss.update(dist_min_by_sample.mean(), n=len(dist_min_by_sample))
             assert self.n_objects == 1
