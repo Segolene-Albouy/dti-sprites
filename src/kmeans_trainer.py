@@ -58,6 +58,7 @@ class Trainer:
         self.config_path = coerce_to_path_and_check_exist(config_path)
         self.run_dir = coerce_to_path_and_create_dir(run_dir)
         self.logger = get_logger(self.run_dir, name="trainer")
+        self.save_img = save
         self.print_and_log_info(
             "Trainer initialisation: run directory is {}".format(run_dir)
         )
@@ -395,7 +396,7 @@ class Trainer:
                     if not self.is_val_empty:
                         self.run_val()
                         self.log_val_metrics(cur_iter, epoch, batch)
-                    if self.save:
+                    if self.save_img:
                         self.log_images(cur_iter)
                     self.save(epoch=epoch, batch=batch)
 
@@ -742,7 +743,7 @@ class Trainer:
             fig.savefig(self.run_dir / "scores_by_cls.pdf")
 
         # Prototypes & Variances
-        if self.save:
+        if self.save_img:
             size = MAX_GIF_SIZE if MAX_GIF_SIZE < max(self.img_size) else self.img_size
             with torch.no_grad():
                 self.save_prototypes()
@@ -950,5 +951,5 @@ if __name__ == "__main__":
     dataset = cfg["dataset"]["name"]
 
     run_dir = RUNS_PATH / dataset / args.tag
-    trainer = Trainer(config, run_dir, seed=seed, save=save)
+    trainer = Trainer(config, run_dir, seed=seed, save=args.save)
     trainer.run(seed=seed)
