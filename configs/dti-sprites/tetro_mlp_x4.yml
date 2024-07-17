@@ -26,11 +26,9 @@ model:
   sprite_size: [24, 24]
   pred_occlusion: False
   estimate_minimum: True
-  reassign_cluster: False
-  freq_weight: 0.1
-  proba: True
-  proba_type: linear
-
+  reassign_cluster: True
+  proba: False
+  freq_weight: 0
 training:
   batch_size: 32
   n_workers: 8
@@ -42,14 +40,14 @@ training:
   scheduler:
     name: multi_step
     gamma: [1, 0.1]
-    milestones: [100, 200]
-  n_epoches: 210
+    milestones: [400, 800]
+  n_epoches: 840
   train_stat_interval: 500
   val_stat_interval: 1000
   check_cluster_interval: 50
   eval_with_bkg: True
   eval_semantic: True
-  seed: 65176
+  seed: 93208
   visualizer_port:
   pretrained: 
-  resume: 
+  resume:
