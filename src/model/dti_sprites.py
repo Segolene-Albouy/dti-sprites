@@ -308,6 +308,10 @@ class DTISprites(nn.Module):
         if proba:
             self.proba = nn.Linear(self.encoder.out_ch, n_sprites * n_objects)
             self.freq_weight = kwargs.get("freq_weight", 0)
+            self.bin_weight = kwargs.get("bin_weight", 0)
+            self.beta_dist = torch.distributions.Beta(
+                torch.Tensor([2.0]).to("cuda"), torch.Tensor([2.0]).to("cuda")
+            )
         self.estimate_proba = proba
 
     @staticmethod
@@ -480,6 +484,17 @@ class DTISprites(nn.Module):
             params.append(self.occ_predictor.parameters())
         return chain(*params)
 
+    def reg_func(self, probas, type="freq"):
+        if type == "freq":
+            freqs = probas.mean(dim=0)
+            freqs = freqs / freqs.sum()
+            return freqs.clamp(max=(self.empty_cluster_threshold))
+        elif type == "bin":
+            p = probas.clamp(min=1e-5, max=1 - 1e-5)
+            return torch.exp(self.beta_dist.log_prob(p))
+        else:
+            raise ValueError("undefined regularizer")
+
     def forward(self, x, img_masks=None, epoch=None):
         B, C, H, W = x.size()
         L, K, M = self.n_objects, self.n_sprites, self.n_backgrounds or 1
@@ -503,12 +518,12 @@ class DTISprites(nn.Module):
             if img_masks != None:
                 img_masks = img_masks.unsqueeze(1)
             if self.estimate_proba:
-                freqs = class_prob.mean(dim=0).mean(dim=0)  # B
-                freqs = freqs / freqs.sum()
-                freq_loss = freqs.clamp(max=(self.empty_cluster_threshold))
+                freq_loss = self.reg_func(class_prob, type="freq")
+                bin_loss = self.reg_func(class_prob, type="bin")
+
                 loss = self.criterion(
                     x.unsqueeze(1), target.unsqueeze(1), weights=img_masks
-                ).mean() + self.freq_weight * (1 - freq_loss.sum())
+                ).mean() + self.freq_weight * (1 - freq_loss.sum()) + self.bin_weight * bin_loss.mean()
                 class_oh = torch.zeros(class_prob.shape, device=x.device).scatter_(
                     1, class_prob.argmax(1, keepdim=True), 1
                 )
