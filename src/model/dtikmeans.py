@@ -14,7 +14,7 @@ from .u_net import UNet
 NOISE_SCALE = 0.0001
 EMPTY_CLUSTER_THRESHOLD = 0.2
 LATENT_SIZE = 128
-EPSILON = 1e-6
+EPSILON = 1e-5
 
 
 class DTIKmeans(nn.Module):
@@ -77,6 +77,7 @@ class DTIKmeans(nn.Module):
         if proba:
             # proba regularization loss weight
             self.freq_weight = kwargs.get("freq_weight", 0)
+            self.bin_weight = kwargs.get("bin_weight", 0)
             self.beta_dist = torch.distributions.Beta(
                 torch.Tensor([2.0]).to("cuda"), torch.Tensor([2.0]).to("cuda")
             )
@@ -231,13 +232,11 @@ class DTIKmeans(nn.Module):
                 # distances of input from transformed sprites
                 samplewise_distances = (inp - target) ** 2
                 samplewise_distances = samplewise_distances.flatten(2).mean(2)
-
                 bin_loss = self.reg_func(probas, type="bin")
-
                 return (
                     distances.mean()
                     + self.freq_weight * (1 - freq_loss.sum())
-                    + 0.1 * (bin_loss.mean()),
+                    + self.bin_weight * (bin_loss.mean()),
                     samplewise_distances,
                     probas,
                 )
