@@ -238,6 +238,8 @@ class Trainer:
         # Train metrics
         metric_names = ["time/img", "loss"]
         metric_names += [f"prop_clus{i}" for i in range(self.n_clusters)]
+        self.bin_edges = np.arange(0, 1.1, 0.1)
+        self.bin_counts = np.zeros(len(self.bin_edges) - 1)
 
         train_iter_interval = cfg["training"]["train_stat_interval"]
         self.train_stat_interval = train_iter_interval
@@ -1166,6 +1168,8 @@ class Trainer:
             if self.learn_proba:
                 class_oh = class_prob.permute(2, 0, 1).flatten(1)
                 argmin_idx = class_oh.argmax(1)
+                hist, _ = np.histogram(class_prob.cpu().numpy(), bins=self.bin_edges)
+                self.bin_counts += hist
 
             loss.update(dist_min_by_sample.mean(), n=len(dist_min_by_sample))
             argmin_idx = argmin_idx.astype(np.int32)
@@ -1189,6 +1193,7 @@ class Trainer:
             ).set_index("path")
             cluster_by_path.to_csv(self.run_dir / "cluster_by_path.csv")
 
+        self.print_and_log_info("bin_counts: " + str(self.bin_counts))
         self.print_and_log_info("final_loss: {:.5}".format(float(loss.avg)))
 
         # Save results
