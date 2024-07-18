@@ -321,7 +321,7 @@ class DTISprites(nn.Module):
         elif mask_init == "gaussian":
             assert std is not None
             mask = create_gaussian_weights(size, 1, std)
-            masks = mask.unsqueeze(0).expand(K, -1, -1, -1)
+            masks = mask.unsqueeze(0).expand(K, -1, -1, -1).clone()
         elif mask_init == "random":
             masks = torch.rand(K, 1, *size)
         elif mask_init == "sample":
@@ -521,9 +521,13 @@ class DTISprites(nn.Module):
                 freq_loss = self.reg_func(class_prob, type="freq")
                 bin_loss = self.reg_func(class_prob, type="bin")
 
-                loss = self.criterion(
-                    x.unsqueeze(1), target.unsqueeze(1), weights=img_masks
-                ).mean() + self.freq_weight * (1 - freq_loss.sum()) + self.bin_weight * bin_loss.mean()
+                loss = (
+                    self.criterion(
+                        x.unsqueeze(1), target.unsqueeze(1), weights=img_masks
+                    ).mean()
+                    + self.freq_weight * (1 - freq_loss.sum())
+                    + self.bin_weight * bin_loss.mean()
+                )
                 class_oh = torch.zeros(class_prob.shape, device=x.device).scatter_(
                     1, class_prob.argmax(1, keepdim=True), 1
                 )
