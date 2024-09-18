@@ -257,36 +257,37 @@ class Trainer:
             )
 
         # Prototypes & Variances
-        self.prototypes_path = coerce_to_path_and_create_dir(
-            self.run_dir / "prototypes"
-        )
-        [
-            coerce_to_path_and_create_dir(self.prototypes_path / f"proto{k}")
-            for k in range(self.n_prototypes)
-        ]
-        if self.is_gmm:
-            self.variances_path = coerce_to_path_and_create_dir(
-                self.run_dir / "variances"
+        if self.save_img:
+            self.prototypes_path = coerce_to_path_and_create_dir(
+                self.run_dir / "prototypes"
             )
             [
-                coerce_to_path_and_create_dir(self.variances_path / f"var{k}")
+                coerce_to_path_and_create_dir(self.prototypes_path / f"proto{k}")
                 for k in range(self.n_prototypes)
             ]
+            if self.is_gmm:
+                self.variances_path = coerce_to_path_and_create_dir(
+                    self.run_dir / "variances"
+                )
+                [
+                    coerce_to_path_and_create_dir(self.variances_path / f"var{k}")
+                    for k in range(self.n_prototypes)
+                ]
 
-        # Transformation predictions
-        self.transformation_path = coerce_to_path_and_create_dir(
-            self.run_dir / "transformations"
-        )
-        self.images_to_tsf = next(iter(self.train_loader))[0][
-            :N_TRANSFORMATION_PREDICTIONS
-        ].to(self.device)
-        for k in range(self.images_to_tsf.size(0)):
-            out = coerce_to_path_and_create_dir(self.transformation_path / f"img{k}")
-            convert_to_img(self.images_to_tsf[k]).save(out / "input.png")
-            [
-                coerce_to_path_and_create_dir(out / f"tsf{k}")
-                for k in range(self.n_prototypes)
-            ]
+            # Transformation predictions
+            self.transformation_path = coerce_to_path_and_create_dir(
+                self.run_dir / "transformations"
+            )
+            self.images_to_tsf = next(iter(self.train_loader))[0][
+                :N_TRANSFORMATION_PREDICTIONS
+            ].to(self.device)
+            for k in range(self.images_to_tsf.size(0)):
+                out = coerce_to_path_and_create_dir(self.transformation_path / f"img{k}")
+                convert_to_img(self.images_to_tsf[k]).save(out / "input.png")
+                [
+                    coerce_to_path_and_create_dir(out / f"tsf{k}")
+                    for k in range(self.n_prototypes)
+                ]
 
         # Visdom
         viz_port = cfg["training"].get("visualizer_port")
@@ -307,7 +308,6 @@ class Trainer:
         print_info(string)
         self.logger.info(string)
 
-    # NOTE: Didnt check during debug
     def load_from_tag(self, tag, resume=False):
         self.print_and_log_info("Loading model from run {}".format(tag))
         path = coerce_to_path_and_check_exist(
