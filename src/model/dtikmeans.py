@@ -14,7 +14,7 @@ from .u_net import UNet
 NOISE_SCALE = 0.0001
 EMPTY_CLUSTER_THRESHOLD = 0.2
 LATENT_SIZE = 128
-EPSILON = 1e-5
+EPSILON = 1e-6
 
 
 class DTIKmeans(nn.Module):
@@ -180,11 +180,14 @@ class DTIKmeans(nn.Module):
             return freqs.clamp(max=(self.empty_cluster_threshold))
         elif type == "bin":
             p = probas.clamp(min=EPSILON, max=1 - EPSILON)
-            return torch.exp(self.beta_dist.log_prob(p))
+            dist = self.beta_dist.log_prob(p)
+            return torch.exp(dist)
         else:
             raise ValueError("undefined regularizer")
 
     def forward(self, x):
+        is_nan_t = torch.stack([torch.isnan(p).any() for p in self.transformer.parameters()]).any()
+        is_nan_c = torch.stack([torch.isnan(p).any() for p in self.cluster_parameters()]).any()
         if self.proto_source == "generator":
             params = self.generator(self.latent_params)
             if len(params.size()) != 4:
@@ -218,7 +221,6 @@ class DTIKmeans(nn.Module):
             inp, target, features = self.transformer(x, prototypes)
             logits = self.estimate_logits(features)
             probas = F.softmax(logits, dim=-1)
-
             freq_loss = self.reg_func(probas, type="freq")
 
             # Weight transformed sprites and sum
@@ -233,10 +235,13 @@ class DTIKmeans(nn.Module):
                 samplewise_distances = (inp - target) ** 2
                 samplewise_distances = samplewise_distances.flatten(2).mean(2)
                 bin_loss = self.reg_func(probas, type="bin")
+                a = distances.mean() 
+                b = self.freq_weight * (1 - freq_loss.sum())
+                c = self.bin_weight * (bin_loss.mean())
                 return (
-                    distances.mean()
-                    + self.freq_weight * (1 - freq_loss.sum())
-                    + self.bin_weight * (bin_loss.mean()),
+                    a+b+c, #distances.mean()
+                    #+ self.freq_weight * (1 - freq_loss.sum())
+                    #+ self.bin_weight * (bin_loss.mean()),
                     samplewise_distances,
                     probas,
                 )
