@@ -5,7 +5,13 @@ model:
   n_sprites: 3
   n_backgrounds: 1
   n_objects: 5
-  freeze_sprite: 10
+  prototype:
+    source: data
+    data:
+      freeze: [1, 1, 10]
+      init: ["constant", "constant", "gaussian"]
+      gaussian_weights_std: 7
+      value: [0.9, 0.5, 0.]
   inject_noise: 0.4
   encoder_name: resnet32
   with_pool: [4, 4]
@@ -15,11 +21,7 @@ model:
   curriculum_learning: [20]
   curriculum_learning_bkg: False
   curriculum_learning_layer: False
-  proto_init: constant
-  mask_init: gaussian
-  bkg_init: constant
   sprite_size: [28, 28]
-  gaussian_weights_std: 7
   pred_occlusion: True
   estimate_minimum: True
   greedy_algo_iter: 3
@@ -43,7 +45,7 @@ training:
   check_cluster_interval: 100
   eval_with_bkg: True
   eval_semantic: True
-  seed: 98469
+  seed: 96176
   visualizer_port:
   pretrained: 
   resume: 

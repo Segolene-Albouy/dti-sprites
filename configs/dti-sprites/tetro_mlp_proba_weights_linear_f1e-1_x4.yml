@@ -5,15 +5,14 @@ model:
   n_sprites: 19
   n_backgrounds: 0
   n_objects: 3
-  freeze_sprite: 1
   inject_noise: 0.4
   prototype:
     source: generator
     generator: mlp
     data:
-      freeze: [1, 1, 1]
+      freeze: [0, 0, 4]
       init: ["constant", "constant", "gaussian"]
-      value: [0.9, 0.9, 0.]
+      value: [0.9, 0., 0.]
       gaussian_weights_std: 5
   encoder_name: resnet32
   transformation_sequence: identity
@@ -30,6 +29,8 @@ model:
   proba: True
   proba_type: linear
   freq_weight: 0.1
+  bin_weight: 0.0
+  empty_cluster_threshold: 0.025
 training:
   batch_size: 32
   n_workers: 8
@@ -48,7 +49,7 @@ training:
   check_cluster_interval: 50
   eval_with_bkg: True
   eval_semantic: True
-  seed: 81704
+  seed: 71458
   visualizer_port:
   pretrained: 
-  resume:
+  resume: 0816_tetro-mlp-proba-b0 

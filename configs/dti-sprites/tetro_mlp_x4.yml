@@ -11,7 +11,7 @@ model:
     source: generator
     generator: mlp
     data:
-      freeze: [1, 1, 1]
+      freeze: [0, 0, 4]
       init: ["constant", "constant", "gaussian"]
       value: [0.9, 0.9, 0.]
       gaussian_weights_std: 5
@@ -42,12 +42,11 @@ training:
     gamma: [1, 0.1]
     milestones: [400, 800]
   n_epoches: 840
-  train_stat_interval: 500
-  val_stat_interval: 1000
+  train_stat_interval: 10000
+  val_stat_interval: 20000
   check_cluster_interval: 50
   eval_with_bkg: True
   eval_semantic: True
-  seed: 93208
+  seed: 81864
   visualizer_port:
-  pretrained: 
-  resume:
+  resume: 0917_tetro-mlp-x4
