@@ -49,7 +49,7 @@ training:
     milestones: [500, 1000]
   n_epoches: 1020
   train_stat_interval: 2000
-  val_stat_interval: 4000
+  val_stat_interval: 40000 #4000
   check_cluster_interval: 100
   eval_with_bkg: True
   eval_semantic: True

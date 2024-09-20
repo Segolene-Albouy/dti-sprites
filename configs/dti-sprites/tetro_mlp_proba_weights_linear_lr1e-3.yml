@@ -10,7 +10,7 @@ model:
     source: generator
     generator: mlp
     data:
-      freeze: [0, 0, 4]
+      freeze: [0, 0, 1]
       init: ["constant", "constant", "gaussian"]
       value: [0.9, 0., 0.]
       gaussian_weights_std: 5
@@ -28,7 +28,7 @@ model:
   reassign_cluster: False
   proba: True
   proba_type: linear
-  freq_weight: 0.01
+  freq_weight: 0.0
   bin_weight: 0.0
   empty_cluster_threshold: 0.025
 training:
@@ -36,19 +36,19 @@ training:
   n_workers: 8
   optimizer:
     name: adam
-    lr: 1.0e-4
+    lr: 1.0e-3
     transformer:
       weight_decay: 1.0e-6
   scheduler:
     name: multi_step
     gamma: [1, 0.1]
-    milestones: [400, 800]
-  n_epoches: 840
+    milestones: [100, 200]
+  n_epoches: 210
   train_stat_interval: 500
-  val_stat_interval: 10000 #1000
+  val_stat_interval: 1000
   check_cluster_interval: 50
   eval_with_bkg: True
   eval_semantic: True
-  seed: 43305
+  seed: 7889
   visualizer_port:
   pretrained: 
