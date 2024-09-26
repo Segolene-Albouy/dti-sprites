@@ -7,6 +7,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 from torch.utils.data.dataloader import DataLoader
+from torchvision.transforms.functional import resize
 
 
 def get_bbox_from_mask(masks):
@@ -184,9 +185,13 @@ def get_nb_out_channels(layer):
     ].out_channels
 
 
-def get_output_size(in_channels, img_size, model):
+@torch.no_grad()
+def get_output_size(in_channels, img_size, model, encoder_name):
     x = torch.zeros(1, in_channels, *img_size)
-    return np.prod(model(x).shape)
+    if encoder_name == "dinov2":
+        x = resize(x, (28, 28))
+    shape = model(x).shape
+    return np.prod(shape)
 
 
 class Identity(nn.Module):
