@@ -31,7 +31,16 @@ LATENT_SIZE = 128
 def init_linear(hidden, out, init, n_channels=3, std=5, freeze_frg=False, dataset=None):
     if init == "random":
         return nn.Linear(hidden, out)
+    elif init == "constant":
+        linear = nn.Linear(hidden, out)
+        h = int(math.sqrt(out / n_channels))
+        nn.init.constant_(linear.weight, 1e-10)
+        sample = torch.full(size=(3 * h * h,), fill_value=0.5)
+        sample = torch.log(sample / (1 - sample))
+        linear.bias.data.copy_(sample)
+        return linear
     elif init == "gaussian":
+        print_warning("Last layer initialized with gaussian weights.")
         linear = nn.Linear(hidden, out)
         if freeze_frg:
             h = int(math.sqrt(out))
@@ -116,6 +125,7 @@ class DTISprites(nn.Module):
             proto_init, bkg_init, mask_init = data_args.get(
                 "init", ["constant", "constant", "constant"]
             )
+            print(freeze_frg, freeze_bkg, freeze_sprite)
         else:
             freeze_frg, freeze_bkg, freeze_sprite = False, False, False
             value_frg, value_bkg, value_mask = 0.5, 0.5, 0.5
@@ -123,14 +133,24 @@ class DTISprites(nn.Module):
             proto_init, bkg_init, mask_init = "constant", "constant", "constant"
 
         if proto_source == "data":
-            self.prototype_params = nn.Parameter(
-                torch.stack(
-                    generate_data(
-                        dataset, n_sprites, proto_init, value=value_frg, size=size
+            if freeze_frg:
+                self.prototype_params = nn.Parameter(
+                    torch.stack(
+                        generate_data(
+                            dataset, n_sprites, proto_init, value=value_frg, size=size
+                        )
+                    ),
+                    requires_grad=False,
+                )
+            else:
+                self.prototype_params = nn.Parameter(
+                    torch.stack(
+                        generate_data(
+                            dataset, n_sprites, proto_init, value=value_frg, size=size
+                        )
                     )
                 )
-            )
-            self.prototype_params.requires_grad = False if freeze_frg else True
+
             self.mask_params = nn.Parameter(
                 self.init_masks(n_sprites, mask_init, size, std, value_mask, dataset)
             )
@@ -306,7 +326,7 @@ class DTISprites(nn.Module):
 
         proba = kwargs.get("proba", False)
         if proba:
-            self.proba = nn.Linear(self.encoder.out_ch, n_sprites * n_objects)
+            self.proba = nn.Linear(self.encoder.out_ch, self.n_sprites * n_objects)
             self.freq_weight = kwargs.get("freq_weight", 0)
             self.bin_weight = kwargs.get("bin_weight", 0)
             self.beta_dist = torch.distributions.Beta(
@@ -356,6 +376,7 @@ class DTISprites(nn.Module):
                 dataset=dataset,
                 freeze_frg=freeze_frg,
             )  # freeze_frg = False by default
+
             model = nn.Sequential(
                 nn.Linear(latent_dim, 8 * latent_dim),
                 nn.GroupNorm(8, 8 * latent_dim),
@@ -490,7 +511,7 @@ class DTISprites(nn.Module):
             freqs = freqs / freqs.sum()
             return freqs.clamp(max=(self.empty_cluster_threshold))
         elif type == "bin":
-            p = probas.clamp(min=1e-5, max=1 - 1e-5)
+            p = probas.clamp(min=1e-5, max=1 - 1e-5)  # LKB
             return torch.exp(self.beta_dist.log_prob(p))
         else:
             raise ValueError("undefined regularizer")
