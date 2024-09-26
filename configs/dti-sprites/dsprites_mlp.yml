@@ -1,36 +1,37 @@
 dataset:
-  name: tetrominoes
+  name: dsprites_gray
 model:
   name: dti_sprites
-  n_sprites: 19
-  n_backgrounds: 0
-  n_objects: 3
+  n_sprites: 3
+  n_backgrounds: 1
+  n_objects: 5
   inject_noise: 0.4
   prototype:
-    source: generator
+    source: generator 
     generator: mlp
     data:
-      freeze: [0, 0, 4]
+      freeze: [0, 0, 10]
       init: ["constant", "constant", "gaussian"]
-      value: [0.9, 0., 0.]
-      gaussian_weights_std: 5
+      value: [0.9, 0.5, 0.]
+      gaussian_weights_std: 7
   init_latent_linear: gaussian
   encoder_name: resnet32
-  transformation_sequence: identity
+  with_pool: [4, 4]
+  transformation_sequence: identity_similarity
   transformation_sequence_bkg: color
   transformation_sequence_layer: color_position
-  curriculum_learning: False
+  curriculum_learning: [20]
   curriculum_learning_bkg: False
   curriculum_learning_layer: False
-  sprite_size: [24, 24]
-  pred_occlusion: False
+  sprite_size: [28, 28]
+  pred_occlusion: True
   estimate_minimum: True
-  reassign_cluster: True
-  proba: False
-  freq_weight: 0
+  greedy_algo_iter: 3
+  add_empty_sprite: True
+  lambda_empty_sprite: 1.0e-4
 training:
   batch_size: 32
-  n_workers: 8
+  n_workers: 4
   optimizer:
     name: adam
     lr: 1.0e-4
@@ -39,14 +40,14 @@ training:
   scheduler:
     name: multi_step
     gamma: [1, 0.1]
-    milestones: [400, 800]
-  n_epoches: 840
-  train_stat_interval: 500
-  val_stat_interval: 1000
-  check_cluster_interval: 50
+    milestones: [250, 500]
+  n_epoches: 510
+  train_stat_interval: 2000
+  val_stat_interval: 400
+  check_cluster_interval: 100
   eval_with_bkg: True
   eval_semantic: True
-  seed: 90811
+  seed: 55912
   visualizer_port:
   pretrained: 
-  resume:
+  resume: 

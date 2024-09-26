@@ -7,7 +7,8 @@ model:
   n_objects: 6
   inject_noise: 0.4
   prototype:
-    source: data
+    source: generator
+    generator: mlp 
     data:
       freeze: [0, 0, 40]
       init: ["constant", "mean", "gaussian"]
@@ -29,6 +30,13 @@ model:
   greedy_algo_iter: 3
   add_empty_sprite: True
   lambda_empty_sprite: 1.0e-4
+  proba: True
+  proba_weighting: tr_sprite
+  proba_type: linear
+  reassign_cluster: False
+  bin_weight: 0.0
+  freq_weight: 0.0
+  empty_cluster_threshold: 0.0833
 training:
   batch_size: 32
   n_workers: 4
@@ -47,7 +55,7 @@ training:
   check_cluster_interval: 250
   eval_with_bkg: True
   eval_semantic: True
-  seed: 45822
+  seed: 71444
   visualizer_port:
   pretrained: 
   resume: 

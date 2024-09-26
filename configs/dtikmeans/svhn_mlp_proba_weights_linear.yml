@@ -1,5 +1,5 @@
 dataset:
-  name: mnist
+  name: svhn
 model:
   name: dtikmeans
   n_prototypes: 10
@@ -7,16 +7,15 @@ model:
     source: generator
     generator: mlp
   encoder_name: resnet20
-  color_channels: 1
-  transformation_sequence: identity_affine_morpho_tps
-  curriculum_learning: [10, 30, 40]
-  grid_size: 4
-  kernel_size: 7
+  transformation_sequence: identity_color_projective
+  curriculum_learning: [16, 144]
+  gaussian_weights: True
+  gaussian_weights_std: 7
   proba: True
-  proba_weighting: diff 
+  proba_weighting: tr_sprite
   proba_type: linear
   reassign_cluster: False
-  freq_weight: 0.01
+  freq_weight: 0.0
   empty_cluster_threshold: 0.05
 training:
   batch_size: 128
@@ -28,12 +27,12 @@ training:
   scheduler:
     name: multi_step
     gamma: 0.1
-    milestones: [70]
+    milestones: [240]
     update_range: epoch
-  n_epoches: 80
-  train_stat_interval: 25
-  val_stat_interval: 50
-  check_cluster_interval: 50
-  seed: 20502
-  visualizer_port: 
-  resume:
+  n_epoches: 264
+  train_stat_interval: 500
+  val_stat_interval: 1000
+  check_cluster_interval: 100
+  seed: 86158
+  visualizer_port:
+  resume: 0916_svhn_proba-weights-linear_0
