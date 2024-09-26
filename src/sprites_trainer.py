@@ -40,6 +40,7 @@ from .utils.metrics import (
 from .utils.path import CONFIGS_PATH, RUNS_PATH
 from .utils.plot import plot_bar, plot_lines
 
+from torch.profiler import profile, record_function, ProfilerActivity
 
 PRINT_TRAIN_STAT_FMT = "Epoch [{}/{}], Iter [{}/{}], train_metrics: {}".format
 PRINT_VAL_STAT_FMT = "Epoch [{}/{}], Iter [{}/{}], val_metrics: {}".format
@@ -178,7 +179,6 @@ class Trainer:
         self.learn_masks = getattr(self.model, "learn_masks", False)
         self.learn_backgrounds = getattr(self.model, "learn_backgrounds", False)
         self.learn_proba = getattr(self.model, "proba", False)
-
         # Optimizer
         opt_params = cfg["training"]["optimizer"] or {}
         optimizer_name = opt_params.pop("name")
@@ -481,6 +481,7 @@ class Trainer:
         else:
             masks = None
         self.optimizer.zero_grad()
+
         loss, distances, class_prob = self.model(images, masks, epoch=epoch)
         loss.backward()
         self.optimizer.step()
@@ -973,7 +974,7 @@ class Trainer:
             self.save_backgrounds()
         self.save_transformed_images()
         # Train metrics
-        df_train = pd.read_csv(self.train_metrics_path, sep="\t", index_col=False)  # 0)
+        df_train = pd.read_csv(self.train_metrics_path, sep="\t", index_col=0)
         df_val = pd.read_csv(self.val_metrics_path, sep="\t", index_col=0)
         df_scores = pd.read_csv(self.val_scores_path, sep="\t", index_col=0)
         if len(df_train) == 0:
@@ -1167,7 +1168,7 @@ class Trainer:
             dist_min_by_sample, argmin_idx = map(lambda t: t.cpu().numpy(), dist.min(1))
             if self.learn_proba:
                 class_oh = class_prob.permute(2, 0, 1).flatten(1)
-                argmin_idx = class_oh.argmax(1)
+                argmin_idx = class_oh.argmax(1).cpu().numpy()
                 hist, _ = np.histogram(class_prob.cpu().numpy(), bins=self.bin_edges)
                 self.bin_counts += hist
 
@@ -1337,6 +1338,7 @@ class Trainer:
 
             else:
                 # TODO: proba segmentation
+                exit("Not implemented")
                 _, distances, class_prob = self.model(images)
                 distances = distances.view(B, *(self.n_prototypes,) * self.n_objects)
                 other_idxs = []
@@ -1415,6 +1417,7 @@ class Trainer:
 
                 else:
                     # TODO: proba segmentation
+                    exit("Not implemented")
                     distances = distances.view(
                         B, *(self.n_prototypes,) * self.n_objects
                     )
@@ -1494,6 +1497,7 @@ class Trainer:
                 ).cpu()
             else:
                 # TODO: proba segmentation
+                exit("Not implemented")
                 _, distances, class_prob = self.model(images)
                 distances = distances.view(B, *(self.n_prototypes,) * self.n_objects)
                 other_idxs = []
