@@ -8,7 +8,11 @@ import copy
 
 import numpy as np
 import pandas as pd
+
+print("Torch import")
 import torch
+
+print("2- Torch import")
 from torch.utils.data import DataLoader
 from torch.nn import functional as F
 
@@ -69,7 +73,7 @@ class Trainer:
     """Pipeline to train a NN model using a certain dataset, both specified by an YML config."""
 
     @use_seed()
-    def __init__(self, config_path, run_dir):
+    def __init__(self, config_path, run_dir, save):
         self.config_path = coerce_to_path_and_check_exist(config_path)
         self.run_dir = coerce_to_path_and_create_dir(run_dir)
         self.logger = get_logger(self.run_dir, name="trainer")
@@ -77,6 +81,7 @@ class Trainer:
             "Trainer initialisation: run directory is {}".format(run_dir)
         )
 
+        self.save_img = save
         shutil.copy(self.config_path, self.run_dir)
         self.print_and_log_info(
             "Config {} copied to run directory".format(self.config_path)
@@ -236,7 +241,7 @@ class Trainer:
             self.start_epoch, self.start_batch = 1, 1
 
         # Train metrics
-        metric_names = ["time/img", "loss"]
+        metric_names = ["time/img", "loss_rec", "loss_bin", "loss_freq"]
         metric_names += [f"prop_clus{i}" for i in range(self.n_clusters)]
         self.bin_edges = np.arange(0, 1.1, 0.1)
         self.bin_counts = np.zeros(len(self.bin_edges) - 1)
@@ -288,62 +293,67 @@ class Trainer:
 
         # Prototypes
         self.check_cluster_interval = cfg["training"]["check_cluster_interval"]
-        self.prototypes_path = coerce_to_path_and_create_dir(
-            self.run_dir / "prototypes"
-        )
-        [
-            coerce_to_path_and_create_dir(self.prototypes_path / f"proto{k}")
-            for k in range(self.n_prototypes)
-        ]
-
-        if self.learn_masks:
-            self.masked_prototypes_path = coerce_to_path_and_create_dir(
-                self.run_dir / "masked_prototypes"
+        if self.save_img:
+            self.prototypes_path = coerce_to_path_and_create_dir(
+                self.run_dir / "prototypes"
             )
             [
-                coerce_to_path_and_create_dir(self.masked_prototypes_path / f"proto{k}")
+                coerce_to_path_and_create_dir(self.prototypes_path / f"proto{k}")
                 for k in range(self.n_prototypes)
-            ]
-            self.masks_path = coerce_to_path_and_create_dir(self.run_dir / "masks")
-            [
-                coerce_to_path_and_create_dir(self.masks_path / f"mask{k}")
-                for k in range(self.n_prototypes)
-            ]
-        if self.learn_backgrounds:
-            self.backgrounds_path = coerce_to_path_and_create_dir(
-                self.run_dir / "backgrounds"
-            )
-            [
-                coerce_to_path_and_create_dir(self.backgrounds_path / f"bkg{k}")
-                for k in range(self.n_backgrounds)
             ]
 
-        # Transformation predictions
-        self.transformation_path = coerce_to_path_and_create_dir(
-            self.run_dir / "transformations"
-        )
-        self.images_to_tsf = next(iter(self.train_loader))[0][
-            :N_TRANSFORMATION_PREDICTIONS
-        ].to(self.device)
-        for k in range(self.images_to_tsf.size(0)):
-            out = coerce_to_path_and_create_dir(self.transformation_path / f"img{k}")
-            convert_to_img(self.images_to_tsf[k]).save(out / "input.png")
-            N = self.n_clusters if self.n_clusters <= 40 else 2 * self.n_prototypes
-            [coerce_to_path_and_create_dir(out / f"tsf{k}") for k in range(N)]
             if self.learn_masks:
+                self.masked_prototypes_path = coerce_to_path_and_create_dir(
+                    self.run_dir / "masked_prototypes"
+                )
                 [
-                    coerce_to_path_and_create_dir(out / f"frg_tsf{k}")
+                    coerce_to_path_and_create_dir(
+                        self.masked_prototypes_path / f"proto{k}"
+                    )
                     for k in range(self.n_prototypes)
                 ]
+                self.masks_path = coerce_to_path_and_create_dir(self.run_dir / "masks")
                 [
-                    coerce_to_path_and_create_dir(out / f"mask_tsf{k}")
+                    coerce_to_path_and_create_dir(self.masks_path / f"mask{k}")
                     for k in range(self.n_prototypes)
                 ]
             if self.learn_backgrounds:
+                self.backgrounds_path = coerce_to_path_and_create_dir(
+                    self.run_dir / "backgrounds"
+                )
                 [
-                    coerce_to_path_and_create_dir(out / f"bkg_tsf{k}")
+                    coerce_to_path_and_create_dir(self.backgrounds_path / f"bkg{k}")
                     for k in range(self.n_backgrounds)
                 ]
+
+            # Transformation predictions
+            self.transformation_path = coerce_to_path_and_create_dir(
+                self.run_dir / "transformations"
+            )
+            self.images_to_tsf = next(iter(self.train_loader))[0][
+                :N_TRANSFORMATION_PREDICTIONS
+            ].to(self.device)
+            for k in range(self.images_to_tsf.size(0)):
+                out = coerce_to_path_and_create_dir(
+                    self.transformation_path / f"img{k}"
+                )
+                convert_to_img(self.images_to_tsf[k]).save(out / "input.png")
+                N = self.n_clusters if self.n_clusters <= 40 else 2 * self.n_prototypes
+                [coerce_to_path_and_create_dir(out / f"tsf{k}") for k in range(N)]
+                if self.learn_masks:
+                    [
+                        coerce_to_path_and_create_dir(out / f"frg_tsf{k}")
+                        for k in range(self.n_prototypes)
+                    ]
+                    [
+                        coerce_to_path_and_create_dir(out / f"mask_tsf{k}")
+                        for k in range(self.n_prototypes)
+                    ]
+                if self.learn_backgrounds:
+                    [
+                        coerce_to_path_and_create_dir(out / f"bkg_tsf{k}")
+                        for k in range(self.n_backgrounds)
+                    ]
 
         # Visdom
         viz_port = cfg["training"].get("visualizer_port")
@@ -451,7 +461,8 @@ class Trainer:
                         self.run_val()
                         self.log_val_metrics(cur_iter, epoch, batch)
                     self.save(epoch=epoch, batch=batch)
-                    self.log_images(cur_iter)
+                    if self.save_img:
+                        self.log_images(cur_iter)
 
             self.model.step()
             if self.scheduler_update_range == "epoch" and batch_start == 1:
@@ -483,7 +494,7 @@ class Trainer:
         self.optimizer.zero_grad()
 
         loss, distances, class_prob = self.model(images, masks, epoch=epoch)
-        loss.backward()
+        loss[0].backward()
         self.optimizer.step()
 
         with torch.no_grad():
@@ -506,7 +517,9 @@ class Trainer:
         self.train_metrics.update(
             {
                 "time/img": (time.time() - start_time) / B,
-                "loss": loss.item(),
+                "loss_rec": loss[1].item(),
+                "loss_bin": loss[2].item(),
+                "loss_freq": loss[3].item(),
             }
         )
         self.train_metrics.update(
@@ -753,7 +766,7 @@ class Trainer:
             )
 
         self.update_visualizer_metrics(cur_iter, train=True)
-        self.train_metrics.reset(*(["time/img", "loss"]))
+        self.train_metrics.reset(*(["time/img", "rec_loss", "bin_loss", "freq_loss"]))
 
     def update_visualizer_metrics(self, cur_iter, train):
         if self.visualizer is None:
@@ -854,7 +867,7 @@ class Trainer:
                 else:
                     argmin_idx = distances.argmin(1)
 
-            self.val_metrics.update({"loss_val": loss_val.item()})
+            self.val_metrics.update({"loss_val": loss_val[0].item()})
             if self.seg_eval:  # we account for probabilities within model.transform
                 if self.n_objects == 1:
                     masks = self.model.transform(images, with_composition=True)[1][1]
@@ -966,13 +979,14 @@ class Trainer:
         self.model.eval()
         # Prototypes & transformation predictions
         size = MAX_GIF_SIZE if MAX_GIF_SIZE < max(self.img_size) else self.img_size
-        self.save_prototypes()
-        if self.learn_masks:
-            self.save_masked_prototypes()
-            self.save_masks()
-        if self.learn_backgrounds:
-            self.save_backgrounds()
-        self.save_transformed_images()
+        if self.save_img:
+            self.save_prototypes()
+            if self.learn_masks:
+                self.save_masked_prototypes()
+                self.save_masks()
+            if self.learn_backgrounds:
+                self.save_backgrounds()
+            self.save_transformed_images()
         # Train metrics
         df_train = pd.read_csv(self.train_metrics_path, sep="\t", index_col=0)
         df_val = pd.read_csv(self.val_metrics_path, sep="\t", index_col=0)
@@ -1015,64 +1029,68 @@ class Trainer:
                     unit_yaxis=True,
                 )
                 fig.savefig(self.run_dir / "scores_by_cls.pdf")
-
-        # Save gifs for prototypes
-        for k in range(self.n_prototypes):
-            save_gif(self.prototypes_path / f"proto{k}", f"prototype{k}.gif", size=size)
-            shutil.rmtree(str(self.prototypes_path / f"proto{k}"))
-            if self.learn_masks:
+        if self.save_img:
+            # Save gifs for prototypes
+            for k in range(self.n_prototypes):
                 save_gif(
-                    self.masked_prototypes_path / f"proto{k}",
-                    f"prototype{k}.gif",
-                    size=size,
+                    self.prototypes_path / f"proto{k}", f"prototype{k}.gif", size=size
                 )
-                shutil.rmtree(str(self.masked_prototypes_path / f"proto{k}"))
-                save_gif(self.masks_path / f"mask{k}", f"mask{k}.gif", size=size)
-                shutil.rmtree(str(self.masks_path / f"mask{k}"))
+                shutil.rmtree(str(self.prototypes_path / f"proto{k}"))
+                if self.learn_masks:
+                    save_gif(
+                        self.masked_prototypes_path / f"proto{k}",
+                        f"prototype{k}.gif",
+                        size=size,
+                    )
+                    shutil.rmtree(str(self.masked_prototypes_path / f"proto{k}"))
+                    save_gif(self.masks_path / f"mask{k}", f"mask{k}.gif", size=size)
+                    shutil.rmtree(str(self.masks_path / f"mask{k}"))
 
-        for k in range(self.n_backgrounds):
-            save_gif(self.backgrounds_path / f"bkg{k}", f"background{k}.gif", size=size)
-            shutil.rmtree(str(self.backgrounds_path / f"bkg{k}"))
-
-        # Save gifs for transformation predictions
-        for i in range(self.images_to_tsf.size(0)):
-            N = self.n_clusters if self.n_clusters <= 40 else 2 * self.n_prototypes
-            for k in range(N):
+            for k in range(self.n_backgrounds):
                 save_gif(
-                    self.transformation_path / f"img{i}" / f"tsf{k}",
-                    f"tsf{k}.gif",
-                    size=size,
+                    self.backgrounds_path / f"bkg{k}", f"background{k}.gif", size=size
                 )
-                shutil.rmtree(str(self.transformation_path / f"img{i}" / f"tsf{k}"))
+                shutil.rmtree(str(self.backgrounds_path / f"bkg{k}"))
 
-            if self.learn_masks:
-                for k in range(self.n_prototypes):
+            # Save gifs for transformation predictions
+            for i in range(self.images_to_tsf.size(0)):
+                N = self.n_clusters if self.n_clusters <= 40 else 2 * self.n_prototypes
+                for k in range(N):
                     save_gif(
-                        self.transformation_path / f"img{i}" / f"frg_tsf{k}",
-                        f"frg_tsf{k}.gif",
+                        self.transformation_path / f"img{i}" / f"tsf{k}",
+                        f"tsf{k}.gif",
                         size=size,
                     )
-                    save_gif(
-                        self.transformation_path / f"img{i}" / f"mask_tsf{k}",
-                        f"mask_tsf{k}.gif",
-                        size=size,
-                    )
-                    shutil.rmtree(
-                        str(self.transformation_path / f"img{i}" / f"frg_tsf{k}")
-                    )
-                    shutil.rmtree(
-                        str(self.transformation_path / f"img{i}" / f"mask_tsf{k}")
-                    )
-            if self.learn_backgrounds:
-                for k in range(self.n_backgrounds):
-                    save_gif(
-                        self.transformation_path / f"img{i}" / f"bkg_tsf{k}",
-                        f"bkg_tsf{k}.gif",
-                        size=size,
-                    )
-                    shutil.rmtree(
-                        str(self.transformation_path / f"img{i}" / f"bkg_tsf{k}")
-                    )
+                    shutil.rmtree(str(self.transformation_path / f"img{i}" / f"tsf{k}"))
+
+                if self.learn_masks:
+                    for k in range(self.n_prototypes):
+                        save_gif(
+                            self.transformation_path / f"img{i}" / f"frg_tsf{k}",
+                            f"frg_tsf{k}.gif",
+                            size=size,
+                        )
+                        save_gif(
+                            self.transformation_path / f"img{i}" / f"mask_tsf{k}",
+                            f"mask_tsf{k}.gif",
+                            size=size,
+                        )
+                        shutil.rmtree(
+                            str(self.transformation_path / f"img{i}" / f"frg_tsf{k}")
+                        )
+                        shutil.rmtree(
+                            str(self.transformation_path / f"img{i}" / f"mask_tsf{k}")
+                        )
+                if self.learn_backgrounds:
+                    for k in range(self.n_backgrounds):
+                        save_gif(
+                            self.transformation_path / f"img{i}" / f"bkg_tsf{k}",
+                            f"bkg_tsf{k}.gif",
+                            size=size,
+                        )
+                        shutil.rmtree(
+                            str(self.transformation_path / f"img{i}" / f"bkg_tsf{k}")
+                        )
         self.print_and_log_info("Metrics and plots saved")
 
     def evaluate(self):
@@ -1288,7 +1306,7 @@ class Trainer:
                         target = target[torch.arange(B), idx]
                     scores.update(labels.long().numpy(), target.long().cpu().numpy())
 
-            loss.update(loss_val.item(), n=images.size(0))
+            loss.update(loss_val[0].item(), n=images.size(0))
 
         scores = scores.compute()
         self.print_and_log_info("final_loss: {:.4f}".format(float(loss.avg)))
@@ -1456,7 +1474,7 @@ class Trainer:
                         target[bkg_idx] = new_target[bkg_idx]
                     scores.update(labels.long().numpy(), target.long().numpy())
 
-            loss.update(loss_val.item(), n=images.size(0))
+            loss.update(loss_val[0].item(), n=images.size(0))
 
         scores = scores.compute()
         self.print_and_log_info("final_loss: {:.4f}".format(float(loss.avg)))
@@ -1622,6 +1640,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "-c", "--config", nargs="?", type=str, required=True, help="Config file name"
     )
+    parser.add_argument("--save", action="store_true")
+    parser.set_defaults(save=False)
     args = parser.parse_args()
 
     assert args.tag is not None and args.config is not None
@@ -1633,5 +1653,5 @@ if __name__ == "__main__":
 
     run_dir = RUNS_PATH / dataset / args.tag
     run_dir = str(run_dir)
-    trainer = Trainer(config, run_dir, seed=seed)
+    trainer = Trainer(config, run_dir, seed=seed, save=args.save)
     temp = trainer.run(seed=seed)

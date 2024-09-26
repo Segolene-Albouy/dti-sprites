@@ -531,7 +531,8 @@ class DTISprites(nn.Module):
             if img_masks != None:
                 img_masks = img_masks.unsqueeze(1).expand(-1, K**L * M, -1, -1, -1)
             distances = self.criterion(x, target, weights=img_masks)
-            loss = distances.min(1)[0].mean()
+            loss_r = distances.min(1)[0].mean()
+            loss = (loss_r, loss_r, torch.Tensor([0.]), torch.Tensor([0.]))
         else:
             target = self.compose(
                 tsf_layers, tsf_masks, occ_grid, tsf_bkgs, class_prob
@@ -542,22 +543,23 @@ class DTISprites(nn.Module):
                 freq_loss = self.reg_func(class_prob, type="freq")
                 bin_loss = self.reg_func(class_prob, type="bin")
 
-                loss = (
-                    self.criterion(
+                loss_r = self.criterion(
                         x.unsqueeze(1), target.unsqueeze(1), weights=img_masks
                     ).mean()
-                    + self.freq_weight * (1 - freq_loss.sum())
-                    + self.bin_weight * bin_loss.mean()
-                )
+                loss_freq = 1 - freq_loss.sum()
+                loss_bin = bin_loss.mean()
+                loss_all = loss_r + self.freq_weight * loss_freq + self.bin_weight * loss_bin
                 class_oh = torch.zeros(class_prob.shape, device=x.device).scatter_(
                     1, class_prob.argmax(1, keepdim=True), 1
                 )
                 distances = 1 - class_oh.permute(2, 0, 1).flatten(1)  # B(L*K)
+                loss = (loss_all, loss_r, loss_freq, loss_bin)
             else:
-                loss = self.criterion(
+                loss_r = self.criterion(
                     x.unsqueeze(1), target.unsqueeze(1), weights=img_masks
                 ).mean()
                 distances = 1 - class_prob.permute(2, 0, 1).flatten(1)  # B(L*K)
+                loss = (loss_r, loss_r, torch.Tensor([0.]), torch.Tensor([0.]))
 
         return loss, distances, class_prob
 
