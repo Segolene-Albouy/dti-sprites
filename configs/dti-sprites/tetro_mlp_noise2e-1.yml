@@ -5,7 +5,7 @@ model:
   n_sprites: 19
   n_backgrounds: 0
   n_objects: 3
-  inject_noise: 0.4
+  inject_noise: 0.1
   prototype:
     source: generator
     generator: mlp
@@ -45,7 +45,7 @@ training:
   check_cluster_interval: 50
   eval_with_bkg: True
   eval_semantic: True
-  seed: 93477
+  seed: 73652
   visualizer_port:
   pretrained: 
   resume:
