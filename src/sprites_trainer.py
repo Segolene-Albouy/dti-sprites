@@ -4,15 +4,11 @@ import shutil
 import seaborn as sns
 import time
 import yaml
-import copy
 
 import numpy as np
 import pandas as pd
 
-print("Torch import")
 import torch
-
-print("2- Torch import")
 from torch.utils.data import DataLoader
 from torch.nn import functional as F
 
