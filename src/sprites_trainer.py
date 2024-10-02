@@ -1102,11 +1102,13 @@ class Trainer:
                 self.qualitative_eval()
         elif self.seg_eval or self.instance_eval:
             if (self.seg_eval and self.learn_masks) or self.eval_semantic:
+                self.print_and_log_info("Semantic segmentation evaluation")
                 self.segmentation_quantitative_eval()
                 self.segmentation_qualitative_eval()
             elif (
                 self.instance_eval and self.learn_masks
             ):  # NOTE: evaluate either semantic or instance
+                self.print_and_log_info("Instance segmentation evaluation")
                 self.instance_seg_quantitative_eval()
                 self.instance_seg_qualitative_eval()
         else:
@@ -1260,6 +1262,8 @@ class Trainer:
         for images, labels, _, _ in train_loader:
             images = images.to(self.device)
             loss_val, distances, class_prob = self.model(images)
+            hist, _ = np.histogram(class_prob.cpu().numpy(), bins=self.bin_edges)
+            self.bin_counts += hist
             B, C, H, W = images.shape
             if self.n_objects == 1:
                 masks = self.model.transform(images, with_composition=True)[1][1]
@@ -1305,6 +1309,7 @@ class Trainer:
             loss.update(loss_val[0].item(), n=images.size(0))
 
         scores = scores.compute()
+        self.print_and_log_info("bin_counts: " + str(self.bin_counts))
         self.print_and_log_info("final_loss: {:.4f}".format(float(loss.avg)))
         self.print_and_log_info(
             "final_scores: "
@@ -1419,6 +1424,11 @@ class Trainer:
             images, labels = iterator.next()
             images = images.to(self.device)
             loss_val, distances, class_prob = self.model(images)
+            if self.learn_proba:
+                class_oh = class_prob.permute(2, 0, 1).flatten(1)
+                argmin_idx = class_oh.argmax(1).cpu().numpy()
+                hist, _ = np.histogram(class_prob.cpu().numpy(), bins=self.bin_edges)
+                self.bin_counts += hist
             if self.n_objects == 1:
                 masks = self.model.transform(images, with_composition=True)[1][1]
                 scores.update(labels.long().numpy(), (masks > 0.5).long().cpu().numpy())
@@ -1473,6 +1483,7 @@ class Trainer:
             loss.update(loss_val[0].item(), n=images.size(0))
 
         scores = scores.compute()
+        self.print_and_log_info("bin_counts: " + str(self.bin_counts))
         self.print_and_log_info("final_loss: {:.4f}".format(float(loss.avg)))
         self.print_and_log_info(
             "final_scores: "

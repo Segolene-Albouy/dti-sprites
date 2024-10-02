@@ -7,8 +7,7 @@ model:
   n_objects: 3
   inject_noise: 0.4
   prototype:
-    source: generator
-    generator: mlp
+    source: data
     data:
       freeze: [0, 0, 1]
       init: ["constant", "constant", "gaussian"]
@@ -43,12 +42,13 @@ training:
     name: multi_step
     gamma: [1, 0.1]
     milestones: [100, 200]
-  n_epoches: 2 #210
+  n_epoches: 210
   train_stat_interval: 500
   val_stat_interval: 1000
   check_cluster_interval: 50
   eval_with_bkg: True
   eval_semantic: True
-  seed: 7889
+  seed: 7732
   visualizer_port:
   pretrained: 
+  resume: 1001_rgb-proba
