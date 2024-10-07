@@ -661,7 +661,7 @@ class DTISprites(nn.Module):
 
         prototypes = prototypes.unsqueeze(1).expand(K, B, C, -1, -1)
         if self.are_frg_frozen:
-            sprites = prototypes.detach()
+            prototypes = prototypes.detach()
         masks = masks.unsqueeze(1).expand(K, B, 1, -1, -1)
         sprites = torch.cat([prototypes, masks], dim=2)
         if self.inject_noise and self.training:
@@ -1062,10 +1062,14 @@ class DTISprites(nn.Module):
             opt = self.optimizer
             if isinstance(opt, (Adam,)):
                 for param in params:
-                    opt.state[param]["exp_avg"][i] = opt.state[param]["exp_avg"][j]
-                    opt.state[param]["exp_avg_sq"][i] = opt.state[param]["exp_avg_sq"][
-                        j
-                    ]
+                    if "exp_avg" in opt.state[param]:
+                        opt.state[param]["exp_avg"][i] = opt.state[param]["exp_avg"][j]
+                        opt.state[param]["exp_avg_sq"][i] = opt.state[param]["exp_avg_sq"][
+                            j
+                        ]
+                    else:
+                        # make sure we are here because frg is frozen (not in the graph yet)
+                        assert self.are_frg_frozen
             elif isinstance(opt, (RMSprop,)):
                 for param in params:
                     opt.state[param]["square_avg"][i] = opt.state[param]["square_avg"][
