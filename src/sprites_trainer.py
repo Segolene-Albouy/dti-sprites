@@ -40,6 +40,8 @@ from .utils.metrics import (
 from .utils.path import CONFIGS_PATH, RUNS_PATH
 from .utils.plot import plot_bar, plot_lines
 
+from omegaconf import OmegaConf, DictConfig
+import hydra
 from torch.profiler import profile, record_function, ProfilerActivity
 
 PRINT_TRAIN_STAT_FMT = "Epoch [{}/{}], Iter [{}/{}], train_metrics: {}".format
@@ -69,22 +71,15 @@ class Trainer:
     """Pipeline to train a NN model using a certain dataset, both specified by an YML config."""
 
     @use_seed()
-    def __init__(self, config_path, run_dir, save):
-        self.config_path = coerce_to_path_and_check_exist(config_path)
+    def __init__(self, cfg):
+        run_dir = RUNS_PATH / cfg.dataset.name / cfg.training.tag
         self.run_dir = coerce_to_path_and_create_dir(run_dir)
         self.logger = get_logger(self.run_dir, name="trainer")
         self.print_and_log_info(
             "Trainer initialisation: run directory is {}".format(run_dir)
         )
 
-        self.save_img = save
-        shutil.copy(self.config_path, self.run_dir)
-        self.print_and_log_info(
-            "Config {} copied to run directory".format(self.config_path)
-        )
-
-        with open(self.config_path) as fp:
-            cfg = yaml.load(fp, Loader=yaml.FullLoader)
+        self.save_img = cfg.training.save
 
         if torch.cuda.is_available():
             type_device = "cuda"
@@ -99,7 +94,7 @@ class Trainer:
 
         # Datasets and dataloaders
         self.dataset_kwargs = cfg["dataset"]
-        self.dataset_name = self.dataset_kwargs.pop("name")
+        self.dataset_name = self.dataset_kwargs["name"]
         train_dataset = get_dataset(self.dataset_name)("train", **self.dataset_kwargs)
         val_dataset = get_dataset(self.dataset_name)("val", **self.dataset_kwargs)
 
@@ -122,7 +117,7 @@ class Trainer:
             if cfg["training"]["batch_size"] < len(train_dataset)
             else len(train_dataset)
         )
-        self.n_workers = cfg["training"].get("n_workers", 4)
+        self.n_workers = cfg["training"]["n_workers"]
         self.train_loader = DataLoader(
             train_dataset,
             batch_size=self.batch_size,
@@ -151,9 +146,8 @@ class Trainer:
             self.n_iterations = self.n_epoches * len(self.train_loader)
 
         # Model
-        self.model_kwargs = cfg["model"]
-        self.model_name = self.model_kwargs.pop("name")
-        self.is_gmm = "gmm" in self.model_name
+        self.model_kwargs = cfg["model"]["sprites"]
+        self.model_name = self.model_kwargs["name"]
         self.model = get_model(self.model_name)(
             self.train_loader.dataset, **self.model_kwargs
         ).to(self.device)
@@ -182,9 +176,9 @@ class Trainer:
         self.learn_proba = getattr(self.model, "proba", False)
         # Optimizer
         opt_params = cfg["training"]["optimizer"] or {}
-        optimizer_name = opt_params.pop("name")
-        cluster_kwargs = opt_params.pop("cluster", {})
-        tsf_kwargs = opt_params.pop("transformer", {})
+        optimizer_name = cfg["training"].get("opt_name", "adam")
+        cluster_kwargs = cfg["training"].get("cluster",{})
+        tsf_kwargs = cfg["training"].get("transformer",{})
         self.optimizer = get_optimizer(optimizer_name)(
             [
                 dict(params=self.model.cluster_parameters(), **cluster_kwargs),
@@ -201,8 +195,8 @@ class Trainer:
 
         # Scheduler
         scheduler_params = cfg["training"].get("scheduler", {}) or {}
-        scheduler_name = scheduler_params.pop("name", None)
-        self.scheduler_update_range = scheduler_params.pop("update_range", "epoch")
+        scheduler_name = cfg["training"].get("sch_name", "multi_step")
+        self.scheduler_update_range = cfg["training"].get("update_range", "epoch")
         assert self.scheduler_update_range in ["epoch", "batch"]
         if scheduler_name == "multi_step" and isinstance(
             scheduler_params["milestones"][0], float
@@ -1631,34 +1625,10 @@ class Trainer:
                 + "\n"
             )
 
+@hydra.main(config_path="../hydra_conf", config_name="config")
+def hydra_trainer(cfg: DictConfig) ->None:
+    trainer=Trainer(cfg, seed=cfg.training.seed)
+    trainer.run(seed=cfg.training.seed)
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Pipeline to train a NN model specified by a YML config"
-    )
-    parser.add_argument(
-        "-t",
-        "--tag",
-        nargs="?",
-        type=str,
-        required=True,
-        help="Run tag of the experiment",
-    )
-    parser.add_argument(
-        "-c", "--config", nargs="?", type=str, required=True, help="Config file name"
-    )
-    parser.add_argument("--save", action="store_true")
-    parser.set_defaults(save=False)
-    args = parser.parse_args()
-
-    assert args.tag is not None and args.config is not None
-    config = coerce_to_path_and_check_exist(CONFIGS_PATH / args.config)
-    with open(config) as fp:
-        cfg = yaml.load(fp, Loader=yaml.FullLoader)
-    seed = cfg["training"].get("seed", 4321)
-    dataset = cfg["dataset"]["name"]
-
-    run_dir = RUNS_PATH / dataset / args.tag
-    run_dir = str(run_dir)
-    trainer = Trainer(config, run_dir, seed=seed, save=args.save)
-    temp = trainer.run(seed=seed)
+    hydra_trainer()

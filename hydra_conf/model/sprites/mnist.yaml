@@ -1,0 +1,9 @@
+n_sprites: 10
+n_objects: 1
+color_channels: 1
+transformation_sequence: identity_affine_morpho_tps
+transformation_sequence_bkg: identity
+curriculum_learning: [5, 15, 20]
+curriculum_learning_bkg: False
+grid_size: 4
+kernel_size: 7

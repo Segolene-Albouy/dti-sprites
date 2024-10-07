@@ -1,0 +1,16 @@
+n_workers: 4
+batch_size: 128
+opt_name: adam
+optimizer:
+  lr: 1.0e-3
+transformer:
+  weight_decay: 1.0e-6
+sch_name: multi_step
+update_range: epoch
+scheduler:
+  gamma: 0.1
+  milestones: [35]
+n_epoches: 40
+train_stat_interval: 25
+val_stat_interval: 50
+check_cluster_interval: 50

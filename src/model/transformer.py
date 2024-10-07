@@ -15,6 +15,8 @@ from .resnet import get_resnet_model
 from .tools import copy_with_noise, get_output_size, TPSGrid, create_mlp, get_clamp_func
 from ..utils.logger import print_warning
 
+import omegaconf
+
 N_HIDDEN_UNITS = 128
 N_LAYERS = 2
 
@@ -287,10 +289,10 @@ class TransformationSequence(nn.Module):
             tsf_modules.append(self.get_module(name)(in_channels, **kwargs))
         self.tsf_modules = nn.ModuleList(tsf_modules)
 
-        curriculum_learning = kwargs.get("curriculum_learning", False)
+        curriculum_learning = kwargs["curriculum_learning"]
         if curriculum_learning:
             assert (
-                isinstance(curriculum_learning, (list, tuple))
+                isinstance(curriculum_learning, (omegaconf.listconfig.ListConfig, list, tuple))
                 and len(curriculum_learning) == self.n_tsf - 1
             )
             self.act_milestones = curriculum_learning
@@ -372,7 +374,7 @@ class TransformationSequence(nn.Module):
         self.cur_milestone += 1
         while (
             self.next_act_idx < self.n_tsf
-            and self.act_milestones[self.next_act_idx - 1] == self.cur_milestone
+            and self.act_milestones[int(self.next_act_idx - 1)] == self.cur_milestone
         ):
             self.activations[self.next_act_idx] = True
             self.next_act_idx += 1

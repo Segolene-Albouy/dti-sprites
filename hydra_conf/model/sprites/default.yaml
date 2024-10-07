@@ -1,0 +1,11 @@
+name: dti_sprites
+return_map_out: False
+color_channels: 3
+add_empty_sprite: False
+lambda_empty_sprite: 0
+use_clamp: soft
+estimate_minimum: False
+greedy_algo_iter: 1
+transformation_sequence_layer: identity
+n_backgrounds: 0
+encoder_name: resnet20

@@ -175,6 +175,7 @@ class DTISprites(nn.Module):
 
         if proto_source == "data":
             if freeze_frg:
+                self.freeze_frg_milestone = freeze_frg if freeze_frg else -1
                 self.prototype_params = nn.Parameter(
                     torch.stack(
                         generate_data(
