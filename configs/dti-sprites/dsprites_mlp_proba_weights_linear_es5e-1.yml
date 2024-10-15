@@ -28,7 +28,7 @@ model:
   estimate_minimum: True
   greedy_algo_iter: 3
   add_empty_sprite: True
-  lambda_empty_sprite: 1.0e-3
+  lambda_empty_sprite: 0.5
   proba: True
   proba_weighting: tr_sprite
   proba_type: linear

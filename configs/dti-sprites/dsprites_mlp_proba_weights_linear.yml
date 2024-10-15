@@ -57,4 +57,3 @@ training:
   seed: 21412
   visualizer_port:
   pretrained: 
-  resume: 1002_dsprites-proba 

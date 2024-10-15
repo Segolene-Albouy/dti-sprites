@@ -10,7 +10,7 @@ model:
     source: generator
     generator: mlp
     data:
-      freeze: [3, 0, 1]
+      freeze: [10, 0, 1]
       init: ["constant", "constant", "gaussian"]
       value: [0.9, 0., 0.]
       gaussian_weights_std: 5
@@ -25,12 +25,8 @@ model:
   sprite_size: [24, 24]
   pred_occlusion: False
   estimate_minimum: True
-  reassign_cluster: False
-  proba: True
-  proba_type: linear
-  freq_weight: 0.0
-  bin_weight: 0.0
-  empty_cluster_threshold: 0.025
+  reassign_cluster: True
+  proba: False
 training:
   batch_size: 32
   n_workers: 8

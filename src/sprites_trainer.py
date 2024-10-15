@@ -154,7 +154,7 @@ class Trainer:
         self.model_kwargs = cfg["model"]
         self.model_name = self.model_kwargs.pop("name")
         self.is_gmm = "gmm" in self.model_name
-        self.model = get_model(self.model_name)(
+        self.model = get_model(self.model_name)(self.n_epoches,
             self.train_loader.dataset, **self.model_kwargs
         ).to(self.device)
         self.print_and_log_info(
@@ -237,7 +237,7 @@ class Trainer:
             self.start_epoch, self.start_batch = 1, 1
 
         # Train metrics
-        metric_names = ["time/img", "loss_rec", "loss_bin", "loss_freq"]
+        metric_names = ["time/img", "loss_rec", "loss_em", "loss_bin", "loss_freq"]
         metric_names += [f"prop_clus{i}" for i in range(self.n_clusters)]
         self.bin_edges = np.arange(0, 1.1, 0.1)
         self.bin_counts = np.zeros(len(self.bin_edges) - 1)
@@ -439,7 +439,7 @@ class Trainer:
                 if cur_iter > self.n_iterations:
                     break
 
-                self.single_train_batch_run(images, img_masks, epoch=epoch)
+                self.single_train_batch_run(images, img_masks)
                 if self.scheduler_update_range == "batch":
                     self.update_scheduler(epoch, batch=batch)
 
@@ -478,7 +478,7 @@ class Trainer:
                 PRINT_LR_UPD_FMT(epoch, self.n_epoches, batch, self.n_batches, lr)
             )
 
-    def single_train_batch_run(self, images, masks, epoch=None):
+    def single_train_batch_run(self, images, masks):
         start_time = time.time()
         B = images.size(0)
         self.model.train()
@@ -489,17 +489,18 @@ class Trainer:
             masks = None
         self.optimizer.zero_grad()
 
-        loss, distances, class_prob = self.model(images, masks, epoch=epoch)
+        loss, distances, class_prob = self.model(images, masks)
         loss[0].backward()
         self.optimizer.step()
 
         with torch.no_grad():
-            if self.learn_proba:
-                class_oh = class_prob.permute(2, 0, 1).flatten(1)  # B(L*K)
+            if self.learn_proba: 
+                class_oh = class_prob.permute(2, 0, 1) # LKB to BLK
+
                 one_hot = torch.zeros(class_oh.shape, device=self.device).scatter(
-                    1, class_oh.argmax(1, keepdim=True), 1
-                )
-                proportions = one_hot.sum(0) / B
+                    2, class_oh.argmax(2, keepdim=True), 1
+                ).reshape(B, -1)
+                proportions = one_hot.mean(0)
             else:
                 if self.pred_class:  # distances B(L*K), discovery
                     proportions = (1 - distances).mean(0)
@@ -514,6 +515,7 @@ class Trainer:
             {
                 "time/img": (time.time() - start_time) / B,
                 "loss_rec": loss[1].item(),
+                "loss_em": loss[4].item(),
                 "loss_bin": loss[2].item(),
                 "loss_freq": loss[3].item(),
             }
@@ -1105,7 +1107,7 @@ class Trainer:
                 self.print_and_log_info("Semantic segmentation evaluation")
                 self.segmentation_quantitative_eval()
                 self.segmentation_qualitative_eval()
-            elif (
+            if (
                 self.instance_eval and self.learn_masks
             ):  # NOTE: evaluate either semantic or instance
                 self.print_and_log_info("Instance segmentation evaluation")
