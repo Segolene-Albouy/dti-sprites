@@ -15,8 +15,8 @@ model:
   proba_weighting: tr_sprite
   proba_type: linear
   reassign_cluster: False
-  freq_weight: 1.
   bin_weight: 0.001
+  freq_weight: 1.
   empty_cluster_threshold: 0.05
 training:
   batch_size: 128

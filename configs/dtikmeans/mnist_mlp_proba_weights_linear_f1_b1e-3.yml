@@ -35,5 +35,9 @@ training:
   train_stat_interval: 25
   val_stat_interval: 50
   check_cluster_interval: 50
+<<<<<<< HEAD
   seed: 89942
+=======
+  seed: 44999
+>>>>>>> 5dd2effab7f22a2431c587283e45258b803737e5
   visualizer_port: 

@@ -5,16 +5,17 @@ model:
   n_sprites: 19
   n_backgrounds: 0
   n_objects: 3
-  freeze_sprite: 1
   inject_noise: 0.4
   prototype:
     source: generator
     generator: mlp
     data:
       freeze: [0, 0, 4]
+      freeze: [0, 0, 4]
       init: ["constant", "constant", "gaussian"]
-      value: [0.9, 0.9, 0.]
+      value: [0.9, 0., 0.]
       gaussian_weights_std: 5
+  init_latent_linear: gaussian
   encoder_name: resnet32
   transformation_sequence: identity
   transformation_sequence_bkg: color
@@ -22,7 +23,6 @@ model:
   curriculum_learning: False
   curriculum_learning_bkg: False
   curriculum_learning_layer: False
-  init_latent_linear: gaussian
   sprite_size: [24, 24]
   pred_occlusion: False
   estimate_minimum: True
@@ -47,6 +47,6 @@ training:
   check_cluster_interval: 50
   eval_with_bkg: True
   eval_semantic: True
-  seed: 81864
+  seed: 90811
   visualizer_port:
   resume: 0917_tetro-mlp-x4

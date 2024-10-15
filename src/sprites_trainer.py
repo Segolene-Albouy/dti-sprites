@@ -4,13 +4,11 @@ import shutil
 import seaborn as sns
 import time
 import yaml
-import copy
 
 import numpy as np
 import pandas as pd
-print("Torch import")
+
 import torch
-print("2- Torch import")
 from torch.utils.data import DataLoader
 from torch.nn import functional as F
 
@@ -42,6 +40,7 @@ from .utils.metrics import (
 from .utils.path import CONFIGS_PATH, RUNS_PATH
 from .utils.plot import plot_bar, plot_lines
 
+from torch.profiler import profile, record_function, ProfilerActivity
 
 PRINT_TRAIN_STAT_FMT = "Epoch [{}/{}], Iter [{}/{}], train_metrics: {}".format
 PRINT_VAL_STAT_FMT = "Epoch [{}/{}], Iter [{}/{}], val_metrics: {}".format
@@ -155,7 +154,7 @@ class Trainer:
         self.model_kwargs = cfg["model"]
         self.model_name = self.model_kwargs.pop("name")
         self.is_gmm = "gmm" in self.model_name
-        self.model = get_model(self.model_name)(
+        self.model = get_model(self.model_name)(self.n_epoches,
             self.train_loader.dataset, **self.model_kwargs
         ).to(self.device)
         self.print_and_log_info(
@@ -181,7 +180,6 @@ class Trainer:
         self.learn_masks = getattr(self.model, "learn_masks", False)
         self.learn_backgrounds = getattr(self.model, "learn_backgrounds", False)
         self.learn_proba = getattr(self.model, "proba", False)
-
         # Optimizer
         opt_params = cfg["training"]["optimizer"] or {}
         optimizer_name = opt_params.pop("name")
@@ -239,7 +237,7 @@ class Trainer:
             self.start_epoch, self.start_batch = 1, 1
 
         # Train metrics
-        metric_names = ["time/img", "loss_rec", "loss_bin", "loss_freq"]
+        metric_names = ["time/img", "loss_rec", "loss_em", "loss_bin", "loss_freq"]
         metric_names += [f"prop_clus{i}" for i in range(self.n_clusters)]
         self.bin_edges = np.arange(0, 1.1, 0.1)
         self.bin_counts = np.zeros(len(self.bin_edges) - 1)
@@ -305,7 +303,9 @@ class Trainer:
                     self.run_dir / "masked_prototypes"
                 )
                 [
-                    coerce_to_path_and_create_dir(self.masked_prototypes_path / f"proto{k}")
+                    coerce_to_path_and_create_dir(
+                        self.masked_prototypes_path / f"proto{k}"
+                    )
                     for k in range(self.n_prototypes)
                 ]
                 self.masks_path = coerce_to_path_and_create_dir(self.run_dir / "masks")
@@ -321,7 +321,7 @@ class Trainer:
                     coerce_to_path_and_create_dir(self.backgrounds_path / f"bkg{k}")
                     for k in range(self.n_backgrounds)
                 ]
-            
+
             # Transformation predictions
             self.transformation_path = coerce_to_path_and_create_dir(
                 self.run_dir / "transformations"
@@ -330,7 +330,9 @@ class Trainer:
                 :N_TRANSFORMATION_PREDICTIONS
             ].to(self.device)
             for k in range(self.images_to_tsf.size(0)):
-                out = coerce_to_path_and_create_dir(self.transformation_path / f"img{k}")
+                out = coerce_to_path_and_create_dir(
+                    self.transformation_path / f"img{k}"
+                )
                 convert_to_img(self.images_to_tsf[k]).save(out / "input.png")
                 N = self.n_clusters if self.n_clusters <= 40 else 2 * self.n_prototypes
                 [coerce_to_path_and_create_dir(out / f"tsf{k}") for k in range(N)]
@@ -437,7 +439,7 @@ class Trainer:
                 if cur_iter > self.n_iterations:
                     break
 
-                self.single_train_batch_run(images, img_masks, epoch=epoch)
+                self.single_train_batch_run(images, img_masks)
                 if self.scheduler_update_range == "batch":
                     self.update_scheduler(epoch, batch=batch)
 
@@ -476,7 +478,7 @@ class Trainer:
                 PRINT_LR_UPD_FMT(epoch, self.n_epoches, batch, self.n_batches, lr)
             )
 
-    def single_train_batch_run(self, images, masks, epoch=None):
+    def single_train_batch_run(self, images, masks):
         start_time = time.time()
         B = images.size(0)
         self.model.train()
@@ -486,7 +488,8 @@ class Trainer:
         else:
             masks = None
         self.optimizer.zero_grad()
-        loss, distances, class_prob = self.model(images, masks, epoch=epoch)
+
+        loss, distances, class_prob = self.model(images, masks)
         loss[0].backward()
         self.optimizer.step()
 
@@ -511,6 +514,7 @@ class Trainer:
             {
                 "time/img": (time.time() - start_time) / B,
                 "loss_rec": loss[1].item(),
+                "loss_em": loss[4].item(),
                 "loss_bin": loss[2].item(),
                 "loss_freq": loss[3].item(),
             }
@@ -1025,7 +1029,9 @@ class Trainer:
         if self.save_img:
             # Save gifs for prototypes
             for k in range(self.n_prototypes):
-                save_gif(self.prototypes_path / f"proto{k}", f"prototype{k}.gif", size=size)
+                save_gif(
+                    self.prototypes_path / f"proto{k}", f"prototype{k}.gif", size=size
+                )
                 shutil.rmtree(str(self.prototypes_path / f"proto{k}"))
                 if self.learn_masks:
                     save_gif(
@@ -1038,7 +1044,9 @@ class Trainer:
                     shutil.rmtree(str(self.masks_path / f"mask{k}"))
 
             for k in range(self.n_backgrounds):
-                save_gif(self.backgrounds_path / f"bkg{k}", f"background{k}.gif", size=size)
+                save_gif(
+                    self.backgrounds_path / f"bkg{k}", f"background{k}.gif", size=size
+                )
                 shutil.rmtree(str(self.backgrounds_path / f"bkg{k}"))
 
             # Save gifs for transformation predictions
@@ -1095,11 +1103,13 @@ class Trainer:
                 self.qualitative_eval()
         elif self.seg_eval or self.instance_eval:
             if (self.seg_eval and self.learn_masks) or self.eval_semantic:
+                self.print_and_log_info("Semantic segmentation evaluation")
                 self.segmentation_quantitative_eval()
                 self.segmentation_qualitative_eval()
-            elif (
+            if (
                 self.instance_eval and self.learn_masks
             ):  # NOTE: evaluate either semantic or instance
+                self.print_and_log_info("Instance segmentation evaluation")
                 self.instance_seg_quantitative_eval()
                 self.instance_seg_qualitative_eval()
         else:
@@ -1175,7 +1185,7 @@ class Trainer:
             dist_min_by_sample, argmin_idx = map(lambda t: t.cpu().numpy(), dist.min(1))
             if self.learn_proba:
                 class_oh = class_prob.permute(2, 0, 1).flatten(1)
-                argmin_idx = class_oh.argmax(1)
+                argmin_idx = class_oh.argmax(1).cpu().numpy()
                 hist, _ = np.histogram(class_prob.cpu().numpy(), bins=self.bin_edges)
                 self.bin_counts += hist
 
@@ -1253,6 +1263,8 @@ class Trainer:
         for images, labels, _, _ in train_loader:
             images = images.to(self.device)
             loss_val, distances, class_prob = self.model(images)
+            hist, _ = np.histogram(class_prob.cpu().numpy(), bins=self.bin_edges)
+            self.bin_counts += hist
             B, C, H, W = images.shape
             if self.n_objects == 1:
                 masks = self.model.transform(images, with_composition=True)[1][1]
@@ -1298,6 +1310,7 @@ class Trainer:
             loss.update(loss_val[0].item(), n=images.size(0))
 
         scores = scores.compute()
+        self.print_and_log_info("bin_counts: " + str(self.bin_counts))
         self.print_and_log_info("final_loss: {:.4f}".format(float(loss.avg)))
         self.print_and_log_info(
             "final_scores: "
@@ -1329,7 +1342,7 @@ class Trainer:
 
         iterator = iter(train_loader)
         for j in range(N):
-            images, _, _, _ = iterator.next()
+            images, _, _, _ = next(iterator)
             images = images.to(self.device)
             if self.pred_class:
                 recons = self.model.transform(images, hard_occ_grid=True).cpu()
@@ -1345,7 +1358,7 @@ class Trainer:
 
             else:
                 # TODO: proba segmentation
-                exit("exited.")
+                exit("Not implemented")
                 _, distances, class_prob = self.model(images)
                 distances = distances.view(B, *(self.n_prototypes,) * self.n_objects)
                 other_idxs = []
@@ -1409,9 +1422,14 @@ class Trainer:
 
         iterator = iter(train_loader)
         for k in range(N):
-            images, labels = iterator.next()
+            images, labels = next(iterator)
             images = images.to(self.device)
             loss_val, distances, class_prob = self.model(images)
+            if self.learn_proba:
+                class_oh = class_prob.permute(2, 0, 1).flatten(1)
+                argmin_idx = class_oh.argmax(1).cpu().numpy()
+                hist, _ = np.histogram(class_prob.cpu().numpy(), bins=self.bin_edges)
+                self.bin_counts += hist
             if self.n_objects == 1:
                 masks = self.model.transform(images, with_composition=True)[1][1]
                 scores.update(labels.long().numpy(), (masks > 0.5).long().cpu().numpy())
@@ -1424,7 +1442,7 @@ class Trainer:
 
                 else:
                     # TODO: proba segmentation
-                    exit("exited.")
+                    exit("Not implemented")
                     distances = distances.view(
                         B, *(self.n_prototypes,) * self.n_objects
                     )
@@ -1466,6 +1484,7 @@ class Trainer:
             loss.update(loss_val[0].item(), n=images.size(0))
 
         scores = scores.compute()
+        self.print_and_log_info("bin_counts: " + str(self.bin_counts))
         self.print_and_log_info("final_loss: {:.4f}".format(float(loss.avg)))
         self.print_and_log_info(
             "final_scores: "
@@ -1495,7 +1514,7 @@ class Trainer:
 
         iterator = iter(train_loader)
         for j in range(N):
-            images, labels = iterator.next()
+            images, labels = next(iterator)
             images = images.to(self.device)
             if self.pred_class:
                 recons = self.model.transform(images, hard_occ_grid=True).cpu()
@@ -1504,7 +1523,7 @@ class Trainer:
                 ).cpu()
             else:
                 # TODO: proba segmentation
-                exit("exited.")
+                exit("Not implemented")
                 _, distances, class_prob = self.model(images)
                 distances = distances.view(B, *(self.n_prototypes,) * self.n_objects)
                 other_idxs = []
