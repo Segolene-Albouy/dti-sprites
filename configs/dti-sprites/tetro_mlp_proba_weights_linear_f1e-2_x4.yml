@@ -30,7 +30,7 @@ model:
   proba_type: linear
   freq_weight: 0.01
   bin_weight: 0.0
-  empty_cluster_threshold: 0.025
+  empty_cluster_threshold: 0.025 
 training:
   batch_size: 32
   n_workers: 8
@@ -49,6 +49,7 @@ training:
   check_cluster_interval: 50
   eval_with_bkg: True
   eval_semantic: True
-  seed: 43305
+  seed: 51177
   visualizer_port:
+  resume: 0926_tetro-mlp-proba-f1e-2-x4
   pretrained: 

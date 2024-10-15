@@ -16,6 +16,7 @@ model:
       init: ["constant", "constant", "gaussian"]
       value: [0.9, 0.5, 0.]
       gaussian_weights_std: 7
+  init_latent_linear: gaussian
   transformation_sequence: identity_similarity
   transformation_sequence_bkg: color
   transformation_sequence_layer: color_position
@@ -53,6 +54,7 @@ training:
   check_cluster_interval: 100
   eval_with_bkg: True
   eval_semantic: True
-  seed: 2400
+  seed: 39804
+  resume: 0926_dsprites-mlp-proba
   visualizer_port:
   pretrained: 
