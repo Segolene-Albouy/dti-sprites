@@ -135,7 +135,7 @@ class DTISprites(nn.Module):
     name = "dti_sprites"
     learn_masks = True
 
-    def __init__(self, dataset, n_sprites, n_objects=1, **kwargs):
+    def __init__(self, n_epochs, dataset, n_sprites, n_objects=1, **kwargs):
         super().__init__()
         if dataset is None:
             raise NotImplementedError
@@ -143,6 +143,7 @@ class DTISprites(nn.Module):
             img_size = dataset.img_size
             n_ch = dataset.n_channels
 
+        self.num_epochs = n_epochs
         # Prototypes & masks
         size = kwargs.get("sprite_size", img_size)
         self.sprite_size = size
@@ -389,6 +390,11 @@ class DTISprites(nn.Module):
             self.proba = nn.Linear(self.encoder.out_ch, self.n_sprites * n_objects)
             self.freq_weight = kwargs.get("freq_weight", 0)
             self.bin_weight = kwargs.get("bin_weight", 0)
+            self.start_bin_weight = 0.0001
+            if self.bin_weight < self.start_bin_weight:
+                self.curr_bin_weight = self.bin_weight
+            else:
+                self.curr_bin_weight = self.start_bin_weight
             self.beta_dist = torch.distributions.Beta(
                 torch.Tensor([2.0]).to("cuda"), torch.Tensor([2.0]).to("cuda")
             )
@@ -572,14 +578,21 @@ class DTISprites(nn.Module):
         elif type == "bin":
             p = probas.clamp(min=1e-5, max=1 - 1e-5)  # LKB
             return torch.exp(self.beta_dist.log_prob(p))
+        elif type == "empty_sprite":
+            r = (self.lambda_empty_sprite * torch.Tensor(
+                    [1] * (self.n_sprites - 1) + [0])).to(probas.device).reshape(
+                    1, self.n_sprites, 1) # 1K1
+            r = (r * probas).mean()
+            return r
         else:
             raise ValueError("undefined regularizer")
 
-    def forward(self, x, img_masks=None, epoch=None):
+    def forward(self, x, img_masks=None):
+        loss_em = torch.Tensor([0.0])
         B, C, H, W = x.size()
         L, K, M = self.n_objects, self.n_sprites, self.n_backgrounds or 1
         tsf_layers, tsf_masks, tsf_bkgs, occ_grid, class_prob = self.predict(
-            x, epoch=epoch
+            x
         )
 
         if class_prob is None:
@@ -605,16 +618,19 @@ class DTISprites(nn.Module):
                 loss_r = self.criterion(
                     x.unsqueeze(1), target.unsqueeze(1), weights=img_masks
                 ).mean()
+                if self.add_empty_sprite and not self.are_sprite_frozen:
+                    loss_em = self.reg_func(class_prob, type="empty_sprite")
+                    loss_r += loss_em
                 loss_freq = 1 - freq_loss.sum()
                 loss_bin = bin_loss.mean()
                 loss_all = (
-                    loss_r + self.freq_weight * loss_freq + self.bin_weight * loss_bin
+                    loss_r + self.freq_weight * loss_freq + self.curr_bin_weight * loss_bin
                 )
                 class_oh = torch.zeros(class_prob.shape, device=x.device).scatter_(
                     1, class_prob.argmax(1, keepdim=True), 1
                 )
                 distances = 1 - class_oh.permute(2, 0, 1).flatten(1)  # B(L*K)
-                loss = (loss_all, loss_r, loss_freq, loss_bin)
+                loss = (loss_all, loss_r, loss_freq, loss_bin, loss_em)
             else:
                 loss_r = self.criterion(
                     x.unsqueeze(1), target.unsqueeze(1), weights=img_masks
@@ -624,7 +640,7 @@ class DTISprites(nn.Module):
 
         return loss, distances, class_prob
 
-    def predict(self, x, epoch=None):
+    def predict(self, x):
         B, C, H, W = x.size()
         h, w = self.prototypes.shape[2:]
         L, K, M = self.n_objects, self.n_sprites, self.n_backgrounds or 1
@@ -984,6 +1000,9 @@ class DTISprites(nn.Module):
             self.layer_transformer.step()
         if self.learn_backgrounds:
             self.bkg_transformer.step()
+        if hasattr(self, "proba") and self.curr_bin_weight < self.bin_weight:
+            self.curr_bin_weight = self.start_bin_weight + (self.bin_weight - self.start_bin_weight) * (self.cur_epoch / self.num_epochs)
+            print(f"Updating bin weight to {self.curr_bin_weight}")
 
     def set_optimizer(self, opt):
         self.optimizer = opt
