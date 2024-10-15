@@ -743,9 +743,12 @@ class DTISprites(nn.Module):
 
         if self.estimate_proba:
             logits = self.proba(features).reshape(B, L, K)
-            class_prob = torch.nn.functional.softmax(logits, dim=-1).permute(
-                1, 2, 0
-            )  # LKB
+            if self.add_empty_sprite and self.are_sprite_frozen:
+                logits = logits[:, :, :-1] # B, L, K-1
+                class_prob = torch.nn.functional.softmax(logits, dim=-1).permute(1, 2, 0) # LKB
+                class_prob = torch.cat([class_prob, torch.zeros(L, 1, B, device=class_prob.device)], dim=1)
+            else:
+                class_prob = torch.nn.functional.softmax(logits, dim=-1).permute(1, 2, 0) # LKB
         else:
             if self.estimate_minimum:
                 class_prob = self.greedy_algo_selection(
