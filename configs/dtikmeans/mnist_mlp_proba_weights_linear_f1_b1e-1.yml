@@ -1,5 +1,5 @@
 dataset:
-  name: usps
+  name: mnist
 model:
   name: dtikmeans
   n_prototypes: 10
@@ -8,17 +8,17 @@ model:
     generator: mlp
   encoder_name: resnet20
   color_channels: 1
-  transformation_sequence: identity_color_affine_tps
-  curriculum_learning: [120, 240, 400]
+  transformation_sequence: identity_affine_morpho_tps
+  curriculum_learning: [10, 30, 40]
   grid_size: 4
-  padding_mode: zeros
+  kernel_size: 7
   proba: True
-  proba_weighting: tr_sprite
+  proba_weighting: tr_sprite 
   proba_type: linear
   reassign_cluster: False
+  freq_weight: 1.
+  bin_weight: 0.1
   empty_cluster_threshold: 0.05
-  freq_weight: 0.0
-  bin_weight: 1.
 training:
   batch_size: 128
   optimizer:
@@ -29,11 +29,11 @@ training:
   scheduler:
     name: multi_step
     gamma: 0.1
-    milestones: [500]
+    milestones: [70]
     update_range: epoch
-  n_epoches: 540
+  n_epoches: 80
   train_stat_interval: 25
   val_stat_interval: 50
   check_cluster_interval: 50
-  seed: 13909
-  visualizer_port:
+  seed: 2321
+  visualizer_port: 

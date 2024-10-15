@@ -48,7 +48,6 @@ training:
   check_cluster_interval: 50
   eval_with_bkg: True
   eval_semantic: True
-  seed: 7732
+  seed: 7889
   visualizer_port:
   pretrained: 
-  resume: 1001_rgb-proba
