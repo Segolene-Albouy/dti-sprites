@@ -6,6 +6,7 @@ import torch
 from torch.optim import Adam, RMSprop
 import torch.nn as nn
 from torch.utils.data.dataloader import DataLoader
+import torchvision
 
 from .transformer import (
     PrototypeTransformationNetwork as Transformer,
@@ -84,7 +85,7 @@ def _old_init_linear(
         raise NotImplementedError("init is not implemented.")
 
 
-def init_linear(hidden, out, init, n_channels=3, std=5, value=0.9, dataset=None):
+def init_linear(hidden, out, init, n_channels=3, std=5, value=0.9, dataset=None, uniform=[None, None]):
     if init == "random":
         return nn.Linear(hidden, out)
     elif init == "constant":
@@ -125,10 +126,12 @@ def init_linear(hidden, out, init, n_channels=3, std=5, value=0.9, dataset=None)
 
 def layered_composition(layers, masks, occ_grid):
     # LBCHW size of layers and masks and LLB size for occ_grid
-    occ_masks = (1 - occ_grid[..., None, None, None].transpose(0, 1) * masks).prod(
+    occ_masks = (1 - occ_grid[..., None, None, None].transpose(0, 1) * masks.sum(dim=1)).prod(
         1
     )  # LBCHW
-    return (occ_masks * masks * layers).sum(0)  # BCHW
+    final_layer = (masks*layers).sum(1) # LBCHW
+    return (occ_masks * final_layer).sum(0)  # BCHW
+    #return (occ_masks * masks * layers).sum(0)  # BCHW
 
 
 class DTISprites(nn.Module):
@@ -142,6 +145,8 @@ class DTISprites(nn.Module):
         else:
             img_size = dataset.img_size
             n_ch = dataset.n_channels
+
+        self.count = 0
 
         self.num_epochs = n_epochs
         # Prototypes & masks
@@ -594,7 +599,6 @@ class DTISprites(nn.Module):
         tsf_layers, tsf_masks, tsf_bkgs, occ_grid, class_prob = self.predict(
             x
         )
-
         if class_prob is None:
             target = self.compose(
                 tsf_layers, tsf_masks, occ_grid, tsf_bkgs, class_prob
@@ -630,13 +634,13 @@ class DTISprites(nn.Module):
                     1, class_prob.argmax(1, keepdim=True), 1
                 )
                 distances = 1 - class_oh.permute(2, 0, 1).flatten(1)  # B(L*K)
-                loss = (loss_all, loss_r, loss_freq, loss_bin, loss_em)
+                loss = (loss_all, loss_r, self.freq_weight*loss_freq, self.curr_bin_weight*loss_bin, loss_em)
             else:
                 loss_r = self.criterion(
                     x.unsqueeze(1), target.unsqueeze(1), weights=img_masks
                 ).mean()
                 distances = 1 - class_prob.permute(2, 0, 1).flatten(1)  # B(L*K)
-                loss = (loss_r, loss_r, torch.Tensor([0.0]), torch.Tensor([0.0]))
+                loss = (loss_r, loss_r, torch.Tensor([0.0]), torch.Tensor([0.0]), loss_em)
 
         return loss, distances, class_prob
 
@@ -778,7 +782,7 @@ class DTISprites(nn.Module):
     @torch.no_grad()
     def greedy_algo_selection(self, x, layers, masks, bkgs, occ_grid):
         L, K, B, C, H, W = layers.shape
-        if self.add_empty_sprite and self.are_sprite_frozen:
+        if self.add_empty_sprite and self.are_sprite_frozen: # 1. exclude empty sprite if frozen
             layers, masks = layers[:, :-1], masks[:, :-1]
             K = K - 1
         x, device = x.unsqueeze(0).expand(K, -1, -1, -1, -1), x.device
@@ -842,16 +846,19 @@ class DTISprites(nn.Module):
             resps = torch.cat([resps, torch.zeros(L, 1, B, device=device)], dim=1)
         return resps
 
-    def compose(self, layers, masks, occ_grid, backgrounds=None, class_prob=None):
+    def compose(self, layers, masks, occ_grid, backgrounds=None, class_prob=None, semantic=False):
         L, K, B, C, H, W = layers.shape
         device = occ_grid.device
-
+        self.count += 1
         if class_prob is not None:
-            masks = (masks * class_prob[..., None, None, None]).sum(axis=1)
-            layers = (layers * class_prob[..., None, None, None]).sum(axis=1)
+            masks = (masks * class_prob[..., None, None, None]) #.sum(axis=1)
+            # layers = (layers * class_prob[..., None, None, None]).sum(axis=1)
             size = (B, C, H, W)
+
             if backgrounds is not None:
-                masks = torch.cat([torch.ones(1, B, 1, H, W, device=device), masks])
+                masks = torch.cat([torch.ones(1, K, B, 1, H, W, device=device)/K, masks]) # why 1, not M?
+                M, _, _, _, _ = backgrounds.shape
+                backgrounds = backgrounds.unsqueeze(1).expand(-1, K, -1, -1, -1, -1)
                 layers = torch.cat([backgrounds, layers])
                 one, zero = torch.ones(B, L, 1, device=device), torch.zeros(
                     B, 1, L + 1, device=device
@@ -859,6 +866,7 @@ class DTISprites(nn.Module):
                 occ_grid = torch.cat(
                     [zero, torch.cat([one, occ_grid.permute(2, 0, 1)], dim=2)], dim=1
                 ).permute(1, 2, 0)
+
             return layered_composition(layers, masks, occ_grid)
 
         else:
@@ -925,7 +933,9 @@ class DTISprites(nn.Module):
     ):
         B, C, H, W = x.size()
         L, K = self.n_objects, self.n_sprites
+
         tsf_layers, tsf_masks, tsf_bkgs, occ_grid, class_prob = self.predict(x)
+        
         if class_prob is not None:
             class_oh = torch.zeros(class_prob.shape, device=x.device).scatter_(
                 1, class_prob.argmax(1, keepdim=True), 1
@@ -945,6 +955,7 @@ class DTISprites(nn.Module):
                 (tsf_masks > 0.5).long(),
                 true_occ_grid,
                 class_prob=class_oh,
+                semantic=True,
             ).squeeze(1)
             if self.return_map_out:
                 bboxes = get_bbox_from_mask(tsf_masks)
@@ -977,8 +988,12 @@ class DTISprites(nn.Module):
         else:
             occ_grid = (occ_grid > 0.5).float() if hard_occ_grid else occ_grid
             tsf_layers, tsf_masks = tsf_layers.clamp(0, 1), tsf_masks.clamp(0, 1)
+            
             if tsf_bkgs is not None:
                 tsf_bkgs = tsf_bkgs.clamp(0, 1)
+
+            if hard_occ_grid: # Threshold also the class probability for visualization
+                class_prob = class_oh
             target = self.compose(tsf_layers, tsf_masks, occ_grid, tsf_bkgs, class_prob)
             if class_prob is not None:
                 target = target.unsqueeze(1)

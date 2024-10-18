@@ -9,7 +9,7 @@ from torch.nn import functional as F
 from torch.optim import Adam, RMSprop
 from torchvision.models import vgg16_bn
 from torchvision.transforms.functional import resize
-
+import torchvision
 from .mini_resnet import get_resnet_model as get_mini_resnet_model
 from .resnet import get_resnet_model
 from .tools import copy_with_noise, get_output_size, TPSGrid, create_mlp, get_clamp_func
@@ -580,14 +580,45 @@ class PositionModule(_AbstractTransformationModule):
             (x.size(0), x.size(1), self.img_size[0], self.img_size[1]),
             align_corners=False,
         )
-        return F.grid_sample(
-            x,
+        x_proto = x[:, :3, ...]
+        x_mask = x[:, 3, ...].unsqueeze(1)
+
+        """
+        out_proto = F.grid_sample(
+            x_proto,
             grid,
             mode="bilinear",
             padding_mode=self.padding_mode,
             align_corners=False,
+        ) 
+        out_mask = F.grid_sample(
+            x_mask,
+            grid,
+            mode="bilinear",
+            padding_mode="zeros",
+            align_corners=False,
         )
+        out_mask_ = out_mask.squeeze(1)
+        for i in range(out_mask_.size(0)):
+            torchvision.utils.save_image(out_mask_[i], f"out_mask_{i}.png")
+        
+        out_proto_ = out_proto.squeeze(1)
+        for i in range(out_proto_.size(0)):
+            torchvision.utils.save_image(out_proto_[i], f"out_proto_{i}.png")
 
+        out = torch.cat([out_proto, out_mask], dim=1)
+        """
+
+        
+        out = F.grid_sample(
+            x,
+            grid,
+            mode="bilinear",
+            padding_mode="zeros",
+            align_corners=False,
+        )       
+
+        return out
 
 class SimilarityModule(_AbstractTransformationModule):
     def __init__(self, in_channels, img_size, **kwargs):

@@ -1107,7 +1107,7 @@ class Trainer:
                 self.print_and_log_info("Semantic segmentation evaluation")
                 self.segmentation_quantitative_eval()
                 self.segmentation_qualitative_eval()
-            if (
+            elif (
                 self.instance_eval and self.learn_masks
             ):  # NOTE: evaluate either semantic or instance
                 self.print_and_log_info("Instance segmentation evaluation")
@@ -1423,7 +1423,7 @@ class Trainer:
 
         iterator = iter(train_loader)
         for k in range(N):
-            images, labels = next(iterator)
+            images, labels, _, _ = next(iterator)
             images = images.to(self.device)
             loss_val, distances, class_prob = self.model(images)
             if self.learn_proba:

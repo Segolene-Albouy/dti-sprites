@@ -20,7 +20,7 @@ model:
   transformation_sequence: identity_similarity
   transformation_sequence_bkg: color
   transformation_sequence_layer: color_position
-  curriculum_learning: [20]
+  curriculum_learning: [50]
   curriculum_learning_bkg: False
   curriculum_learning_layer: False
   sprite_size: [28, 28]
@@ -28,14 +28,13 @@ model:
   estimate_minimum: True
   greedy_algo_iter: 3
   add_empty_sprite: True
-  lambda_empty_sprite: 1.e-2
+  lambda_empty_sprite: 1.0e-4
   proba: True
   proba_weighting: tr_sprite
   proba_type: linear
   reassign_cluster: False
   bin_weight: 0.0
   freq_weight: 0.0
-  empty_cluster_threshold: 0.1667
 training:
   batch_size: 32
   n_workers: 4
@@ -56,4 +55,4 @@ training:
   eval_semantic: True
   seed: 21412
   visualizer_port:
-  pretrained: 
+  pretrained:
