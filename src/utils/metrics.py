@@ -29,7 +29,7 @@ class Metrics:
         return self.meters[name]
 
     def __repr__(self):
-        return ', '.join(['{}={:.4f}'.format(name, self.meters[name].avg) for name in self.names])
+        return ', '.join(['{}={:.8f}'.format(name, self.meters[name].avg) for name in self.names])
 
     @property
     def avg_values(self):
