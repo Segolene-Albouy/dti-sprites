@@ -51,6 +51,7 @@ class PrototypeTransformationNetwork(nn.Module):
             "freeze_frg": kwargs.get("freeze_frg", False),
             "in_channels": self.enc_out_channels,
             "img_size": img_size,
+            "layer_size": kwargs.get("layer_size", img_size),
             "color_channels": kwargs.get("color_channels", 3),
             "sequence_name": self.sequence_name,
             "grid_size": kwargs.get("grid_size", 4),
@@ -580,45 +581,13 @@ class PositionModule(_AbstractTransformationModule):
             (x.size(0), x.size(1), self.img_size[0], self.img_size[1]),
             align_corners=False,
         )
-        x_proto = x[:, :3, ...]
-        x_mask = x[:, 3, ...].unsqueeze(1)
-
-        """
-        out_proto = F.grid_sample(
-            x_proto,
-            grid,
-            mode="bilinear",
-            padding_mode=self.padding_mode,
-            align_corners=False,
-        ) 
-        out_mask = F.grid_sample(
-            x_mask,
-            grid,
-            mode="bilinear",
-            padding_mode="zeros",
-            align_corners=False,
-        )
-        out_mask_ = out_mask.squeeze(1)
-        for i in range(out_mask_.size(0)):
-            torchvision.utils.save_image(out_mask_[i], f"out_mask_{i}.png")
-        
-        out_proto_ = out_proto.squeeze(1)
-        for i in range(out_proto_.size(0)):
-            torchvision.utils.save_image(out_proto_[i], f"out_proto_{i}.png")
-
-        out = torch.cat([out_proto, out_mask], dim=1)
-        """
-
-        
-        out = F.grid_sample(
+        return F.grid_sample(
             x,
             grid,
             mode="bilinear",
             padding_mode="zeros",
             align_corners=False,
         )       
-
-        return out
 
 class SimilarityModule(_AbstractTransformationModule):
     def __init__(self, in_channels, img_size, **kwargs):
@@ -627,7 +596,7 @@ class SimilarityModule(_AbstractTransformationModule):
         self.padding_mode = kwargs.get("padding_mode", "border")
         n_layers = kwargs.get("n_hidden_layers", N_LAYERS)
         self.regressor = create_mlp(in_channels, 4, N_HIDDEN_UNITS, n_layers)
-
+        self.layer_size = kwargs.get("layer_size")
         # Identity transformation parameters and regressor initialization
         self.register_buffer(
             "identity", torch.cat([torch.eye(2, 2), torch.zeros(2, 1)], dim=1)
@@ -649,7 +618,7 @@ class SimilarityModule(_AbstractTransformationModule):
         beta = torch.cat([scaled_rot, t.unsqueeze(2)], dim=2) + self.identity
         grid = F.affine_grid(
             beta,
-            (x.size(0), x.size(1), self.img_size[0], self.img_size[1]),
+            (x.size(0), x.size(1), self.layer_size[0], self.layer_size[1]),
             align_corners=False,
         )
         return F.grid_sample(
