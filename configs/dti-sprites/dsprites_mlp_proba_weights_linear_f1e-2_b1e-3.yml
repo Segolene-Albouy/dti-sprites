@@ -28,14 +28,11 @@ model:
   estimate_minimum: True
   greedy_algo_iter: 3
   add_empty_sprite: True
-  lambda_empty_sprite: 1.e-2
+  lambda_empty_sprite: 1.e-4
   proba: True
-  proba_weighting: tr_sprite
-  proba_type: linear
   reassign_cluster: False
-  bin_weight: 0.0
-  freq_weight: 0.0
-  empty_cluster_threshold: 0.1667
+  bin_weight: 0.001
+  freq_weight: 0.01
 training:
   batch_size: 32
   n_workers: 4
@@ -57,4 +54,3 @@ training:
   seed: 21412
   visualizer_port:
   pretrained: 
-  resume: 1019_debug-run-es1e-2

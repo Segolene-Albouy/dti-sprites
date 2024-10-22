@@ -28,7 +28,6 @@ model:
   greedy_algo_iter: 3
   add_empty_sprite: True
   lambda_empty_sprite: 1.0e-4
-  empty_cluster_threshold: 0.1667
   proba: True
   proba_weighting: tr_sprite
   proba_type: linear

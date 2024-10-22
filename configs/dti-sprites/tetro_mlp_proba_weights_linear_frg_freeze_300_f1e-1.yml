@@ -28,9 +28,8 @@ model:
   reassign_cluster: False
   proba: True
   proba_type: linear
-  freq_weight: 0.0
+  freq_weight: 0.1
   bin_weight: 0.0
-  empty_cluster_threshold: 0.025
 training:
   batch_size: 32
   n_workers: 8
@@ -43,7 +42,7 @@ training:
     name: multi_step
     gamma: [1, 0.1]
     milestones: [500, 600] 
-  n_epoches: 610 
+  n_epoches: 610
   train_stat_interval: 500
   val_stat_interval: 1000
   check_cluster_interval: 50
