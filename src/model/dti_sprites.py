@@ -24,6 +24,9 @@ from .tools import (
 from ..utils.logger import print_warning
 from .u_net import UNet
 
+import lovely_tensors as lt
+lt.monkey_patch()
+
 NOISE_SCALE = 0.0001
 EMPTY_CLUSTER_THRESHOLD = 0.2
 LATENT_SIZE = 128
@@ -124,14 +127,17 @@ def init_linear(hidden, out, init, n_channels=3, std=5, value=0.9, dataset=None,
         raise NotImplementedError("init is not implemented.")
 
 
-def layered_composition(layers, masks, occ_grid):
+def layered_composition(layers, masks, occ_grid, proba=False):
     # LBCHW size of layers and masks and LLB size for occ_grid
-    occ_masks = (1 - occ_grid[..., None, None, None].transpose(0, 1) * masks.sum(dim=1)).prod(
-        1
-    )  # LBCHW
-    final_layer = (masks*layers).sum(1) # LBCHW
-    return (occ_masks * final_layer).sum(0)  # BCHW
-    #return (occ_masks * masks * layers).sum(0)  # BCHW
+    if proba:
+        occ_masks = (1 - occ_grid[..., None, None, None].transpose(0, 1) * masks.sum(dim=1)).prod(
+            1
+        )  # LBCHW
+        final_layer = (masks*layers).sum(1) # LBCHW
+        return (occ_masks * final_layer).sum(0)  # BCHW
+    else:
+        occ_masks = (1 - occ_grid[..., None, None, None].transpose(0, 1) * masks).prod(1)  # LBCHW
+        return (occ_masks * masks * layers).sum(0)  # BCHW
 
 
 class DTISprites(nn.Module):
@@ -284,6 +290,7 @@ class DTISprites(nn.Module):
                     n_ch,
                     size,
                     self.n_sprites,
+                    layer_size=img_size,
                     encoder=self.encoder,
                     **dict(kwargs, freeze_frg=freeze_frg),
                 )
@@ -577,7 +584,9 @@ class DTISprites(nn.Module):
 
     def reg_func(self, probas, type="freq"):
         if type == "freq":
-            freqs = probas.mean(dim=0)
+            probas_ = probas[:, :-1, :] if self.add_empty_sprite else probas
+            probas_ = probas_ / torch.max(probas_, dim=1, keepdim=True)[0] # just like reassignment of clusters from proportion
+            freqs = probas_.mean(dim=0)
             freqs = freqs / freqs.sum()
             return freqs.clamp(max=(self.empty_cluster_threshold))
         elif type == "bin":
@@ -634,7 +643,7 @@ class DTISprites(nn.Module):
                     1, class_prob.argmax(1, keepdim=True), 1
                 )
                 distances = 1 - class_oh.permute(2, 0, 1).flatten(1)  # B(L*K)
-                loss = (loss_all, loss_r, self.freq_weight*loss_freq, self.curr_bin_weight*loss_bin, loss_em)
+                loss = (loss_all, loss_r, loss_freq, loss_bin, loss_em)
             else:
                 loss_r = self.criterion(
                     x.unsqueeze(1), target.unsqueeze(1), weights=img_masks
@@ -846,28 +855,44 @@ class DTISprites(nn.Module):
             resps = torch.cat([resps, torch.zeros(L, 1, B, device=device)], dim=1)
         return resps
 
-    def compose(self, layers, masks, occ_grid, backgrounds=None, class_prob=None, semantic=False):
+    def compose(self, layers, masks, occ_grid, backgrounds=None, class_prob=None):
         L, K, B, C, H, W = layers.shape
         device = occ_grid.device
-        self.count += 1
+
+        is_binary = (class_prob == 0) | (class_prob == 1)
+        is_only_0_or_1 = is_binary.all()
+
         if class_prob is not None:
-            masks = (masks * class_prob[..., None, None, None]) #.sum(axis=1)
-            # layers = (layers * class_prob[..., None, None, None]).sum(axis=1)
-            size = (B, C, H, W)
+            if is_only_0_or_1:
+                masks = (masks * class_prob[..., None, None, None]).sum(axis=1)
+                layers = (layers * class_prob[..., None, None, None]).sum(axis=1)
 
-            if backgrounds is not None:
-                masks = torch.cat([torch.ones(1, K, B, 1, H, W, device=device)/K, masks]) # why 1, not M?
-                M, _, _, _, _ = backgrounds.shape
-                backgrounds = backgrounds.unsqueeze(1).expand(-1, K, -1, -1, -1, -1)
-                layers = torch.cat([backgrounds, layers])
-                one, zero = torch.ones(B, L, 1, device=device), torch.zeros(
-                    B, 1, L + 1, device=device
-                )
-                occ_grid = torch.cat(
-                    [zero, torch.cat([one, occ_grid.permute(2, 0, 1)], dim=2)], dim=1
-                ).permute(1, 2, 0)
+                if backgrounds is not None:
+                    masks = torch.cat([torch.ones(1, B, 1, H, W, device=device), masks]) # why 1, not M?
+                    layers = torch.cat([backgrounds, layers])
+                    one, zero = torch.ones(B, L, 1, device=device), torch.zeros(
+                        B, 1, L + 1, device=device
+                    )
+                    occ_grid = torch.cat(
+                        [zero, torch.cat([one, occ_grid.permute(2, 0, 1)], dim=2)], dim=1
+                    ).permute(1, 2, 0)
 
-            return layered_composition(layers, masks, occ_grid)
+                return layered_composition(layers, masks, occ_grid)
+            else:
+                masks = (masks * class_prob[..., None, None, None]) 
+                if backgrounds is not None:
+                    masks = torch.cat([torch.ones(1, K, B, 1, H, W, device=device)/K, masks]) # why 1, not M?
+                    M, _, _, _, _ = backgrounds.shape
+                    backgrounds = backgrounds.unsqueeze(1).expand(-1, K, -1, -1, -1, -1)
+                    layers = torch.cat([backgrounds, layers])
+                    one, zero = torch.ones(B, L, 1, device=device), torch.zeros(
+                        B, 1, L + 1, device=device
+                    )
+                    occ_grid = torch.cat(
+                        [zero, torch.cat([one, occ_grid.permute(2, 0, 1)], dim=2)], dim=1
+                    ).permute(1, 2, 0)
+
+                return layered_composition(layers, masks, occ_grid, proba=True)
 
         else:
             layers = [
@@ -935,7 +960,6 @@ class DTISprites(nn.Module):
         L, K = self.n_objects, self.n_sprites
 
         tsf_layers, tsf_masks, tsf_bkgs, occ_grid, class_prob = self.predict(x)
-        
         if class_prob is not None:
             class_oh = torch.zeros(class_prob.shape, device=x.device).scatter_(
                 1, class_prob.argmax(1, keepdim=True), 1
@@ -954,8 +978,7 @@ class DTISprites(nn.Module):
                 label_layers,
                 (tsf_masks > 0.5).long(),
                 true_occ_grid,
-                class_prob=class_oh,
-                semantic=True,
+                class_prob=class_oh
             ).squeeze(1)
             if self.return_map_out:
                 bboxes = get_bbox_from_mask(tsf_masks)
