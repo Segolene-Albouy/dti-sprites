@@ -9,6 +9,19 @@ from torch.nn import functional as F
 from torch.utils.data.dataloader import DataLoader
 
 
+def get_bbox_from_mask(binary_masks):
+    indices_y, indices_x = torch.where(binary_masks.view(binary_masks.shape[0], -1))
+
+    x_min = indices_x.min(dim=1).values
+    y_min = indices_y.min(dim=1).values
+    x_max = indices_x.max(dim=1).values
+    y_max = indices_y.max(dim=1).values
+
+    bounding_boxes = torch.stack([x_min, y_min, x_max - x_min, y_max - y_min], dim=1)
+
+    return bounding_boxes
+
+
 def copy_with_noise(t, noise_scale=0.0001):
     return t.detach().clone() + torch.randn(t.shape, device=t.device) * noise_scale
 
@@ -36,38 +49,67 @@ def create_gaussian_weights(img_size, n_channels, std):
     return torch.from_numpy(g2d).unsqueeze(0).expand(n_channels, -1, -1).float()
 
 
-def generate_data(dataset, K, init_type='sample', value=None, noise_scale=None, std=None, size=None):
+def generate_data(
+    dataset, K, init_type="sample", value=None, noise_scale=None, std=None, size=None
+):
     samples = []
-    if init_type == 'kmeans':
+    if init_type == "kmeans":
         N = min(100 * K, len(dataset))
-        images = next(iter(DataLoader(dataset, batch_size=N, shuffle=True, num_workers=4)))[0]
+        images = next(
+            iter(DataLoader(dataset, batch_size=N, shuffle=True, num_workers=4))
+        )[0]
         img_size = images.shape[1:]
         X = images.flatten(1).numpy()
         cluster = KMeans(K)
         cluster.fit(X)
-        samples = list(map(lambda c: torch.Tensor(c).reshape(img_size), cluster.cluster_centers_))
+        samples = list(
+            map(lambda c: torch.Tensor(c).reshape(img_size), cluster.cluster_centers_)
+        )
         if size is not None:
-            samples = [F.interpolate(s.unsqueeze(0), size, mode='bilinear', align_corners=False)[0] for s in samples]
+            samples = [
+                F.interpolate(
+                    s.unsqueeze(0), size, mode="bilinear", align_corners=False
+                )[0]
+                for s in samples
+            ]
     else:
         for _ in range(K):
-            if init_type == 'soup':
+            if init_type == "soup":
                 noise_scale = noise_scale or 1
-                sample = torch.rand(dataset.n_channels, *(size or dataset.img_size)) * noise_scale
+                sample = torch.rand(dataset[0][0].shape)
                 if value is not None:
                     sample += value
-            elif init_type == 'sample':
+            elif init_type == "sample":
                 sample = dataset[np.random.randint(len(dataset))][0]
                 if size is not None:
-                    sample = F.interpolate(sample.unsqueeze(0), size, mode='bilinear', align_corners=False)[0]
-            elif init_type == 'constant':
-                value = value or 0.5
-                sample = torch.full((dataset.n_channels, *(size or dataset.img_size)), value, dtype=torch.float)
-            elif init_type == 'random_color':
-                sample = torch.ones(3, *(size or dataset.img_size)) * torch.rand(3, 1, 1)
-            elif init_type == 'gaussian':
-                sample = create_gaussian_weights(size or dataset.img_size, dataset.n_channels, std)
-            elif init_type == 'mean':
-                images = next(iter(DataLoader(dataset, batch_size=100, shuffle=True, num_workers=4)))[0]
+                    sample = F.interpolate(
+                        sample.unsqueeze(0), size, mode="bilinear", align_corners=False
+                    )[0]
+            elif init_type == "constant":
+                if value is not None:
+                    sample = torch.full(
+                        (dataset.n_channels, *(size or dataset.img_size)),
+                        value,
+                        dtype=torch.float,
+                    )
+                else:
+                    raise ValueError(
+                        "value arg is mandatory with init_type=='constant'"
+                    )
+            elif init_type == "random_color":
+                sample = torch.ones(3, *(size or dataset.img_size)) * torch.rand(
+                    3, 1, 1
+                )
+            elif init_type == "gaussian":
+                sample = create_gaussian_weights(
+                    size or dataset.img_size, dataset.n_channels, std
+                )
+            elif init_type == "mean":
+                images = next(
+                    iter(
+                        DataLoader(dataset, batch_size=100, shuffle=True, num_workers=4)
+                    )
+                )[0]
                 sample = images.mean(0)
             else:
                 raise NotImplementedError
@@ -90,8 +132,16 @@ def safe_model_state_dict(state_dict):
 
 def conv3x3(in_planes, out_planes, stride=1, groups=1, dilation=1):
     """3x3 convolution with padding"""
-    return nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride,
-                     padding=dilation, groups=groups, bias=False, dilation=dilation)
+    return nn.Conv2d(
+        in_planes,
+        out_planes,
+        kernel_size=3,
+        stride=stride,
+        padding=dilation,
+        groups=groups,
+        bias=False,
+        dilation=dilation,
+    )
 
 
 def conv1x1(in_planes, out_planes, stride=1):
@@ -100,15 +150,19 @@ def conv1x1(in_planes, out_planes, stride=1):
 
 
 def create_mlp(in_ch, out_ch, n_hidden_units, n_layers, norm_layer=None):
-    if norm_layer is None or norm_layer in ['id', 'identity']:
+    if norm_layer is None or norm_layer in ["id", "identity"]:
         norm_layer = Identity
-    elif norm_layer in ['batch_norm', 'bn']:
+    elif norm_layer in ["batch_norm", "bn"]:
         norm_layer = nn.BatchNorm1d
     elif not norm_layer == nn.BatchNorm1d:
         raise NotImplementedError
 
     if n_layers > 0:
-        seq = [nn.Linear(in_ch, n_hidden_units), norm_layer(n_hidden_units), nn.ReLU(True)]
+        seq = [
+            nn.Linear(in_ch, n_hidden_units),
+            norm_layer(n_hidden_units),
+            nn.ReLU(True),
+        ]
         for _ in range(n_layers - 1):
             seq += [nn.Linear(n_hidden_units, n_hidden_units), nn.ReLU(True)]
         seq += [nn.Linear(n_hidden_units, out_ch)]
@@ -118,7 +172,9 @@ def create_mlp(in_ch, out_ch, n_hidden_units, n_layers, norm_layer=None):
 
 
 def get_nb_out_channels(layer):
-    return list(filter(lambda e: isinstance(e, nn.Conv2d), layer.modules()))[-1].out_channels
+    return list(filter(lambda e: isinstance(e, nn.Conv2d), layer.modules()))[
+        -1
+    ].out_channels
 
 
 def get_output_size(in_channels, img_size, model):
@@ -176,18 +232,18 @@ class DiffClamp(nn.Module):
 
 
 def get_clamp_func(name):
-    if name in [True, 'clamp', 'normal']:
+    if name in [True, "clamp", "normal"]:
         func = Clamp()
     elif not name:
         func = Identity()
-    elif name.startswith('soft') or name.startswith('leaky'):
-        alpha = name.replace('soft', '').replace('leaky_relu', '')
-        kwargs = {'alpha': float(alpha)} if len(alpha) > 0 else {}
+    elif name.startswith("soft") or name.startswith("leaky"):
+        alpha = name.replace("soft", "").replace("leaky_relu", "")
+        kwargs = {"alpha": float(alpha)} if len(alpha) > 0 else {}
         func = SoftClamp(**kwargs)
-    elif name.startswith('diff'):
+    elif name.startswith("diff"):
         func = DiffClamp()
     else:
-        raise NotImplementedError(f'{name} is not a valid clamp function')
+        raise NotImplementedError(f"{name} is not a valid clamp function")
     return func
 
 
@@ -203,7 +259,9 @@ class TPSGrid(nn.Module):
 
         # create padded kernel matrix
         forward_kernel = torch.zeros(N + 3, N + 3)
-        target_control_partial_repr = self.compute_partial_repr(target_control_points, target_control_points)
+        target_control_partial_repr = self.compute_partial_repr(
+            target_control_points, target_control_points
+        )
         forward_kernel[:N, :N].copy_(target_control_partial_repr)
         forward_kernel[:N, -3].fill_(1)
         forward_kernel[-3, :N].fill_(1)
@@ -213,15 +271,23 @@ class TPSGrid(nn.Module):
 
         # create target cordinate matrix
         HW = img_height * img_width
-        y, x = torch.meshgrid(torch.linspace(-1, 1, img_height), torch.linspace(-1, 1, img_width))
+        y, x = torch.meshgrid(
+            torch.linspace(-1, 1, img_height),
+            torch.linspace(-1, 1, img_width),
+            indexing="ij",
+        )
         target_coordinate = torch.stack([x.flatten(), y.flatten()], 1)
-        target_coordinate_partial_repr = self.compute_partial_repr(target_coordinate, target_control_points)
-        target_coordinate_repr = torch.cat([target_coordinate_partial_repr, torch.ones(HW, 1), target_coordinate], 1)
+        target_coordinate_partial_repr = self.compute_partial_repr(
+            target_coordinate, target_control_points
+        )
+        target_coordinate_repr = torch.cat(
+            [target_coordinate_partial_repr, torch.ones(HW, 1), target_coordinate], 1
+        )
 
         # register precomputed matrices
-        self.register_buffer('inverse_kernel', inverse_kernel)
-        self.register_buffer('padding_matrix', torch.zeros(3, 2))
-        self.register_buffer('target_coordinate_repr', target_coordinate_repr)
+        self.register_buffer("inverse_kernel", inverse_kernel)
+        self.register_buffer("padding_matrix", torch.zeros(3, 2))
+        self.register_buffer("target_coordinate_repr", target_coordinate_repr)
 
     @staticmethod
     def compute_partial_repr(input_points, control_points):
@@ -236,7 +302,13 @@ class TPSGrid(nn.Module):
         return repr_matrix
 
     def forward(self, source_control_points):
-        Y = torch.cat([source_control_points, self.padding_matrix.expand(source_control_points.size(0), 3, 2)], 1)
+        Y = torch.cat(
+            [
+                source_control_points,
+                self.padding_matrix.expand(source_control_points.size(0), 3, 2),
+            ],
+            1,
+        )
         mapping_matrix = torch.matmul(self.inverse_kernel, Y)
         source_coordinate = torch.matmul(self.target_coordinate_repr, mapping_matrix)
         return source_coordinate
