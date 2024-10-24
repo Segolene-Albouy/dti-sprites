@@ -1,5 +1,10 @@
 # DTI-Sprites
 
+> Fork of the original repository by [Tom Monnier](https://github.com/monniert/dti-sprites)
+> including modifications for implementation inside [Discover-demo platform](https://github.com/Aikon-platform/discover-demo).
+> 
+> Contributors to this version: [Sonat Baltaci](https://github.com/sonatbaltaci) & [Robin Champenois](https://github.com/Evarin)
+
 Pytorch implementation of [**"Unsupervised Layered Image Decomposition into Object 
 Prototypes"**](https://arxiv.org/abs/2104.14575) paper (accepted to ICCV 2021)
 
