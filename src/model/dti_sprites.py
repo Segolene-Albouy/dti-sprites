@@ -402,8 +402,8 @@ class DTISprites(nn.Module):
             self.proba = nn.Linear(self.encoder.out_ch, self.n_sprites * n_objects)
             self.freq_weight = kwargs.get("freq_weight", 0)
             self.bin_weight = kwargs.get("bin_weight", 0)
-            self.start_bin_weight = 0.0001
-            if self.bin_weight < self.start_bin_weight:
+            self.start_bin_weight = self.bin_weight #0.0001
+            if self.bin_weight <= self.start_bin_weight:
                 self.curr_bin_weight = self.bin_weight
             else:
                 self.curr_bin_weight = self.start_bin_weight
@@ -590,7 +590,7 @@ class DTISprites(nn.Module):
             freqs = freqs / freqs.sum()
             return freqs.clamp(max=(self.empty_cluster_threshold))
         elif type == "bin":
-            p = probas.clamp(min=1e-5, max=1 - 1e-5)  # LKB
+            p = probas_.clamp(min=1e-5, max=1 - 1e-5)  # LKB
             return torch.exp(self.beta_dist.log_prob(p))
         elif type == "empty_sprite":
             r = (self.lambda_empty_sprite * torch.Tensor(
