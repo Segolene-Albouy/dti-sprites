@@ -495,11 +495,10 @@ class Trainer:
 
         with torch.no_grad():
             if self.learn_proba: 
-                class_oh = class_prob.permute(2, 0, 1) # LKB to BLK
-
-                one_hot = torch.zeros(class_oh.shape, device=self.device).scatter(
-                    2, class_oh.argmax(2, keepdim=True), 1
-                ).reshape(B, -1)
+                class_oh = torch.zeros(class_prob.shape, device=class_prob.device).scatter_(
+                    1, class_prob.argmax(1, keepdim=True), 1
+                )
+                one_hot = class_oh.permute(2, 0, 1).flatten(1)  # B(L*K)
                 proportions = one_hot.mean(0)
             else:
                 if self.pred_class:  # distances B(L*K), discovery
