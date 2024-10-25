@@ -590,7 +590,7 @@ class DTISprites(nn.Module):
             freqs = freqs / freqs.sum()
             return freqs.clamp(max=(self.empty_cluster_threshold))
         elif type == "bin":
-            p = probas.clamp(min=1e-5, max=1 - 1e-5)  # LKB
+            p = probas_.clamp(min=1e-5, max=1 - 1e-5)  # LKB
             return torch.exp(self.beta_dist.log_prob(p))
         elif type == "empty_sprite":
             r = (self.lambda_empty_sprite * torch.Tensor(
