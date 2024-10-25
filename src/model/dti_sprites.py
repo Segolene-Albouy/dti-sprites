@@ -402,8 +402,8 @@ class DTISprites(nn.Module):
             self.proba = nn.Linear(self.encoder.out_ch, self.n_sprites * n_objects)
             self.freq_weight = kwargs.get("freq_weight", 0)
             self.bin_weight = kwargs.get("bin_weight", 0)
-            self.start_bin_weight = 0.0001
-            if self.bin_weight < self.start_bin_weight:
+            self.start_bin_weight = self. bin_weight # 0.0001
+            if self.bin_weight <= self.start_bin_weight:
                 self.curr_bin_weight = self.bin_weight
             else:
                 self.curr_bin_weight = self.start_bin_weight
@@ -711,6 +711,8 @@ class DTISprites(nn.Module):
         )
         if self.has_layer_tsf:
             layer_features = features.unsqueeze(1).expand(-1, K, -1).reshape(B * K, -1)
+            if tsf_sprites.shape[-1] == W:
+                h, w = tsf_sprites.shape[-2:]
             tsf_layers = self.layer_transformer(
                 x, tsf_sprites.view(L, B * K, -1, h, w), layer_features
             )[1]
