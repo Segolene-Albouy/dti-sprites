@@ -28,7 +28,7 @@ model:
   estimate_minimum: True
   greedy_algo_iter: 3
   add_empty_sprite: True
-  lambda_empty_sprite: 1.0e-3
+  lambda_empty_sprite: 5.0e-3
   proba: True
   proba_type: linear
   reassign_cluster: False
@@ -45,7 +45,7 @@ training:
   scheduler:
     name: multi_step
     gamma: [1, 0.1]
-    milestones: [520, 520] # [250, 500]
+    milestones: [250, 500]
   n_epoches: 510
   train_stat_interval: 2000
   val_stat_interval: 1000
@@ -54,4 +54,3 @@ training:
   eval_semantic: True
   seed: 21412
   visualizer_port:
-  resume: 1029_dsprites-es1e-3-longer

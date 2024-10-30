@@ -20,7 +20,7 @@ model:
   transformation_sequence: identity_similarity
   transformation_sequence_bkg: color
   transformation_sequence_layer: color_position
-  curriculum_learning: [20]
+  curriculum_learning: [10]
   curriculum_learning_bkg: False
   curriculum_learning_layer: False
   sprite_size: [28, 28]
@@ -45,7 +45,7 @@ training:
   scheduler:
     name: multi_step
     gamma: [1, 0.1]
-    milestones: [520, 520] # [250, 500]
+    milestones: [250, 500]
   n_epoches: 510
   train_stat_interval: 2000
   val_stat_interval: 1000
@@ -54,4 +54,3 @@ training:
   eval_semantic: True
   seed: 21412
   visualizer_port:
-  resume: 1029_dsprites-es1e-3-longer

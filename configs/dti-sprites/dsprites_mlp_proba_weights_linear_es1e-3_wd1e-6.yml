@@ -40,12 +40,13 @@ training:
   optimizer:
     name: adam
     lr: 1.0e-4
+    weight_decay: 1.0e-6
     transformer:
       weight_decay: 1.0e-6
   scheduler:
     name: multi_step
     gamma: [1, 0.1]
-    milestones: [520, 520] # [250, 500]
+    milestones: [250, 500]
   n_epoches: 510
   train_stat_interval: 2000
   val_stat_interval: 1000
@@ -54,4 +55,3 @@ training:
   eval_semantic: True
   seed: 21412
   visualizer_port:
-  resume: 1029_dsprites-es1e-3-longer
