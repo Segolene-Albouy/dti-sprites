@@ -31,8 +31,8 @@ model:
   lambda_empty_sprite: 1.0e-3
   proba: True
   reassign_cluster: False
-  bin_weight: 0.001
-  freq_weight: 0.0
+  bin_weight: 0.0
+  freq_weight: 0.001
 training:
   batch_size: 32
   n_workers: 4
@@ -46,11 +46,11 @@ training:
     gamma: [1, 0.1]
     milestones: [250, 500]
   n_epoches: 510
-  train_stat_interval: 2000
-  val_stat_interval: 4000
+  train_stat_interval: 100
+  val_stat_interval: 2000
   check_cluster_interval: 100
   eval_with_bkg: True
   eval_semantic: True
-  seed: 82020
+  seed: 24837
   visualizer_port:
-  resume: 1026_dsprites-deneme 
+  pretrained: 
