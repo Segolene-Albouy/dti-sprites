@@ -28,7 +28,7 @@ model:
   estimate_minimum: True
   greedy_algo_iter: 3
   add_empty_sprite: True
-  lambda_empty_sprite: 1.0e-3
+  lambda_empty_sprite: 1.0e-2
   proba: True
   reassign_cluster: False
   bin_weight: 0.001
@@ -53,4 +53,3 @@ training:
   eval_semantic: True
   seed: 82020
   visualizer_port:
-  resume: 1026_dsprites-deneme 
