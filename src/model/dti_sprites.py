@@ -184,6 +184,8 @@ class DTISprites(nn.Module):
             value_frg, value_bkg, value_mask = 0.5, 0.5, 0.5
             std = 25
             proto_init, bkg_init, mask_init = "constant", "constant", "constant"
+        self.freeze_frg_milestone = freeze_frg if freeze_frg else -1
+        freeze_frg = False
 
         if proto_source == "data":
             if freeze_frg:
@@ -208,8 +210,6 @@ class DTISprites(nn.Module):
                 self.init_masks(n_sprites, mask_init, size, std, value_mask, dataset)
             )
         else:
-            self.freeze_frg_milestone = freeze_frg if freeze_frg else -1
-            freeze_frg = False
             if freeze_frg:
                 self.prototype_params = nn.Parameter(
                     torch.stack(
@@ -553,6 +553,7 @@ class DTISprites(nn.Module):
             if self.freeze_frg_milestone > 0 and self.cur_epoch < self.freeze_frg_milestone
             else False
         )
+    
     def cluster_parameters(self):
         if self.proto_source == "data":
             params = [self.prototype_params, self.mask_params]
@@ -590,7 +591,9 @@ class DTISprites(nn.Module):
             freqs = freqs / freqs.sum()
             return freqs.clamp(max=(self.empty_cluster_threshold))
         elif type == "bin":
-            p = probas_.clamp(min=1e-5, max=1 - 1e-5)  # LKB
+            if self.are_sprite_frozen:
+                return torch.Tensor([0.0]).to(probas.device)
+            p = probas.clamp(min=1e-5, max=1 - 1e-5)  # LKB
             return torch.exp(self.beta_dist.log_prob(p))
         elif type == "empty_sprite":
             r = (self.lambda_empty_sprite * torch.Tensor(
@@ -643,7 +646,7 @@ class DTISprites(nn.Module):
                     1, class_prob.argmax(1, keepdim=True), 1
                 )
                 distances = 1 - class_oh.permute(2, 0, 1).flatten(1)  # B(L*K)
-                loss = (loss_all, loss_r, loss_freq, loss_bin, loss_em)
+                loss = (loss_all, loss_r, loss_bin, loss_freq, loss_em)
             else:
                 loss_r = self.criterion(
                     x.unsqueeze(1), target.unsqueeze(1), weights=img_masks
