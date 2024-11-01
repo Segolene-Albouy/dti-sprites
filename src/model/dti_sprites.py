@@ -224,7 +224,7 @@ class DTISprites(nn.Module):
             print_warning("Sprites will be generated from latent variables.")
             assert gen_name in ["mlp", "unet"]
             latent_dims = (LATENT_SIZE,) if gen_name == "mlp" else (1, size[0], size[1])
-            self.mask_latent_params = nn.Parameter(
+            self.latent_params = nn.Parameter(
                 torch.stack(
                     [
                         torch.normal(mean=0.0, std=1.0, size=latent_dims)
@@ -234,15 +234,6 @@ class DTISprites(nn.Module):
                 ),
             )
             if not freeze_frg:
-                self.frg_latent_params = nn.Parameter(
-                    torch.stack(
-                        [
-                            torch.normal(mean=0.0, std=1.0, size=latent_dims)
-                            for k in range(n_sprites)
-                        ],
-                        dim=0,
-                    ),
-                )
                 self.frg_generator = self.init_generator(
                     gen_name,
                     LATENT_SIZE,
@@ -476,7 +467,7 @@ class DTISprites(nn.Module):
             masks = self.mask_params
         else:
             with torch.no_grad():
-                masks = self.mask_generator(self.mask_latent_params)
+                masks = self.mask_generator(self.latent_params)
             if len(masks.size()) != 4:
                 masks = masks.reshape(-1, 1, self.sprite_size[0], self.sprite_size[1])
 
@@ -499,7 +490,7 @@ class DTISprites(nn.Module):
                 if self.freeze_frg:
                     params = self.prototype_params
                 else:
-                    params = self.frg_generator(self.frg_latent_params)
+                    params = self.frg_generator(self.latent_params)
                     if len(params.size()) != 4:
                         params = params.reshape(
                             -1,
@@ -561,11 +552,10 @@ class DTISprites(nn.Module):
                 params.append(self.bkg_params)
         else:
             params = list(chain(*[self.mask_generator.parameters()])) + [
-                self.mask_latent_params
+                self.latent_params
             ]
             if not self.freeze_frg:
                 params.extend(list(chain(*[self.frg_generator.parameters()])))
-                params.append(self.frg_latent_params)
             if self.learn_backgrounds and not self.freeze_bkg:
                 params.append(self.latent_bkg_params)
                 params.extend(list(chain(*[self.bkg_generator.parameters()])))
@@ -661,12 +651,12 @@ class DTISprites(nn.Module):
         h, w = self.prototypes.shape[2:]
         L, K, M = self.n_objects, self.n_sprites, self.n_backgrounds or 1
         if hasattr(self, "mask_generator"):
-            masks = self.mask_generator(self.mask_latent_params)
+            masks = self.mask_generator(self.latent_params)
             masks = masks.reshape(-1, 1, self.sprite_size[0], self.sprite_size[1])
             if self.freeze_frg:
                 prototypes = self.prototypes
             else:
-                prototypes = self.frg_generator(self.frg_latent_params).reshape(
+                prototypes = self.frg_generator(self.latent_params).reshape(
                     -1, self.color_channels, self.sprite_size[0], self.sprite_size[1]
                 )
             if self.add_empty_sprite:
@@ -1035,7 +1025,7 @@ class DTISprites(nn.Module):
                     ]
                 if self.learn_backgrounds:
                     compo.insert(2, tsf_bkgs.transpose(0, 1))
-                return target, compo
+                return target, compo, class_prob
             else:
                 return target
 
@@ -1102,15 +1092,10 @@ class DTISprites(nn.Module):
 
     def restart_branch_from(self, i, j):
         if hasattr(self, "mask_generator"):
-            self.mask_latent_params[i].data.copy_(
-                copy_with_noise(self.mask_latent_params[j], NOISE_SCALE)
+            self.latent_params[i].data.copy_(
+                copy_with_noise(self.latent_params[j], NOISE_SCALE)
             )
             params = [self.mask_latent_params]
-            if not self.freeze_frg:
-                self.frg_latent_params[i].data.copy_(
-                    copy_with_noise(self.frg_latent_params[j], NOISE_SCALE)
-                )
-                params.extend([self.frg_latent_params])
         else:
             self.mask_params[i].data.copy_(self.mask_params[j].detach().clone())
             params = [self.mask_params]
