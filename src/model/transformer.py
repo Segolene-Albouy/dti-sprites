@@ -317,6 +317,7 @@ class TransformationSequence(nn.Module):
             "identity": IdentityModule,
             "col": ColorModule,
             "color": ColorModule,
+            "linearcolor": LinearColorModule,
             # spatial
             "aff": AffineModule,
             "affine": AffineModule,
@@ -478,6 +479,44 @@ class ColorModule(_AbstractTransformationModule):
             output = torch.cat([output, mask], dim=1)
         return output
 
+class LinearColorModule(_AbstractTransformationModule):
+    def __init__(self, in_channels, **kwargs):
+        super().__init__()
+        self.color_ch = 3 #kwargs.get("color_channels", 3)
+        clamp_name = kwargs.get("use_clamp", False)
+        self.clamp_func = get_clamp_func(clamp_name)
+        n_layers = kwargs.get("n_hidden_layers", N_LAYERS)
+        self.regressor = create_mlp(
+            in_channels, self.color_ch, N_HIDDEN_UNITS, n_layers
+        )
+
+        # Identity transformation parameters and regressor initialization
+        self.register_buffer("identity", torch.eye(self.color_ch, self.color_ch))
+        self.regressor[-1].weight.data.zero_()
+        self.regressor[-1].bias.data.zero_()
+
+    def _transform(self, x, beta, inverse=False):
+        if inverse:
+            return x
+        else:
+            if x.size(1) == 2 or x.size(1) > 3:
+                x, mask = torch.split(
+                    x, [self.color_ch, x.size(1) - self.color_ch], dim=1
+                )
+            else:
+                mask = None
+            if x.size(1) == 1:
+                x = x.expand(-1, 3, -1, -1)
+
+            weight = beta.view(-1, self.color_ch, 1)
+            weight = (
+                weight.expand(-1, -1, self.color_ch) * self.identity + self.identity
+            )
+            output = torch.einsum("bij, bjkl -> bikl", weight, x)
+            output = self.clamp_func(output)
+        if mask is not None:
+            output = torch.cat([output, mask], dim=1)
+        return output
 
 ########################
 #    Spatial Modules
