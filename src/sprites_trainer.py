@@ -40,6 +40,8 @@ from .utils.metrics import (
 from .utils.path import CONFIGS_PATH, RUNS_PATH
 from .utils.plot import plot_bar, plot_lines
 
+from PIL import Image, ImageFont, ImageDraw
+
 from torch.profiler import profile, record_function, ProfilerActivity
 
 PRINT_TRAIN_STAT_FMT = "Epoch [{}/{}], Iter [{}/{}], train_metrics: {}".format
@@ -617,7 +619,7 @@ class Trainer:
     def save_transformed_images(self, cur_iter=None):
         self.model.eval()
         if self.learn_masks:
-            output, compositions = self.model.transform(
+            output, compositions, _ = self.model.transform(
                 self.images_to_tsf, with_composition=True
             )
         else:
@@ -1345,7 +1347,29 @@ class Trainer:
             images, _, _, _ = next(iterator)
             images = images.to(self.device)
             if self.pred_class:
-                recons = self.model.transform(images, hard_occ_grid=True).cpu()
+                recons, composition, class_prob = self.model.transform(images, hard_occ_grid=False, with_composition=True)
+                class_prob = class_prob.permute(2, 0, 1)
+                if len(composition) % 2 != 0:
+                    print("Omitting background from compositions")
+                    composition = composition[:2] + composition[3:]
+                n_layers = int(len(composition)/2)
+                for b in range(B):
+                    for l in range(0, n_layers):
+                        tsf_layers, tsf_masks = composition[l*2], composition[l*2+1]
+                        _, K, _, _, _ = tsf_layers.shape
+                        for k in range(K):
+                            name = f"image_{b}_layer_{l}_sprite_{k}"
+                            convert_to_img(tsf_layers[b, k, ...]).save(out / f"frg_rec_{name}.png")
+                            weight = class_prob[b, l, k].item()
+                            img_temp = convert_to_img(tsf_masks[b, k, ...]*weight)
+                            draw = ImageDraw.Draw(img_temp)
+                            draw.text((0, 0),"%.3f" % weight,(255,255,255))
+                            img_temp.save(out / f"mask_rec_{name}.png")
+                        construction = torch.sum(tsf_layers[b] * tsf_masks[b] * class_prob[b, l, :][:, None, None, None], dim=0)
+                        convert_to_img(construction).save(out / f"rec_image_{b}_layer_{l}.png")
+
+                
+                recons = recons.cpu()
                 if self.model.return_map_out:
                     (infer_seg, bboxes, class_ids) = self.model.transform(
                         images, pred_semantic_labels=True
