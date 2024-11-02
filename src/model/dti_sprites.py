@@ -590,8 +590,9 @@ class DTISprites(nn.Module):
         if type == "freq":
             probas_ = probas[:, :-1, :] if self.add_empty_sprite else probas
             probas_ = probas_ / torch.max(probas_, dim=1, keepdim=True)[0] # just like reassignment of clusters from proportion
-            freqs = probas_.mean(dim=0).mean(dim=1) # mean over L and B
-            freqs = freqs / freqs.sum()
+            #freqs = probas_.mean(dim=0).mean(dim=1) # mean over L and B
+            #freqs = freqs / freqs.sum()
+            freqs = probas_.mean(dim=-1).flatten() # mean over B, dim: KxL
             return freqs.clamp(max=(self.empty_cluster_threshold))
         elif type == "bin":
             if self.are_sprite_frozen:
@@ -1066,6 +1067,9 @@ class DTISprites(nn.Module):
             if not self.are_sprite_frozen:
                 self.curr_bin_weight = self.start_bin_weight + (self.bin_weight - self.start_bin_weight) * ((self.cur_epoch-self.freeze_milestone) / 40)
                 print(f"Updating bin weight to {self.curr_bin_weight}")
+        #if hasattr(self, "proba") and self.cur_epoch == 250:
+        #    self.curr_bin_weight = 0.1
+
 
     def set_optimizer(self, opt):
         self.optimizer = opt
