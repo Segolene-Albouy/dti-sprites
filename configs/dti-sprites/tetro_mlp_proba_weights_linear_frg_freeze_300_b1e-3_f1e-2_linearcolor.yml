@@ -6,7 +6,6 @@ model:
   n_backgrounds: 0
   n_objects: 3
   inject_noise: 0.4
-  color_channels: 1
   prototype:
     source: generator
     generator: mlp
@@ -29,7 +28,7 @@ model:
   reassign_cluster: False
   proba: True
   proba_type: linear
-  freq_weight: 0.0
+  freq_weight: 0.01
   bin_weight: 0.001
 training:
   batch_size: 32
@@ -46,10 +45,9 @@ training:
   n_epoches: 610
   train_stat_interval: 1000
   val_stat_interval: 2000
-  check_cluster_interval: 50
+  check_cluster_interval: 200
   eval_with_bkg: True
   eval_semantic: True
   seed: 7889
   visualizer_port:
   pretrained:
-  resume: "1031_tetro-linear-color"
