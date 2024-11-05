@@ -26,6 +26,7 @@ from .u_net import UNet
 
 import lovely_tensors as lt
 lt.monkey_patch()
+import numpy as np
 
 NOISE_SCALE = 0.0001
 EMPTY_CLUSTER_THRESHOLD = 0.2
@@ -417,7 +418,17 @@ class DTISprites(nn.Module):
 
         proba = kwargs.get("proba", False)
         if proba:
-            self.proba = nn.Linear(self.encoder.out_ch, self.n_sprites * n_objects)
+            self.proba_type = kwargs.get("proba_type", "marionette")
+            if self.proba_type == "linear":  # linear mapping
+                self.proba = nn.Linear(self.encoder.out_ch, self.n_sprites * n_objects)
+            else:  # marionette-like
+                self.proba = nn.Sequential(
+                    nn.Linear(LATENT_SIZE, self.encoder.out_ch),
+                    nn.LayerNorm(self.encoder.out_ch, elementwise_affine=False),
+                )
+                self.empty_latent_params = nn.Parameter(
+                    torch.normal(mean=0.0, std=1.0, size=latent_dims)
+                )
             self.freq_weight = kwargs.get("freq_weight", 0)
             self.bin_weight = kwargs.get("bin_weight", 0)
             self.start_bin_weight = self. bin_weight # 0.0001
@@ -588,6 +599,8 @@ class DTISprites(nn.Module):
                 params.extend(list(chain(*[self.bkg_generator.parameters()])))
         if self.estimate_proba:
             params.extend(list(chain(*[self.proba.parameters()])))
+            if self.proba_type == "marionette":
+                params.append(self.empty_latent_params)
         return iter(params)
 
     def transformer_parameters(self):
@@ -621,6 +634,19 @@ class DTISprites(nn.Module):
             return r
         else:
             raise ValueError("undefined regularizer")
+
+    def estimate_logits(self, features):
+        if self.proba_type == "marionette":
+            latent_params = torch.cat([self.latent_params, self.empty_latent_params.unsqueeze(0)], dim=0)
+            latent_params = latent_params.unsqueeze(1).expand(-1, self.n_objects, -1)
+            proba_theta = self.proba(latent_params).permute(2, 1, 0) # DLK
+            D, L, K = proba_theta.shape
+            temp = torch.matmul(features, proba_theta.reshape(D,-1)).reshape(-1, L, K)  # BLK
+            logits = (1.0 / np.sqrt(self.encoder.out_ch)) * (temp) # BLK
+            return logits
+        elif self.proba_type == "linear":
+            logits = self.proba(features).reshape(features.shape[0], self.n_objects, self.n_sprites)
+            return logits
 
     def forward(self, x, img_masks=None):
         loss_em = torch.Tensor([0.0])
@@ -778,7 +804,7 @@ class DTISprites(nn.Module):
         occ_grid = self.predict_occlusion_grid(x, features)  # LLB
 
         if self.estimate_proba:
-            logits = self.proba(features).reshape(B, L, K)
+            logits = self.estimate_logits(features) # self.proba(features).reshape(B, L, K)
             if self.add_empty_sprite and self.are_sprite_frozen:
                 logits = logits[:, :, :-1] # B, L, K-1
                 class_prob = gumbel_softmax(logits, dim=-1).permute(1, 2, 0) # LKB
@@ -1142,7 +1168,7 @@ class DTISprites(nn.Module):
             self.latent_params[i].data.copy_(
                 copy_with_noise(self.latent_params[j], NOISE_SCALE)
             )
-            params = [self.mask_latent_params]
+            params = [self.latent_params]
         else:
             self.mask_params[i].data.copy_(self.mask_params[j].detach().clone())
             params = [self.mask_params]
