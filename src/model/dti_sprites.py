@@ -32,6 +32,33 @@ EMPTY_CLUSTER_THRESHOLD = 0.2
 LATENT_SIZE = 128
 
 
+def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10, dim=-1):
+    # Ref: https://gist.github.com/GongXinyuu/3536da55639bd9bfdd5a905ebf3ab88e
+    def _gen_gumbels():
+        gumbels = -torch.empty_like(logits).exponential_().log()
+        if torch.isnan(gumbels).sum() or torch.isinf(gumbels).sum():
+            # to avoid zero in exp output
+            gumbels = _gen_gumbels()
+        return gumbels
+
+    gumbels = _gen_gumbels()  # ~Gumbel(0,1)
+
+    gumbels = (logits + gumbels) / tau  # ~Gumbel(logits,tau)
+    y_soft = gumbels.softmax(dim)
+    if torch.isnan(y_soft).any():
+        print("y_soft", y_soft)
+    if hard:
+        # Straight through.
+        index = y_soft.max(dim, keepdim=True)[1]
+        y_hard = torch.zeros_like(logits).scatter_(dim, index, 1.0)
+        ret = y_hard - y_soft.detach() + y_soft
+        if torch.isnan(ret).any():
+            print("ret", ret)
+    else:
+        # Reparametrization trick.
+        ret = y_soft
+    return ret
+
 def _old_init_linear(
     hidden, out, init, n_channels=3, std=5, freeze_frg=False, dataset=None
 ):
@@ -754,10 +781,25 @@ class DTISprites(nn.Module):
             logits = self.proba(features).reshape(B, L, K)
             if self.add_empty_sprite and self.are_sprite_frozen:
                 logits = logits[:, :, :-1] # B, L, K-1
-                class_prob = torch.nn.functional.softmax(logits, dim=-1).permute(1, 2, 0) # LKB
+                class_prob = gumbel_softmax(logits, dim=-1).permute(1, 2, 0) # LKB
+                """
+                if self.training:
+                    noise = torch.rand(1, K-1, 1, device=features.device).expand(L, K-1, B)
+                    noise_ = 2 * 0.3 * noise - 0.3
+                    class_prob = torch.clamp(class_prob + noise_, 1e-5, 1-1e-5)
+                    class_prob = class_prob / class_prob.sum(1, keepdim=True)
+                """
                 class_prob = torch.cat([class_prob, torch.zeros(L, 1, B, device=class_prob.device)], dim=1)
             else:
-                class_prob = torch.nn.functional.softmax(logits, dim=-1).permute(1, 2, 0) # LKB
+                class_prob = gumbel_softmax(logits, dim=-1).permute(1, 2, 0) # LKB
+                """
+                if self.training:
+                    noise = torch.rand(1, K, 1, device=features.device).expand(L, K, B)
+                    noise_ = 2 * 0.3 * noise - 0.3
+                    class_prob = class_prob + noise_
+                    class_prob = torch.clamp(class_prob + noise_, 1e-5, 1-1e-5)
+                    class_prob = class_prob / class_prob.sum(1, keepdim=True)
+                """
         else:
             if self.estimate_minimum:
                 class_prob = self.greedy_algo_selection(
@@ -1041,8 +1083,9 @@ class DTISprites(nn.Module):
             if not self.are_sprite_frozen:
                 self.curr_bin_weight = self.start_bin_weight + (self.bin_weight - self.start_bin_weight) * ((self.cur_epoch-self.freeze_milestone) / 40)
                 print(f"Updating bin weight to {self.curr_bin_weight}")
-        #if hasattr(self, "proba") and self.cur_epoch == 250:
-        #    self.curr_bin_weight = 0.1
+        # if hasattr(self, "proba") and self.cur_epoch == 25:
+        #    self.curr_bin_weight = 0.01
+        #    print(f"Updating bin weight to {self.curr_bin_weight}")
 
 
     def set_optimizer(self, opt):
