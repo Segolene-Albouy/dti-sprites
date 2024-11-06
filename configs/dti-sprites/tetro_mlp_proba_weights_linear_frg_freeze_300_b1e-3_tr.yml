@@ -18,7 +18,7 @@ model:
   encoder_name: resnet32
   transformation_sequence: identity
   transformation_sequence_bkg: linearcolor
-  transformation_sequence_layer: linearcolor_position
+  transformation_sequence_layer: linearcolor_translation
   curriculum_learning: False
   curriculum_learning_bkg: False
   curriculum_learning_layer: False
@@ -52,4 +52,3 @@ training:
   seed: 7889
   visualizer_port:
   pretrained:
-  resume: "1031_tetro-linear-color"
