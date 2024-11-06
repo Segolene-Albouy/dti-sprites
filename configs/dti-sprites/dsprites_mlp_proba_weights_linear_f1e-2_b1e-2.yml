@@ -28,11 +28,11 @@ model:
   estimate_minimum: True
   greedy_algo_iter: 3
   add_empty_sprite: True
-  lambda_empty_sprite: 1.e-2
+  lambda_empty_sprite: 1.e-4
   proba: True
   reassign_cluster: False
-  bin_weight: 0.0
-  freq_weight: 0.0
+  bin_weight: 0.01
+  freq_weight: 0.01
 training:
   batch_size: 32
   n_workers: 4
@@ -48,7 +48,7 @@ training:
   n_epoches: 510
   train_stat_interval: 2000
   val_stat_interval: 1000
-  check_cluster_interval: 1000
+  check_cluster_interval: 100
   eval_with_bkg: True
   eval_semantic: True
   seed: 21412

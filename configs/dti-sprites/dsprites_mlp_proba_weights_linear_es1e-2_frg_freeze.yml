@@ -10,7 +10,7 @@ model:
     source: generator 
     generator: mlp
     data:
-      freeze: [0, 0, 10]
+      freeze: [510, 0, 10]
       init: ["constant", "constant", "gaussian"]
       value: [0.9, 0.5, 0.]
       gaussian_weights_std: 7
@@ -48,7 +48,7 @@ training:
   n_epoches: 510
   train_stat_interval: 2000
   val_stat_interval: 1000
-  check_cluster_interval: 1000
+  check_cluster_interval: 100
   eval_with_bkg: True
   eval_semantic: True
   seed: 21412

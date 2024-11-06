@@ -9,7 +9,7 @@ from torch.nn import functional as F
 from torch.optim import Adam, RMSprop
 from torchvision.models import vgg16_bn
 from torchvision.transforms.functional import resize
-
+import torchvision
 from .mini_resnet import get_resnet_model as get_mini_resnet_model
 from .resnet import get_resnet_model
 from .tools import copy_with_noise, get_output_size, TPSGrid, create_mlp, get_clamp_func
@@ -51,6 +51,7 @@ class PrototypeTransformationNetwork(nn.Module):
             "freeze_frg": kwargs.get("freeze_frg", False),
             "in_channels": self.enc_out_channels,
             "img_size": img_size,
+            "layer_size": kwargs.get("layer_size", img_size),
             "color_channels": kwargs.get("color_channels", 3),
             "sequence_name": self.sequence_name,
             "grid_size": kwargs.get("grid_size", 4),
@@ -316,6 +317,7 @@ class TransformationSequence(nn.Module):
             "identity": IdentityModule,
             "col": ColorModule,
             "color": ColorModule,
+            "linearcolor": LinearColorModule,
             # spatial
             "aff": AffineModule,
             "affine": AffineModule,
@@ -328,6 +330,7 @@ class TransformationSequence(nn.Module):
             "similarity": SimilarityModule,
             "tps": TPSModule,
             "thinplatespline": TPSModule,
+            "translation": TranslationModule,
             # morphological
             "morpho": MorphologicalModule,
             "morphological": MorphologicalModule,
@@ -477,6 +480,44 @@ class ColorModule(_AbstractTransformationModule):
             output = torch.cat([output, mask], dim=1)
         return output
 
+class LinearColorModule(_AbstractTransformationModule):
+    def __init__(self, in_channels, **kwargs):
+        super().__init__()
+        self.color_ch = 3 #kwargs.get("color_channels", 3)
+        clamp_name = kwargs.get("use_clamp", False)
+        self.clamp_func = get_clamp_func(clamp_name)
+        n_layers = kwargs.get("n_hidden_layers", N_LAYERS)
+        self.regressor = create_mlp(
+            in_channels, self.color_ch, N_HIDDEN_UNITS, n_layers
+        )
+
+        # Identity transformation parameters and regressor initialization
+        self.register_buffer("identity", torch.eye(self.color_ch, self.color_ch))
+        self.regressor[-1].weight.data.zero_()
+        self.regressor[-1].bias.data.zero_()
+
+    def _transform(self, x, beta, inverse=False):
+        if inverse:
+            return x
+        else:
+            if x.size(1) == 2 or x.size(1) > 3:
+                x, mask = torch.split(
+                    x, [self.color_ch, x.size(1) - self.color_ch], dim=1
+                )
+            else:
+                mask = None
+            if x.size(1) == 1:
+                x = x.expand(-1, 3, -1, -1)
+
+            weight = beta.view(-1, self.color_ch, 1)
+            weight = (
+                weight.expand(-1, -1, self.color_ch) * self.identity + self.identity
+            )
+            output = torch.einsum("bij, bjkl -> bikl", weight, x)
+            output = self.clamp_func(output)
+        if mask is not None:
+            output = torch.cat([output, mask], dim=1)
+        return output
 
 ########################
 #    Spatial Modules
@@ -552,6 +593,43 @@ class AffineModule(_AbstractTransformationModule):
             )
 
 
+class TranslationModule(_AbstractTransformationModule):
+    def __init__(self, in_channels, img_size, **kwargs):
+        super().__init__()
+        self.img_size = img_size
+        self.padding_mode = kwargs.get("padding_mode", "border")
+        n_layers = kwargs.get("n_hidden_layers", N_LAYERS)
+        self.regressor = create_mlp(in_channels, 2, N_HIDDEN_UNITS, n_layers)
+
+        # Identity transformation parameters and regressor initialization
+        self.register_buffer(
+            "identity", torch.cat([torch.eye(2, 2), torch.zeros(2, 1)], dim=1)
+        )
+        self.regressor[-1].weight.data.zero_()
+        self.regressor[-1].bias.data.zero_()
+
+    def _transform(self, x, beta, inverse=False):
+        if inverse:
+            print_warning("Inverse transform for PositionModule is not implemented.")
+            return x
+        t = beta
+        scale = torch.ones(t.shape[0]).to(t.device)
+        scale = scale[..., None, None].expand(-1, 2, 2) * torch.eye(2, 2).to(t.device)
+        beta = torch.cat([scale, t.unsqueeze(2)], dim=2) + self.identity
+        grid = F.affine_grid(
+            beta,
+            (x.size(0), x.size(1), self.img_size[0], self.img_size[1]),
+            align_corners=False,
+        )
+        out = F.grid_sample(
+            x,
+            grid,
+            mode="bilinear",
+            padding_mode="zeros",
+            align_corners=False,
+        )   
+        return out
+
 class PositionModule(_AbstractTransformationModule):
     def __init__(self, in_channels, img_size, **kwargs):
         super().__init__()
@@ -580,14 +658,14 @@ class PositionModule(_AbstractTransformationModule):
             (x.size(0), x.size(1), self.img_size[0], self.img_size[1]),
             align_corners=False,
         )
-        return F.grid_sample(
+        out = F.grid_sample(
             x,
             grid,
             mode="bilinear",
-            padding_mode=self.padding_mode,
+            padding_mode="zeros",
             align_corners=False,
-        )
-
+        )   
+        return out
 
 class SimilarityModule(_AbstractTransformationModule):
     def __init__(self, in_channels, img_size, **kwargs):
@@ -595,8 +673,9 @@ class SimilarityModule(_AbstractTransformationModule):
         self.img_size = img_size
         self.padding_mode = kwargs.get("padding_mode", "border")
         n_layers = kwargs.get("n_hidden_layers", N_LAYERS)
-        self.regressor = create_mlp(in_channels, 4, N_HIDDEN_UNITS, n_layers)
-
+        # self.regressor = create_mlp(in_channels, 4, N_HIDDEN_UNITS, n_layers)
+        self.regressor = create_mlp(in_channels, 1, N_HIDDEN_UNITS, n_layers)
+        self.layer_size = kwargs.get("layer_size")
         # Identity transformation parameters and regressor initialization
         self.register_buffer(
             "identity", torch.cat([torch.eye(2, 2), torch.zeros(2, 1)], dim=1)
@@ -608,26 +687,30 @@ class SimilarityModule(_AbstractTransformationModule):
         if inverse:
             print_warning("Inverse transform for SimilarityModule is not implemented.")
             return x
-        a, b, t = beta.split([1, 1, 2], dim=1)
-        a_eye = torch.eye(2, 2).to(a.device)
+        # a, b, t = beta.split([1, 1, 2], dim=1)
+        b = beta
+        t = torch.zeros(b.shape[0], 2).to(b.device)
+        # a_eye = torch.eye(2, 2).to(a.device)
         b_eye = torch.Tensor([[0, -1], [1, 0]]).to(b.device)
-        scaled_rot = (
-            a[..., None].expand(-1, 2, 2) * a_eye
-            + b[..., None].expand(-1, 2, 2) * b_eye
-        )
+        # scaled_rot = (
+        #     a[..., None].expand(-1, 2, 2) * a_eye
+        #     + b[..., None].expand(-1, 2, 2) * b_eye
+        # )
+        scaled_rot = b[..., None].expand(-1, 2, 2) * b_eye 
         beta = torch.cat([scaled_rot, t.unsqueeze(2)], dim=2) + self.identity
         grid = F.affine_grid(
             beta,
-            (x.size(0), x.size(1), self.img_size[0], self.img_size[1]),
+            (x.size(0), x.size(1), self.layer_size[0], self.layer_size[1]),
             align_corners=False,
         )
-        return F.grid_sample(
+        out = F.grid_sample(
             x,
             grid,
             mode="bilinear",
             padding_mode=self.padding_mode,
             align_corners=False,
         )
+        return out
 
 
 class ProjectiveModule(_AbstractTransformationModule):

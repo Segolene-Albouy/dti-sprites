@@ -28,8 +28,9 @@ model:
   estimate_minimum: True
   greedy_algo_iter: 3
   add_empty_sprite: True
-  lambda_empty_sprite: 1.e-2
+  lambda_empty_sprite: 1.0e-3
   proba: True
+  proba_type: linear
   reassign_cluster: False
   bin_weight: 0.0
   freq_weight: 0.0
@@ -39,6 +40,7 @@ training:
   optimizer:
     name: adam
     lr: 1.0e-4
+    weight_decay: 1.0e-6
     transformer:
       weight_decay: 1.0e-6
   scheduler:
@@ -48,9 +50,8 @@ training:
   n_epoches: 510
   train_stat_interval: 2000
   val_stat_interval: 1000
-  check_cluster_interval: 1000
+  check_cluster_interval: 100
   eval_with_bkg: True
   eval_semantic: True
   seed: 21412
   visualizer_port:
-  pretrained: 

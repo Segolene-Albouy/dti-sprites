@@ -27,9 +27,10 @@ model:
   pred_occlusion: True
   estimate_minimum: True
   greedy_algo_iter: 3
-  add_empty_sprite: True
-  lambda_empty_sprite: 1.e-2
+  add_empty_sprite: False #True
+  lambda_empty_sprite: 1.0e-4
   proba: True
+  proba_type: marionette
   reassign_cluster: False
   bin_weight: 0.0
   freq_weight: 0.0
@@ -48,9 +49,9 @@ training:
   n_epoches: 510
   train_stat_interval: 2000
   val_stat_interval: 1000
-  check_cluster_interval: 1000
+  check_cluster_interval: 100
   eval_with_bkg: True
   eval_semantic: True
   seed: 21412
   visualizer_port:
-  pretrained: 
+  pretrained:
