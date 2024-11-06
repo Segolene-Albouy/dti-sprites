@@ -808,24 +808,9 @@ class DTISprites(nn.Module):
             if self.add_empty_sprite and self.are_sprite_frozen:
                 logits = logits[:, :, :-1] # B, L, K-1
                 class_prob = gumbel_softmax(logits, dim=-1).permute(1, 2, 0) # LKB
-                """
-                if self.training:
-                    noise = torch.rand(1, K-1, 1, device=features.device).expand(L, K-1, B)
-                    noise_ = 2 * 0.3 * noise - 0.3
-                    class_prob = torch.clamp(class_prob + noise_, 1e-5, 1-1e-5)
-                    class_prob = class_prob / class_prob.sum(1, keepdim=True)
-                """
                 class_prob = torch.cat([class_prob, torch.zeros(L, 1, B, device=class_prob.device)], dim=1)
             else:
                 class_prob = gumbel_softmax(logits, dim=-1).permute(1, 2, 0) # LKB
-                """
-                if self.training:
-                    noise = torch.rand(1, K, 1, device=features.device).expand(L, K, B)
-                    noise_ = 2 * 0.3 * noise - 0.3
-                    class_prob = class_prob + noise_
-                    class_prob = torch.clamp(class_prob + noise_, 1e-5, 1-1e-5)
-                    class_prob = class_prob / class_prob.sum(1, keepdim=True)
-                """
         else:
             if self.estimate_minimum:
                 class_prob = self.greedy_algo_selection(
