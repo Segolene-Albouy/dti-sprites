@@ -640,8 +640,10 @@ class DTISprites(nn.Module):
 
     def estimate_logits(self, features):
         if self.proba_type == "marionette":
-            latent_params = torch.cat([self.latent_params, self.empty_latent_params.unsqueeze(0)], dim=0)
-            latent_params = latent_params.unsqueeze(1) # KD
+            if self.add_empty_sprite:
+                latent_params = torch.cat([self.latent_params, self.empty_latent_params.unsqueeze(0)], dim=0)
+            else: 
+                latent_params = self.latent_params # KD
             proba_theta = [self.proba[l](features) for l in range(self.n_objects)]
             proba_theta = torch.stack(proba_theta, dim=2).permute(1,0,2) # DBL
             D, B, L = proba_theta.shape
