@@ -52,7 +52,7 @@ training:
   check_cluster_interval: 250
   eval_with_bkg: True
   eval_semantic: True
-  seed: 71444
+  seed: 38118
   visualizer_port:
   pretrained: 
   resume: 
