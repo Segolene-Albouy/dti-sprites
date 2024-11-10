@@ -330,6 +330,7 @@ class TransformationSequence(nn.Module):
             "similarity": SimilarityModule,
             "tps": TPSModule,
             "thinplatespline": TPSModule,
+            "translation": TranslationModule,
             # morphological
             "morpho": MorphologicalModule,
             "morphological": MorphologicalModule,
@@ -591,6 +592,43 @@ class AffineModule(_AbstractTransformationModule):
                 align_corners=False,
             )
 
+
+class TranslationModule(_AbstractTransformationModule):
+    def __init__(self, in_channels, img_size, **kwargs):
+        super().__init__()
+        self.img_size = img_size
+        self.padding_mode = kwargs.get("padding_mode", "border")
+        n_layers = kwargs.get("n_hidden_layers", N_LAYERS)
+        self.regressor = create_mlp(in_channels, 2, N_HIDDEN_UNITS, n_layers)
+
+        # Identity transformation parameters and regressor initialization
+        self.register_buffer(
+            "identity", torch.cat([torch.eye(2, 2), torch.zeros(2, 1)], dim=1)
+        )
+        self.regressor[-1].weight.data.zero_()
+        self.regressor[-1].bias.data.zero_()
+
+    def _transform(self, x, beta, inverse=False):
+        if inverse:
+            print_warning("Inverse transform for PositionModule is not implemented.")
+            return x
+        t = beta
+        scale = torch.ones(t.shape[0]).to(t.device)
+        scale = scale[..., None, None].expand(-1, 2, 2) * torch.eye(2, 2).to(t.device)
+        beta = torch.cat([scale, t.unsqueeze(2)], dim=2) + self.identity
+        grid = F.affine_grid(
+            beta,
+            (x.size(0), x.size(1), self.img_size[0], self.img_size[1]),
+            align_corners=False,
+        )
+        out = F.grid_sample(
+            x,
+            grid,
+            mode="bilinear",
+            padding_mode="zeros",
+            align_corners=False,
+        )   
+        return out
 
 class PositionModule(_AbstractTransformationModule):
     def __init__(self, in_channels, img_size, **kwargs):

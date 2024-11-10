@@ -48,7 +48,7 @@ training:
   n_epoches: 510
   train_stat_interval: 2000
   val_stat_interval: 1000
-  check_cluster_interval: 100
+  check_cluster_interval: 1000
   eval_with_bkg: True
   eval_semantic: True
   seed: 21412
