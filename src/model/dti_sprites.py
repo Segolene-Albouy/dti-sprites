@@ -395,10 +395,10 @@ class DTISprites(nn.Module):
             if self.proba_type == "linear":  # linear mapping
                 self.proba = nn.Linear(self.encoder.out_ch, self.n_sprites * n_objects)
             else:  # marionette-like
-                self.proba = nn.Sequential(
-                    nn.Linear(LATENT_SIZE, self.encoder.out_ch),
-                    nn.LayerNorm(self.encoder.out_ch, elementwise_affine=False),
-                )
+                self.proba = [nn.Sequential(
+                    nn.Linear(self.encoder.out_ch, LATENT_SIZE),
+                    nn.LayerNorm(LATENT_SIZE, elementwise_affine=False),
+                ).to("cuda") for _ in range(self.n_objects)]
                 self.empty_latent_params = nn.Parameter(
                     torch.normal(mean=0.0, std=1.0, size=latent_dims)
                 )
@@ -571,9 +571,12 @@ class DTISprites(nn.Module):
                 params.append(self.latent_bkg_params)
                 params.extend(list(chain(*[self.bkg_generator.parameters()])))
         if self.estimate_proba:
-            params.extend(list(chain(*[self.proba.parameters()])))
             if self.proba_type == "marionette":
                 params.append(self.empty_latent_params)
+                for p in self.proba:
+                    params.extend(list(chain(*[p.parameters()])))
+            else:
+                params.extend(list(chain(*[self.proba.parameters()])))
         return iter(params)
 
     def transformer_parameters(self):
@@ -611,10 +614,17 @@ class DTISprites(nn.Module):
     def estimate_logits(self, features):
         if self.proba_type == "marionette":
             latent_params = torch.cat([self.latent_params, self.empty_latent_params.unsqueeze(0)], dim=0)
-            latent_params = latent_params.unsqueeze(1).expand(-1, self.n_objects, -1)
-            proba_theta = self.proba(latent_params).permute(2, 1, 0) # DLK
+            latent_params = latent_params.unsqueeze(1) # KD
+            proba_theta = [self.proba[l](features) for l in range(self.n_objects)]
+            proba_theta = torch.stack(proba_theta, dim=2).permute(1,0,2) # DBL
+            D, B, L = proba_theta.shape
+            temp = torch.matmul(latent_params, proba_theta.reshape(D,-1)).reshape(-1, B, L).permute(1,2,0)
+            """
+            proba_theta = [self.proba[l](latent_params).permute(2, 1, 0) for l in range(self.n_objects)] # DLK
+            proba_theta = torch.cat(proba_theta, dim=1) # DLK
             D, L, K = proba_theta.shape
             temp = torch.matmul(features, proba_theta.reshape(D,-1)).reshape(-1, L, K)  # BLK
+            """
             logits = (1.0 / np.sqrt(self.encoder.out_ch)) * (temp) # BLK
             return logits
         elif self.proba_type == "linear":
@@ -1067,8 +1077,8 @@ class DTISprites(nn.Module):
             if not self.are_sprite_frozen:
                 self.curr_bin_weight = self.start_bin_weight + (self.bin_weight - self.start_bin_weight) * ((self.cur_epoch-self.freeze_milestone) / 40)
                 print(f"Updating bin weight to {self.curr_bin_weight}")
-        #if hasattr(self, "proba") and self.cur_epoch == 250:
-        #    self.curr_bin_weight = 0.1
+        #if hasattr(self, "proba") and self.cur_epoch == 25:
+        #    self.curr_bin_weight = 0.001
 
 
     def set_optimizer(self, opt):
