@@ -422,7 +422,10 @@ class DTISprites(nn.Module):
             self.softmax_f = torch.nn.functional.softmax if softmax_f == "softmax" else gumbel_softmax
             self.proba_type = kwargs.get("proba_type", "marionette")
             if self.proba_type == "linear":  # linear mapping
-                self.proba = nn.Linear(self.encoder.out_ch, self.n_sprites * n_objects)
+                self.proba = nn.Sequential(
+                    nn.Linear(self.encoder.out_ch, self.n_sprites),
+                    nn.LayerNorm(self.n_sprites, elementwise_affine=False))
+                # self.proba = nn.Sequential(nn.Linear(self.encoder.out_ch, self.n_sprites * n_objects), nn.LayerNorm(self.n_sprites * n_objects, elementwise_affine=False))
             else:  # marionette-like
                 self.proba = [nn.Sequential(
                     nn.Linear(self.encoder.out_ch, LATENT_SIZE),
@@ -647,6 +650,7 @@ class DTISprites(nn.Module):
             else: 
                 latent_params = self.latent_params # KD
             latent_params = torch.nn.functional.layer_norm(latent_params, (latent_params.shape[-1],))
+            """
             proba_theta = [self.proba[l](features) for l in range(self.n_objects)]
             proba_theta = torch.stack(proba_theta, dim=2).permute(1,0,2) # DBL
             D, B, L = proba_theta.shape
@@ -656,11 +660,11 @@ class DTISprites(nn.Module):
             proba_theta = torch.cat(proba_theta, dim=1) # DLK
             D, L, K = proba_theta.shape
             temp = torch.matmul(features, proba_theta.reshape(D,-1)).reshape(-1, L, K)  # BLK
-            """
             logits = (1.0 / np.sqrt(self.encoder.out_ch)) * (temp) # BLK
             return logits
         elif self.proba_type == "linear":
-            logits = self.proba(features).reshape(features.shape[0], self.n_objects, self.n_sprites)
+            logits = torch.stack([self.proba[l](features) for l in range(self.n_objects)], dim=1) # BLK
+            #logits = self.proba(features).reshape(features.shape[0], self.n_objects, self.n_sprites)
             return logits
 
     def forward(self, x, img_masks=None):
