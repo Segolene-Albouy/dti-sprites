@@ -24,8 +24,8 @@ from .tools import (
 from ..utils.logger import print_warning
 from .u_net import UNet
 
-import lovely_tensors as lt
-lt.monkey_patch()
+#import lovely_tensors as lt
+#lt.monkey_patch()
 import numpy as np
 
 NOISE_SCALE = 0.0001
@@ -418,14 +418,16 @@ class DTISprites(nn.Module):
 
         proba = kwargs.get("proba", False)
         if proba:
+            softmax_f = kwargs.get("softmax","gumbel_softmax")
+            self.softmax_f = torch.nn.functional.softmax if softmax_f == "softmax" else gumbel_softmax
             self.proba_type = kwargs.get("proba_type", "marionette")
             if self.proba_type == "linear":  # linear mapping
                 self.proba = nn.Linear(self.encoder.out_ch, self.n_sprites * n_objects)
             else:  # marionette-like
-                self.proba = nn.Sequential(
-                    nn.Linear(LATENT_SIZE, self.encoder.out_ch),
-                    nn.LayerNorm(self.encoder.out_ch, elementwise_affine=False),
-                )
+                self.proba = [nn.Sequential(
+                    nn.Linear(self.encoder.out_ch, LATENT_SIZE),
+                    nn.LayerNorm(LATENT_SIZE, elementwise_affine=False),
+                ).to("cuda") for _ in range(self.n_objects)]
                 self.empty_latent_params = nn.Parameter(
                     torch.normal(mean=0.0, std=1.0, size=latent_dims)
                 )
@@ -598,9 +600,12 @@ class DTISprites(nn.Module):
                 params.append(self.latent_bkg_params)
                 params.extend(list(chain(*[self.bkg_generator.parameters()])))
         if self.estimate_proba:
-            params.extend(list(chain(*[self.proba.parameters()])))
             if self.proba_type == "marionette":
                 params.append(self.empty_latent_params)
+                for p in self.proba:
+                    params.extend(list(chain(*[p.parameters()])))
+            else:
+                params.extend(list(chain(*[self.proba.parameters()])))
         return iter(params)
 
     def transformer_parameters(self):
@@ -637,11 +642,21 @@ class DTISprites(nn.Module):
 
     def estimate_logits(self, features):
         if self.proba_type == "marionette":
-            latent_params = torch.cat([self.latent_params, self.empty_latent_params.unsqueeze(0)], dim=0)
-            latent_params = latent_params.unsqueeze(1).expand(-1, self.n_objects, -1)
-            proba_theta = self.proba(latent_params).permute(2, 1, 0) # DLK
+            if self.add_empty_sprite:
+                latent_params = torch.cat([self.latent_params, self.empty_latent_params.unsqueeze(0)], dim=0)
+            else: 
+                latent_params = self.latent_params # KD
+            latent_params = torch.nn.functional.layer_norm(latent_params, (latent_params.shape[-1],))
+            proba_theta = [self.proba[l](features) for l in range(self.n_objects)]
+            proba_theta = torch.stack(proba_theta, dim=2).permute(1,0,2) # DBL
+            D, B, L = proba_theta.shape
+            temp = torch.matmul(latent_params, proba_theta.reshape(D,-1)).reshape(-1, B, L).permute(1,2,0)
+            """
+            proba_theta = [self.proba[l](latent_params).permute(2, 1, 0) for l in range(self.n_objects)] # DLK
+            proba_theta = torch.cat(proba_theta, dim=1) # DLK
             D, L, K = proba_theta.shape
             temp = torch.matmul(features, proba_theta.reshape(D,-1)).reshape(-1, L, K)  # BLK
+            """
             logits = (1.0 / np.sqrt(self.encoder.out_ch)) * (temp) # BLK
             return logits
         elif self.proba_type == "linear":
@@ -807,10 +822,10 @@ class DTISprites(nn.Module):
             logits = self.estimate_logits(features) # self.proba(features).reshape(B, L, K)
             if self.add_empty_sprite and self.are_sprite_frozen:
                 logits = logits[:, :, :-1] # B, L, K-1
-                class_prob = gumbel_softmax(logits, dim=-1).permute(1, 2, 0) # LKB
+                class_prob = self.softmax_f(logits, dim=-1).permute(1, 2, 0) # LKB
                 class_prob = torch.cat([class_prob, torch.zeros(L, 1, B, device=class_prob.device)], dim=1)
             else:
-                class_prob = gumbel_softmax(logits, dim=-1).permute(1, 2, 0) # LKB
+                class_prob = self.softmax_f(logits, dim=-1).permute(1, 2, 0) # LKB
         else:
             if self.estimate_minimum:
                 class_prob = self.greedy_algo_selection(

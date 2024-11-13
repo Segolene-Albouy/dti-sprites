@@ -6,6 +6,7 @@ model:
   n_backgrounds: 0
   n_objects: 3
   inject_noise: 0.4
+  color_channels: 1
   prototype:
     source: generator
     generator: mlp
@@ -14,10 +15,11 @@ model:
       init: ["constant", "constant", "gaussian"]
       value: [0.9, 0., 0.]
       gaussian_weights_std: 5
+  softmax: softmax
   encoder_name: resnet32
   transformation_sequence: identity
   transformation_sequence_bkg: linearcolor
-  transformation_sequence_layer: linearcolor_position
+  transformation_sequence_layer: linearcolor_translation
   curriculum_learning: False
   curriculum_learning_bkg: False
   curriculum_learning_layer: False
@@ -28,7 +30,7 @@ model:
   reassign_cluster: False
   proba: True
   proba_type: linear
-  freq_weight: 0.001
+  freq_weight: 0.0
   bin_weight: 0.001
 training:
   batch_size: 32
@@ -48,6 +50,6 @@ training:
   check_cluster_interval: 50
   eval_with_bkg: True
   eval_semantic: True
-  seed: 7889
+  seed: 24937
   visualizer_port:
   pretrained:

@@ -52,5 +52,6 @@ training:
   check_cluster_interval: 100
   eval_with_bkg: True
   eval_semantic: True
-  seed: 5712
+  seed: 68697
+  resume: 1110_dsprites_proba-weights-linear-gumbel-es1e-3-b1e-4
   visualizer_port:

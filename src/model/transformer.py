@@ -74,7 +74,7 @@ class PrototypeTransformationNetwork(nn.Module):
             )
 
     def get_parameters(self):
-        if not self.is_identity and self.shared_enc:
+        if self.shared_enc:
             return self.tsf_sequences.parameters()
         return self.parameters()
 

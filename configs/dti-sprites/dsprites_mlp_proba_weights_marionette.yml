@@ -27,7 +27,7 @@ model:
   pred_occlusion: True
   estimate_minimum: True
   greedy_algo_iter: 3
-  add_empty_sprite: False #True
+  add_empty_sprite: True
   lambda_empty_sprite: 1.0e-4
   proba: True
   proba_type: marionette
@@ -52,6 +52,7 @@ training:
   check_cluster_interval: 100
   eval_with_bkg: True
   eval_semantic: True
-  seed: 21412
+  seed: 79597
   visualizer_port:
+  resume: 1112_dsprites_proba-mn
   pretrained:

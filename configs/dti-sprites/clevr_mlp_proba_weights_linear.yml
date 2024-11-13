@@ -52,7 +52,7 @@ training:
   check_cluster_interval: 500
   eval_with_bkg: True
   eval_semantic: True
-  seed: 47981
+  seed: 72928
   visualizer_port:
+  resume: 1112_clevr_proba-weights-linear-gumbel
   pretrained: 
-  resume: 

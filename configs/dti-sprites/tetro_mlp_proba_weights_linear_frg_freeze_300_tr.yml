@@ -6,18 +6,19 @@ model:
   n_backgrounds: 0
   n_objects: 3
   inject_noise: 0.4
+  color_channels: 1
   prototype:
     source: generator
     generator: mlp
     data:
-      freeze: [0, 0, 4]
+      freeze: [300, 0, 1]
       init: ["constant", "constant", "gaussian"]
       value: [0.9, 0., 0.]
       gaussian_weights_std: 5
   encoder_name: resnet32
   transformation_sequence: identity
-  transformation_sequence_bkg: color
-  transformation_sequence_layer: color_position
+  transformation_sequence_bkg: linearcolor
+  transformation_sequence_layer: linearcolor_translation
   curriculum_learning: False
   curriculum_learning_bkg: False
   curriculum_learning_layer: False
@@ -28,9 +29,8 @@ model:
   reassign_cluster: False
   proba: True
   proba_type: linear
-  freq_weight: 0.1
-  bin_weight: 0.1
-  empty_cluster_threshold: 0.025
+  freq_weight: 0.0
+  bin_weight: 0.0
 training:
   batch_size: 32
   n_workers: 8
@@ -42,14 +42,13 @@ training:
   scheduler:
     name: multi_step
     gamma: [1, 0.1]
-    milestones: [400, 800]
-  n_epoches: 840
-  train_stat_interval: 500
-  val_stat_interval: 1000
-  check_cluster_interval: 50
+    milestones: [500, 600] 
+  n_epoches: 610
+  train_stat_interval: 1000
+  val_stat_interval: 2000
+  check_cluster_interval: 500
   eval_with_bkg: True
   eval_semantic: True
-  seed: 83315
+  seed: 99217
   visualizer_port:
-  pretrained: 
-  resume: 0813_tetro-mlp-proba 
+  pretrained:

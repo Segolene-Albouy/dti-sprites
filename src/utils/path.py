@@ -12,5 +12,5 @@ DATASET_SCRATCH = Path('/lustre/fsn1/projects/rech/wgc/uze77wm')
 
 CONFIGS_PATH = PROJECT_PATH / 'configs'
 DATASETS_PATH = DATASET_SCRATCH / 'datasets' # PROJECT_PATH / 'datasets'
-RUNS_PATH = PROJECT_PATH / 'runs'
+RUNS_PATH = DATASET_SCRATCH / 'runs' # PROJECT_PATH / 'runs'
 RESULTS_PATH = PROJECT_PATH / 'results' # unused?

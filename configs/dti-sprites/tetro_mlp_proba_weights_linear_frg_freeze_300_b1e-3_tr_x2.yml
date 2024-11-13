@@ -49,6 +49,7 @@ training:
   check_cluster_interval: 500
   eval_with_bkg: True
   eval_semantic: True
-  seed: 1922
+  seed: 32706
   visualizer_port:
+  resume: 1112_tetro_proba-weights-linear-b1e-3-gumbel-x2
   pretrained:
