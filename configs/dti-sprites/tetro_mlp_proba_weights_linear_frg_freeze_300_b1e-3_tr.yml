@@ -52,4 +52,3 @@ training:
   seed: 10492
   visualizer_port:
   pretrained:
-  resume: 1105_tetro-linear-color-b1e-3

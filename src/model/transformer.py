@@ -74,8 +74,10 @@ class PrototypeTransformationNetwork(nn.Module):
             )
 
     def get_parameters(self):
-        if not self.is_identity and self.shared_enc:
+        if self.shared_enc:
+            print("shared encoder")
             return self.tsf_sequences.parameters()
+        print("not shared encoder")
         return self.parameters()
 
     @property
