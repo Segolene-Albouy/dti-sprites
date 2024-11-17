@@ -7,6 +7,7 @@ from torch.optim import Adam, RMSprop
 import torch.nn as nn
 from torch.utils.data.dataloader import DataLoader
 import torchvision
+import torch.nn.functional as F
 
 from .transformer import (
     PrototypeTransformationNetwork as Transformer,
@@ -290,6 +291,10 @@ class DTISprites(nn.Module):
         assert isinstance(self.freeze_milestone, (int,))
         self.freeze_frg = freeze_frg
         self.freeze_bkg = freeze_bkg
+        
+        softmax_f = kwargs.get("softmax", "softmax")
+        self.softmax_f = F.softmax if softmax_f == "softmax" else gumbel_softmax 
+        
         # Sprite transformers
         L = n_objects
         self.n_objects = n_objects
