@@ -12,6 +12,9 @@ import torch
 from torch.utils.data import DataLoader
 from torch.nn import functional as F
 
+import hydra
+from omegaconf import DictConfig, OmegaConf
+
 try:
     import visdom
 except ModuleNotFoundError:
@@ -71,8 +74,7 @@ class Trainer:
     """Pipeline to train a NN model using a certain dataset, both specified by an YML config."""
 
     @use_seed()
-    def __init__(self, config_path, run_dir, save):
-        self.config_path = coerce_to_path_and_check_exist(config_path)
+    def __init__(self, cfg, run_dir, save):
         self.run_dir = coerce_to_path_and_create_dir(run_dir)
         self.logger = get_logger(self.run_dir, name="trainer")
         self.print_and_log_info(
@@ -80,13 +82,8 @@ class Trainer:
         )
 
         self.save_img = save
-        shutil.copy(self.config_path, self.run_dir)
-        self.print_and_log_info(
-            "Config {} copied to run directory".format(self.config_path)
-        )
-
-        with open(self.config_path) as fp:
-            cfg = yaml.load(fp, Loader=yaml.FullLoader)
+        OmegaConf.save(cfg, self.run_dir/"config.yaml")
+        self.print_and_log_info("Current config copied to run directory")
 
         if torch.cuda.is_available():
             type_device = "cuda"
@@ -101,7 +98,7 @@ class Trainer:
 
         # Datasets and dataloaders
         self.dataset_kwargs = cfg["dataset"]
-        self.dataset_name = self.dataset_kwargs.pop("name")
+        self.dataset_name = self.dataset_kwargs["name"]
         train_dataset = get_dataset(self.dataset_name)("train", **self.dataset_kwargs)
         val_dataset = get_dataset(self.dataset_name)("val", **self.dataset_kwargs)
 
@@ -154,7 +151,7 @@ class Trainer:
 
         # Model
         self.model_kwargs = cfg["model"]
-        self.model_name = self.model_kwargs.pop("name")
+        self.model_name = self.model_kwargs["name"]
         self.is_gmm = "gmm" in self.model_name
         self.model = get_model(self.model_name)(self.n_epoches,
             self.train_loader.dataset, **self.model_kwargs
@@ -184,9 +181,9 @@ class Trainer:
         self.learn_proba = getattr(self.model, "proba", False)
         # Optimizer
         opt_params = cfg["training"]["optimizer"] or {}
-        optimizer_name = opt_params.pop("name")
-        cluster_kwargs = opt_params.pop("cluster", {})
-        tsf_kwargs = opt_params.pop("transformer", {})
+        optimizer_name = cfg["training"]["optimizer_name"]
+        cluster_kwargs = cfg["training"].get("cluster_optimizer", {})
+        tsf_kwargs = cfg["training"]["transformer_optimizer"] or {}
         self.optimizer = get_optimizer(optimizer_name)(
             [
                 dict(params=self.model.cluster_parameters(), **cluster_kwargs),
@@ -202,9 +199,9 @@ class Trainer:
         self.print_and_log_info("transformer kwargs {}".format(tsf_kwargs))
 
         # Scheduler
-        scheduler_params = cfg["training"].get("scheduler", {}) or {}
-        scheduler_name = scheduler_params.pop("name", None)
-        self.scheduler_update_range = scheduler_params.pop("update_range", "epoch")
+        scheduler_params = cfg["training"].get("scheduler", {})
+        scheduler_name = cfg["training"].get("scheduler_name", {}) 
+        self.scheduler_update_range = scheduler_params.get("update_range", "epoch")
         assert self.scheduler_update_range in ["epoch", "batch"]
         if scheduler_name == "multi_step" and isinstance(
             scheduler_params["milestones"][0], float
@@ -765,7 +762,6 @@ class Trainer:
             )
 
         self.update_visualizer_metrics(cur_iter, train=True)
-        self.train_metrics.reset(*(["time/img", "rec_loss", "bin_loss", "freq_loss"]))
 
     def update_visualizer_metrics(self, cur_iter, train):
         if self.visualizer is None:
@@ -1656,34 +1652,26 @@ class Trainer:
                 + "\n"
             )
 
-
-if __name__ == "__main__":
+import datetime
+@hydra.main(version_base=None, config_path="../conf", config_name="config")
+def main(cfg: DictConfig) -> None:
     parser = argparse.ArgumentParser(
         description="Pipeline to train a NN model specified by a YML config"
     )
-    parser.add_argument(
-        "-t",
-        "--tag",
-        nargs="?",
-        type=str,
-        required=True,
-        help="Run tag of the experiment",
-    )
-    parser.add_argument(
-        "-c", "--config", nargs="?", type=str, required=True, help="Config file name"
-    )
-    parser.add_argument("--save", action="store_true")
-    parser.set_defaults(save=False)
-    args = parser.parse_args()
 
-    assert args.tag is not None and args.config is not None
-    config = coerce_to_path_and_check_exist(CONFIGS_PATH / args.config)
-    with open(config) as fp:
-        cfg = yaml.load(fp, Loader=yaml.FullLoader)
-    seed = cfg["training"].get("seed", 4321)
+    print(OmegaConf.to_yaml(cfg))
+
     dataset = cfg["dataset"]["name"]
+    seed = cfg["training"]["seed"]
+    save = cfg["training"]["save"]
+    day = datetime.datetime.now().day
+    month = datetime.datetime.now().month
+    tag = f"{month}{day}_{dataset}"
 
-    run_dir = RUNS_PATH / dataset / args.tag
+    run_dir = RUNS_PATH / dataset / tag
     run_dir = str(run_dir)
-    trainer = Trainer(config, run_dir, seed=seed, save=args.save)
-    temp = trainer.run(seed=seed)
+    trainer = Trainer(cfg, run_dir, seed=seed, save=save)
+    trainer.run(seed=seed)
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,22 @@
+name: dti_sprites
+n_sprites: 19
+n_backgrounds: 0
+n_objects: 3
+prototype:
+  source: generator
+  generator: mlp
+  data:
+    freeze: [300, 0, 1]
+    init: ["constant", "constant", "gaussian"]
+    value: [0.9, 0., 0.]
+    gaussian_weights_std: 5
+transformation_sequence: identity
+transformation_sequence_bkg: color
+transformation_sequence_layer: color_position
+curriculum_learning: False
+curriculum_learning_bkg: False
+curriculum_learning_layer: False
+init_latent_linear: gaussian
+sprite_size: [24, 24]
+pred_occlusion: False
+bin_weight: 1.e-3
