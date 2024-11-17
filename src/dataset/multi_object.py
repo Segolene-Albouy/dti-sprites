@@ -91,8 +91,8 @@ class CLEVR6Dataset(_AbstractMultiObjectDataset):
 class CLEVRDataset(_AbstractMultiObjectDataset):
     name = "clevr"
     img_size = (128, 128)
-    N = 34963
-    n_classes = 11
+    N = 100000
+    n_classes = 7
 
 
 class TetrominoesDataset(_AbstractMultiObjectDataset):
