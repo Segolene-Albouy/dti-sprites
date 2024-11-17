@@ -15,6 +15,7 @@ model:
       init: ["constant", "constant", "gaussian"]
       value: [0.9, 0., 0.]
       gaussian_weights_std: 5
+  softmax: softmax
   encoder_name: resnet32
   transformation_sequence: identity
   transformation_sequence_bkg: linearcolor
@@ -46,7 +47,7 @@ training:
   n_epoches: 610
   train_stat_interval: 1000
   val_stat_interval: 2000
-  check_cluster_interval: 50
+  check_cluster_interval: 500
   eval_with_bkg: True
   eval_semantic: True
   seed: 10492

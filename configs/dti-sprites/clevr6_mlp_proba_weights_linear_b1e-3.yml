@@ -14,6 +14,7 @@ model:
       init: ["constant", "mean", "gaussian"]
       value: [0.9, 0., 0.]
       gaussian_weights_std: 10
+  softmax: softmax
   init_latent_linear: gaussian
   init_bkg_linear: mean
   encoder_name: resnet18
@@ -30,6 +31,7 @@ model:
   greedy_algo_iter: 3
   add_empty_sprite: True
   lambda_empty_sprite: 1.0e-4
+  proba_type: linear
   proba: True
   reassign_cluster: False
   bin_weight: 0.001
@@ -52,7 +54,7 @@ training:
   check_cluster_interval: 250
   eval_with_bkg: True
   eval_semantic: True
-  seed: 38118
+  seed: 15616
   visualizer_port:
   pretrained: 
   resume: 
