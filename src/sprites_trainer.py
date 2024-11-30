@@ -13,6 +13,7 @@ from torch.utils.data import DataLoader
 from torch.nn import functional as F
 
 import hydra
+from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, OmegaConf
 
 try:
@@ -1666,7 +1667,13 @@ def main(cfg: DictConfig) -> None:
     save = cfg["training"]["save"]
     day = datetime.datetime.now().day
     month = datetime.datetime.now().month
-    tag = f"{month}{day}_{dataset}"
+    job_name = HydraConfig.get().job.name
+    job_id = HydraConfig.get().job.num
+
+    tag = f"{dataset}_{job_name}_{job_id}"
+
+    if cfg["training"]["cont"] == True:
+        cfg["training"]["resume"] = tag
 
     run_dir = RUNS_PATH / dataset / tag
     run_dir = str(run_dir)
