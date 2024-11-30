@@ -14,7 +14,7 @@ model:
   proba_weighting: diff
   proba_type: marionette
   reassign_cluster: False
-  freq_weight: 0.0
+  freq_weight: 0
   empty_cluster_threshold: 0.05
 training:
   batch_size: 128
@@ -32,5 +32,5 @@ training:
   train_stat_interval: 25
   val_stat_interval: 50
   check_cluster_interval: 50
-  seed: 76932
+  seed: 65248
   visualizer_port:

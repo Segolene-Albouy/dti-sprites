@@ -22,6 +22,5 @@ sprite_size: [28, 28]
 pred_occlusion: True
 add_empty_sprite: True
 lambda_empty_sprite: 1.0e-4
-reassign_cluster: False
-proba: True
-proba_type: linear
+reassign_cluster: True
+proba: False

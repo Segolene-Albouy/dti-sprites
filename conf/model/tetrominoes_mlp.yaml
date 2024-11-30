@@ -7,7 +7,7 @@ prototype:
   source: generator
   generator: mlp
   data:
-    freeze: [300, 0, 1]
+    freeze: [60, 0, 1]
     init: ["constant", "constant", "gaussian"]
     value: [0.9, 0., 0.]
     gaussian_weights_std: 5
@@ -20,7 +20,5 @@ curriculum_learning_layer: False
 init_latent_linear: gaussian
 sprite_size: [24, 24]
 pred_occlusion: False
-bin_weight: 1.e-3
-reassign_cluster: False
-proba: True
-proba_type: linear
+reassign_cluster: True 
+proba: False
