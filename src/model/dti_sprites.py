@@ -34,89 +34,6 @@ EMPTY_CLUSTER_THRESHOLD = 0.2
 LATENT_SIZE = 128
 
 
-def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10, dim=-1):
-    # Ref: https://gist.github.com/GongXinyuu/3536da55639bd9bfdd5a905ebf3ab88e
-    def _gen_gumbels():
-        gumbels = -torch.empty_like(logits).exponential_().log()
-        if torch.isnan(gumbels).sum() or torch.isinf(gumbels).sum():
-            # to avoid zero in exp output
-            gumbels = _gen_gumbels()
-        return gumbels
-
-    gumbels = _gen_gumbels()  # ~Gumbel(0,1)
-
-    gumbels = (logits + gumbels) / tau  # ~Gumbel(logits,tau)
-    y_soft = gumbels.softmax(dim)
-    if torch.isnan(y_soft).any():
-        print("y_soft", y_soft)
-    if hard:
-        # Straight through.
-        index = y_soft.max(dim, keepdim=True)[1]
-        y_hard = torch.zeros_like(logits).scatter_(dim, index, 1.0)
-        ret = y_hard - y_soft.detach() + y_soft
-        if torch.isnan(ret).any():
-            print("ret", ret)
-    else:
-        # Reparametrization trick.
-        ret = y_soft
-    return ret
-
-def _old_init_linear(
-    hidden, out, init, n_channels=3, std=5, freeze_frg=False, dataset=None
-):
-    if init == "random":
-        return nn.Linear(hidden, out)
-    elif init == "constant":
-        linear = nn.Linear(hidden, out)
-        h = int(math.sqrt(out / n_channels))
-        nn.init.constant_(linear.weight, 1e-10)
-        sample = torch.full(size=(3 * h * h,), fill_value=0.5)
-        sample = torch.log(sample / (1 - sample))
-        linear.bias.data.copy_(sample)
-        return linear
-    elif init == "gaussian":
-        print_warning("Last layer initialized with gaussian weights.")
-        linear = nn.Linear(hidden, out)
-        if freeze_frg:
-            h = int(math.sqrt(out))
-            size = [h, h]
-            mask = create_gaussian_weights(size, 1, std)
-            sample = mask.flatten()
-
-        else:
-            h = int(math.sqrt(out / (n_channels + 1)))
-            size = [h, h]
-            mask = create_gaussian_weights(size, 1, std)
-            sample = torch.cat(
-                (
-                    torch.full(
-                        size=(3 * h * h,),
-                        fill_value=0.9,
-                    ),
-                    mask.flatten(),
-                ),
-            )
-        nn.init.constant_(
-            linear.weight, 1e-10
-        )  # a small value to avoid vanishing grads
-        sample = torch.log(sample / (1 - sample))
-        linear.bias.data.copy_(sample)
-        return linear
-    elif init == "mean":
-        linear = nn.Linear(hidden, out)
-        assert dataset is not None
-        images = next(
-            iter(DataLoader(dataset, batch_size=100, shuffle=True, num_workers=4))
-        )[0]
-        sample = images.mean(0)
-        nn.init.constant_(linear.weight, 0.0001)
-        sample = torch.log(sample / (1 - sample))
-        linear.bias.data.copy_(sample.flatten())
-        return linear
-    else:
-        raise NotImplementedError("init is not implemented.")
-
-
 def init_linear(hidden, out, init, n_channels=3, std=5, value=0.9, dataset=None, uniform=[None, None]):
     if init == "random":
         return nn.Linear(hidden, out)
@@ -293,7 +210,7 @@ class DTISprites(nn.Module):
         self.freeze_bkg = freeze_bkg
         
         softmax_f = kwargs.get("softmax", "softmax")
-        self.softmax_f = F.softmax if softmax_f == "softmax" else gumbel_softmax 
+        self.softmax_f = F.softmax if softmax_f == "softmax" else F.gumbel_softmax 
         
         # Sprite transformers
         L = n_objects
