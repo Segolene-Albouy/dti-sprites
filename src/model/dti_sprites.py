@@ -427,7 +427,7 @@ class DTISprites(nn.Module):
             self.softmax_f = torch.nn.functional.softmax if softmax_f == "softmax" else gumbel_softmax
             self.proba_type = kwargs.get("proba_type", "marionette")
             if self.proba_type == "linear":  # linear mapping
-                self.proba = nn.Sequential(nn.Linear(self.encoder.out_ch, self.n_sprites * n_objects), nn.LayerNorm(self.n_sprites * n_objects, elementwise_affine=False))
+                self.proba = nn.Linear(self.encoder.out_ch, self.n_sprites * n_objects)
             else:  # marionette-like
                 self.proba = [nn.Sequential(
                     nn.Linear(self.encoder.out_ch, LATENT_SIZE),
@@ -656,16 +656,9 @@ class DTISprites(nn.Module):
             proba_theta = torch.stack(proba_theta, dim=2).permute(1,0,2) # DBL
             D, B, L = proba_theta.shape
             temp = torch.matmul(latent_params, proba_theta.reshape(D,-1)).reshape(-1, B, L).permute(1,2,0)
-            """
-            proba_theta = [self.proba[l](latent_params).permute(2, 1, 0) for l in range(self.n_objects)] # DLK
-            proba_theta = torch.cat(proba_theta, dim=1) # DLK
-            D, L, K = proba_theta.shape
-            temp = torch.matmul(features, proba_theta.reshape(D,-1)).reshape(-1, L, K)  # BLK
-            """
             logits = (1.0 / np.sqrt(self.encoder.out_ch)) * (temp) # BLK
             return logits
         elif self.proba_type == "linear":
-            #logits = torch.stack([self.proba[l](features) for l in range(self.n_objects)], dim=1) # BLK
             logits = self.proba(features).reshape(features.shape[0], self.n_objects, self.n_sprites)
             return logits
 
@@ -825,7 +818,7 @@ class DTISprites(nn.Module):
         occ_grid = self.predict_occlusion_grid(x, features)  # LLB
 
         if self.estimate_proba:
-            logits = self.estimate_logits(features) # self.proba(features).reshape(B, L, K)
+            logits = self.estimate_logits(features) 
             if self.add_empty_sprite and self.are_sprite_frozen:
                 logits = logits[:, :, :-1] # B, L, K-1
                 class_prob = self.softmax_f(logits, dim=-1).permute(1, 2, 0) # LKB
