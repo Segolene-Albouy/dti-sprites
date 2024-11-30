@@ -377,7 +377,7 @@ class TransformationSequence(nn.Module):
         self.cur_milestone += 1
         while (
             self.next_act_idx < self.n_tsf
-            and self.act_milestones[self.next_act_idx - 1] == self.cur_milestone
+            and self.act_milestones[int(self.next_act_idx - 1)] == self.cur_milestone
         ):
             self.activations[self.next_act_idx] = True
             self.next_act_idx += 1
