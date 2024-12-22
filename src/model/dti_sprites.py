@@ -86,6 +86,10 @@ def layered_composition(layers, masks, occ_grid, proba=False):
         return (occ_masks * masks * layers).sum(0)  # BCHW
 
 
+def softmax(logits, tau=1., dim=-1):
+    return F.softmax(logits/tau, dim=dim)
+
+
 class DTISprites(nn.Module):
     name = "dti_sprites"
     learn_masks = True
@@ -210,7 +214,8 @@ class DTISprites(nn.Module):
         self.freeze_bkg = freeze_bkg
         
         softmax_f = kwargs.get("softmax", "softmax")
-        self.softmax_f = F.softmax if softmax_f == "softmax" else F.gumbel_softmax 
+        self.tau = kwargs.get("tau",1)
+        self.softmax_f = softmax if softmax_f == "softmax" else F.gumbel_softmax 
         
         # Sprite transformers
         L = n_objects
@@ -738,10 +743,16 @@ class DTISprites(nn.Module):
             logits = self.estimate_logits(features) 
             if self.add_empty_sprite and self.are_sprite_frozen:
                 logits = logits[:, :, :-1] # B, L, K-1
-                class_prob = self.softmax_f(logits, dim=-1).permute(1, 2, 0) # LKB
+                if self.training:
+                    class_prob = self.softmax_f(logits, self.tau, dim=-1).permute(1, 2, 0) # LKB
+                else:
+                    class_prob = softmax(logits, self.tau, dim=-1).permute(1, 2, 0) # LKB
                 class_prob = torch.cat([class_prob, torch.zeros(L, 1, B, device=class_prob.device)], dim=1)
             else:
-                class_prob = self.softmax_f(logits, dim=-1).permute(1, 2, 0) # LKB
+                if self.training:
+                    class_prob = self.softmax_f(logits, self.tau, dim=-1).permute(1, 2, 0) # LKB
+                else:
+                    class_prob = softmax(logits, self.tau, dim=-1).permute(1, 2, 0) # LKB
         else:
             if self.estimate_minimum:
                 class_prob = self.greedy_algo_selection(
