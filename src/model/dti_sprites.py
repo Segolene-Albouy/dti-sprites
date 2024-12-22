@@ -33,6 +33,8 @@ NOISE_SCALE = 0.0001
 EMPTY_CLUSTER_THRESHOLD = 0.2
 LATENT_SIZE = 128
 
+def softmax(logits, tau=1., dim=-1):
+    return F.softmax(logits/tau, dim=dim)
 
 def init_linear(hidden, out, init, n_channels=3, std=5, value=0.9, dataset=None, uniform=[None, None]):
     if init == "random":
@@ -346,9 +348,11 @@ class DTISprites(nn.Module):
         proba = kwargs.get("proba", False)
         if proba:
             softmax_f = kwargs.get("softmax","gumbel_softmax")
-            self.softmax_f = torch.nn.functional.softmax if softmax_f == "softmax" else gumbel_softmax
+            self.tau = kwargs.get("tau",1)
+            self.softmax_f = softmax if softmax_f == "softmax" else F.gumbel_softmax
             self.proba_type = kwargs.get("proba_type", "marionette")
             if self.proba_type == "linear":  # linear mapping
+                #self.proba = nn.Sequential(nn.Linear(self.encoder.out_ch, self.n_sprites * n_objects), nn.LayerNorm(self.n_sprites * n_objects, elementwise_affine=False))
                 self.proba = nn.Linear(self.encoder.out_ch, self.n_sprites * n_objects)
             else:  # marionette-like
                 self.proba = [nn.Sequential(

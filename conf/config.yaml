@@ -9,6 +9,7 @@ model:
   bin_weight: 0.0
   estimate_minimum: True
   softmax: softmax
+  tau: 1.
 training:
   optimizer_name: adam
   optimizer:

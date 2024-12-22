@@ -1,7 +1,8 @@
 name: dti_sprites
 n_sprites: 6
 n_backgrounds: 1
-n_objects: 10
+n_objects: 6
+softmax: gumbel_softmax
 prototype:
   source: generator
   generator: mlp 

@@ -37,4 +37,5 @@ evaluate.sh
 recluster.sh
 debug.sh
 /multirun
+*.sh
 /outputs
