@@ -424,8 +424,8 @@ class Trainer:
         prev_check_cluster_iter = cur_iter
         if self.start_epoch == self.n_epoches:
             self.print_and_log_info("No training, only evaluating")
-            self.save_metric_plots()
             self.evaluate()
+            self.save_metric_plots()
             self.print_and_log_info("Training run is over")
             return
         for epoch in range(self.start_epoch, self.n_epoches + 1):
@@ -1535,7 +1535,7 @@ class Trainer:
 
         iterator = iter(train_loader)
         for j in range(N):
-            images, labels = next(iterator)
+            images, labels, _, _ = next(iterator)
             images = images.to(self.device)
             if self.pred_class:
                 recons = self.model.transform(images, hard_occ_grid=True).cpu()
