@@ -205,7 +205,10 @@ class DTIKmeans(nn.Module):
         if hasattr(self, "proba"):
             inp, target, features = self.transformer(x, prototypes)
             logits = self.estimate_logits(features)
-            probas = F.gumbel_softmax(logits, dim=-1)
+            if self.training:
+                probas = F.gumbel_softmax(logits, dim=-1)
+            else:
+                probas = F.softmax(logits, dim=-1)
             freq_loss = self.reg_func(probas, type="freq")
 
             # Weight transformed sprites and sum
