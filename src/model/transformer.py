@@ -260,7 +260,7 @@ class Encoder(nn.Module):
                 ]
         if self.with_pool:
             size = (
-                self.with_pool if isinstance(self.with_pool, (tuple, list)) else (1, 1)
+                self.with_pool if isinstance(self.with_pool, (tuple, list, omegaconf.listconfig.ListConfig)) else (1, 1)
             )
             seq.append(torch.nn.AdaptiveAvgPool2d(output_size=size))
         self.encoder = nn.Sequential(*seq)
