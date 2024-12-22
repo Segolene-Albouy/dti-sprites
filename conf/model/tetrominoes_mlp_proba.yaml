@@ -7,7 +7,7 @@ prototype:
   source: generator
   generator: mlp
   data:
-    freeze: [300, 0, 1]
+    freeze: [600, 0, 1]
     init: ["constant", "constant", "gaussian"]
     value: [0.9, 0., 0.]
     gaussian_weights_std: 5

@@ -7,5 +7,6 @@ scheduler:
   milestones: [250, 500]
 n_epoches: 510
 train_stat_interval: 2000
-val_stat_interval: 1000
+val_stat_interval: 400
 check_cluster_interval: 100
+
