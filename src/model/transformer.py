@@ -330,6 +330,7 @@ class TransformationSequence(nn.Module):
             "homography": ProjectiveModule,
             "sim": SimilarityModule,
             "similarity": SimilarityModule,
+            "rotation": RotationModule,
             "tps": TPSModule,
             "thinplatespline": TPSModule,
             "translation": TranslationModule,
@@ -669,6 +670,44 @@ class PositionModule(_AbstractTransformationModule):
         )   
         return out
 
+class RotationModule(_AbstractTransformationModule):
+    def __init__(self, in_channels, img_size, **kwargs):
+        super().__init__()
+        self.img_size = img_size
+        self.padding_mode = kwargs.get("padding_mode", "border")
+        n_layers = kwargs.get("n_hidden_layers", N_LAYERS)
+        self.regressor = create_mlp(in_channels, 1, N_HIDDEN_UNITS, n_layers)
+        self.layer_size = kwargs.get("layer_size")
+        # Identity transformation parameters and regressor initialization
+        self.register_buffer(
+            "identity", torch.cat([torch.eye(2, 2), torch.zeros(2, 1)], dim=1)
+        )
+        self.regressor[-1].weight.data.zero_()
+        self.regressor[-1].bias.data.zero_()
+
+    def _transform(self, x, beta, inverse=False):
+        if inverse:
+            print_warning("Inverse transform for SimilarityModule is not implemented.")
+            return x
+        b = beta
+        t = torch.zeros(b.shape[0], 2).to(b.device)
+        b_eye = torch.Tensor([[0, -1], [1, 0]]).to(b.device)
+        scaled_rot = b[..., None].expand(-1, 2, 2) * b_eye 
+        beta = torch.cat([scaled_rot, t.unsqueeze(2)], dim=2) + self.identity
+        grid = F.affine_grid(
+            beta,
+            (x.size(0), x.size(1), self.layer_size[0], self.layer_size[1]),
+            align_corners=False,
+        )
+        out = F.grid_sample(
+            x,
+            grid,
+            mode="bilinear",
+            padding_mode=self.padding_mode,
+            align_corners=False,
+        )
+        return out
+
 class SimilarityModule(_AbstractTransformationModule):
     def __init__(self, in_channels, img_size, **kwargs):
         super().__init__()
@@ -682,7 +721,7 @@ class SimilarityModule(_AbstractTransformationModule):
         self.regressor[-1].weight.data.zero_()
         self.regressor[-1].bias.data.zero_()
 
-    def _transform(self, x, beta, inverse=True):
+    def _transform(self, x, beta, inverse=False):
         a, b, t = beta.split([1, 1, 2], dim=1)
         a_eye = torch.eye(2, 2).to(a.device)
         b_eye = torch.Tensor([[0, -1], [1, 0]]).to(b.device)

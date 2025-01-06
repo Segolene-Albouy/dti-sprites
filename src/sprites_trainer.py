@@ -1,4 +1,7 @@
 import argparse
+import traceback
+import sys
+
 import os
 import shutil
 import seaborn as sns
@@ -1684,7 +1687,11 @@ def main(cfg: DictConfig) -> None:
     run_dir = RUNS_PATH / dataset / tag
     run_dir = str(run_dir)
     trainer = Trainer(cfg, run_dir, seed=seed, save=save)
-    trainer.run(seed=seed)
+    try:
+        trainer.run(seed=seed)
+    except Exception:
+        traceback.print_exc(file=sys.stderr)
+        raise
 
 if __name__ == "__main__":
     main()

@@ -264,6 +264,8 @@ class DTISprites(nn.Module):
         else:
             self.learn_tau=False
             self.tau = kwargs.get("tau",1)
+
+        self.softmax_f = softmax if softmax_f == "softmax" else F.gumbel_softmax 
         
         # Sprite transformers
         L = n_objects
