@@ -682,7 +682,7 @@ class SimilarityModule(_AbstractTransformationModule):
         self.regressor[-1].weight.data.zero_()
         self.regressor[-1].bias.data.zero_()
 
-    def _transform(self, x, beta):
+    def _transform(self, x, beta, inverse=True):
         a, b, t = beta.split([1, 1, 2], dim=1)
         a_eye = torch.eye(2, 2).to(a.device)
         b_eye = torch.Tensor([[0, -1], [1, 0]]).to(b.device)
