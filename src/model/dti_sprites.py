@@ -33,10 +33,61 @@ NOISE_SCALE = 0.0001
 EMPTY_CLUSTER_THRESHOLD = 0.2
 LATENT_SIZE = 128
 
-def softmax(logits, tau=1., dim=-1):
-    return F.softmax(logits/tau, dim=dim)
+def init_linear(hidden, out, init, n_channels=3, std=5, value=0.9, dataset=None, freeze_frg=False, uniform=[None, None]):
+    if init == "random":
+        return nn.Linear(hidden, out)
+    elif init == "constant":
+        linear = nn.Linear(hidden, out)
+        h = int(math.sqrt(out / n_channels))
+        nn.init.constant_(linear.weight, 1e-10)
+        sample = torch.full(size=(n_channels * h * h,), fill_value=0.5)
+        sample = torch.log(sample / (1 - sample))
+        linear.bias.data.copy_(sample)
+        return linear
+    elif init == "gaussian":
+        print_warning("Last layer initialized with gaussian weights.")
+        linear = nn.Linear(hidden, out)
+        if freeze_frg:
+            h = int(math.sqrt(out))
+            size = [h, h]
+            mask = create_gaussian_weights(size, 1, std)
+            sample = mask.flatten()
 
-def init_linear(hidden, out, init, n_channels=3, std=5, value=0.9, dataset=None, uniform=[None, None]):
+        else:
+            h = int(math.sqrt(out / (n_channels + 1)))
+            size = [h, h]
+            mask = create_gaussian_weights(size, 1, std)
+            sample = torch.cat(
+                (
+                    torch.full(
+                        size=(n_channels * h * h,),
+                        fill_value=0.9,
+                    ),
+                    mask.flatten(),
+                ),
+            )
+        nn.init.constant_(
+            linear.weight, 1e-10
+        )  # a small value to avoid vanishing grads
+        sample = torch.log(sample / (1 - sample))
+        linear.bias.data.copy_(sample)
+        return linear
+    elif init == "mean":
+        linear = nn.Linear(hidden, out)
+        assert dataset is not None
+        images = next(
+            iter(DataLoader(dataset, batch_size=100, shuffle=True, num_workers=4))
+        )[0]
+        sample = images.mean(0)
+        nn.init.constant_(linear.weight, 0.0001)
+        sample = torch.log(sample / (1 - sample))
+        linear.bias.data.copy_(sample.flatten())
+        return linear
+    else:
+        raise NotImplementedError("init is not implemented.")
+
+
+def old_init_linear(hidden, out, init, n_channels=3, std=5, value=0.9, dataset=None, uniform=[None, None]):
     if init == "random":
         return nn.Linear(hidden, out)
     elif init == "constant":
@@ -185,21 +236,11 @@ class DTISprites(nn.Module):
                     dim=0,
                 ),
             )
-            if not freeze_frg:
-                self.frg_generator = self.init_generator(
-                    gen_name,
-                    LATENT_SIZE,
-                    color_channels,
-                    color_channels * size[0] * size[1],
-                    proto_init,
-                    std=std,
-                    value=value_frg,
-                )
-            self.mask_generator = self.init_generator(
+            self.generator = self.init_generator(
                 gen_name,
                 LATENT_SIZE,
-                1,
-                1 * size[0] * size[1],
+                color_channels,
+                (color_channels+1) * size[0] * size[1],
                 mask_init,
                 std=std,
                 value=0.0,
@@ -216,7 +257,14 @@ class DTISprites(nn.Module):
         self.freeze_bkg = freeze_bkg
         
         softmax_f = kwargs.get("softmax", "softmax")
-        self.tau = kwargs.get("tau",1)
+        if kwargs.get("learn_tau", False):
+            self.learn_tau=True
+            t_ = kwargs.get("tau",1)
+            self.tau = nn.Parameter(torch.tensor([t_],dtype=torch.float, device="cuda"))
+        else:
+            self.learn_tau=False
+            self.tau = kwargs.get("tau",1)
+
         self.softmax_f = softmax if softmax_f == "softmax" else F.gumbel_softmax 
         
         # Sprite transformers
@@ -348,13 +396,14 @@ class DTISprites(nn.Module):
         proba = kwargs.get("proba", False)
         if proba:
             softmax_f = kwargs.get("softmax","gumbel_softmax")
-            self.tau = kwargs.get("tau",1)
             self.softmax_f = softmax if softmax_f == "softmax" else F.gumbel_softmax
             self.proba_type = kwargs.get("proba_type", "marionette")
             if self.proba_type == "linear":  # linear mapping
                 #self.proba = nn.Sequential(nn.Linear(self.encoder.out_ch, self.n_sprites * n_objects), nn.LayerNorm(self.n_sprites * n_objects, elementwise_affine=False))
                 self.proba = nn.Linear(self.encoder.out_ch, self.n_sprites * n_objects)
             else:  # marionette-like
+                # CHECK HERE
+                exit()
                 self.proba = [nn.Sequential(
                     nn.Linear(self.encoder.out_ch, LATENT_SIZE),
                     nn.LayerNorm(LATENT_SIZE, elementwise_affine=False),
@@ -438,7 +487,12 @@ class DTISprites(nn.Module):
             masks = self.mask_params
         else:
             with torch.no_grad():
-                masks = self.mask_generator(self.latent_params)
+                masks = self.generator(self.latent_params)[
+                        :,
+                        self.color_channels
+                        * self.sprite_size[0]
+                        * self.sprite_size[1] :,
+                    ]
             if len(masks.size()) != 4:
                 masks = masks.reshape(-1, 1, self.sprite_size[0], self.sprite_size[1])
 
@@ -461,7 +515,12 @@ class DTISprites(nn.Module):
                 if self.freeze_frg:
                     params = self.prototype_params
                 else:
-                    params = self.frg_generator(self.latent_params)
+                    params = self.generator(self.latent_params)[
+                        :,
+                        : self.color_channels
+                        * self.sprite_size[0]
+                        * self.sprite_size[1],
+                    ]
                     if len(params.size()) != 4:
                         params = params.reshape(
                             -1,
@@ -522,11 +581,11 @@ class DTISprites(nn.Module):
             if self.learn_backgrounds:
                 params.append(self.bkg_params)
         else:
-            params = list(chain(*[self.mask_generator.parameters()])) + [
+            params = list(chain(*[self.generator.parameters()])) + [
                 self.latent_params
             ]
-            if not self.freeze_frg:
-                params.extend(list(chain(*[self.frg_generator.parameters()])))
+            #if not self.freeze_frg:
+            #    params.extend(list(chain(*[self.frg_generator.parameters()])))
             if self.learn_backgrounds and not self.freeze_bkg:
                 params.append(self.latent_bkg_params)
                 params.extend(list(chain(*[self.bkg_generator.parameters()])))
@@ -536,6 +595,8 @@ class DTISprites(nn.Module):
                 for p in self.proba:
                     params.extend(list(chain(*[p.parameters()])))
             else:
+                if self.learn_tau:
+                    params.append(self.tau)
                 params.extend(list(chain(*[self.proba.parameters()])))
         return iter(params)
 
@@ -644,13 +705,27 @@ class DTISprites(nn.Module):
         B, C, H, W = x.size()
         h, w = self.prototypes.shape[2:]
         L, K, M = self.n_objects, self.n_sprites, self.n_backgrounds or 1
-        if hasattr(self, "mask_generator"):
-            masks = self.mask_generator(self.latent_params)
+        if hasattr(self, "generator"):
+            out = self.generator(self.latent_params)
+            masks = out[
+                        :,
+                        self.color_channels
+                        * self.sprite_size[0]
+                        * self.sprite_size[1] :,
+                    ]
+            
             masks = masks.reshape(-1, 1, self.sprite_size[0], self.sprite_size[1])
             if self.freeze_frg:
                 prototypes = self.prototypes
             else:
-                prototypes = self.frg_generator(self.latent_params).reshape(
+                prototypes = out[
+                        :,
+                        : self.color_channels
+                        * self.sprite_size[0]
+                        * self.sprite_size[1],
+                    ]
+
+                prototypes = prototypes.reshape(
                     -1, self.color_channels, self.sprite_size[0], self.sprite_size[1]
                 )
             if self.add_empty_sprite:
@@ -713,7 +788,7 @@ class DTISprites(nn.Module):
             tsf_layers, tsf_masks = torch.split(tsf_layers, [C, 1], dim=3)
 
         if self.learn_backgrounds:
-            if hasattr(self, "mask_generator"):
+            if hasattr(self, "generator"):
                 if not self.freeze_bkg:
                     backgrounds = self.bkg_generator(self.latent_bkg_params).reshape(
                         -1, self.color_channels, self.img_size[0], self.img_size[1]
@@ -748,15 +823,15 @@ class DTISprites(nn.Module):
             if self.add_empty_sprite and self.are_sprite_frozen:
                 logits = logits[:, :, :-1] # B, L, K-1
                 if self.training:
-                    class_prob = self.softmax_f(logits, self.tau, dim=-1).permute(1, 2, 0) # LKB
+                    class_prob = self.softmax_f(logits, (self.tau+1e-9), dim=-1).permute(1, 2, 0) # LKB
                 else:
-                    class_prob = softmax(logits, self.tau, dim=-1).permute(1, 2, 0) # LKB
+                    class_prob = softmax(logits, (self.tau+1e-9), dim=-1).permute(1, 2, 0) # LKB
                 class_prob = torch.cat([class_prob, torch.zeros(L, 1, B, device=class_prob.device)], dim=1)
             else:
                 if self.training:
-                    class_prob = self.softmax_f(logits, self.tau, dim=-1).permute(1, 2, 0) # LKB
+                    class_prob = self.softmax_f(logits, (self.tau+1e-9), dim=-1).permute(1, 2, 0) # LKB
                 else:
-                    class_prob = softmax(logits, self.tau, dim=-1).permute(1, 2, 0) # LKB
+                    class_prob = softmax(logits, (self.tau+1e-9), dim=-1).permute(1, 2, 0) # LKB
         else:
             if self.estimate_minimum:
                 class_prob = self.greedy_algo_selection(
@@ -1095,7 +1170,7 @@ class DTISprites(nn.Module):
         return reassigned, idx
 
     def restart_branch_from(self, i, j):
-        if hasattr(self, "mask_generator"):
+        if hasattr(self, "generator"):
             self.latent_params[i].data.copy_(
                 copy_with_noise(self.latent_params[j], NOISE_SCALE)
             )
