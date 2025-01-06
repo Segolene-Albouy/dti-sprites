@@ -47,6 +47,7 @@ from .utils.plot import plot_bar, plot_lines
 from PIL import Image, ImageFont, ImageDraw
 
 from torch.profiler import profile, record_function, ProfilerActivity
+from fvcore.nn import FlopCountAnalysis
 
 PRINT_TRAIN_STAT_FMT = "Epoch [{}/{}], Iter [{}/{}], train_metrics: {}".format
 PRINT_VAL_STAT_FMT = "Epoch [{}/{}], Iter [{}/{}], val_metrics: {}".format
@@ -1090,6 +1091,7 @@ class Trainer:
         self.print_and_log_info("Metrics and plots saved")
 
     def evaluate(self):
+        print("TAU:",self.model.tau)
         self.model.eval()
         label = self.train_loader.dataset[0][1]
         empty_label = isinstance(label, (int, np.integer)) and label == -1
@@ -1307,6 +1309,9 @@ class Trainer:
                     scores.update(labels.long().numpy(), target.long().cpu().numpy())
 
             loss.update(loss_val[0].item(), n=images.size(0))
+
+        flops = FlopCountAnalysis(self.model, images)
+        self.print_and_log_info("flops:" + str(flops.total()))
 
         scores = scores.compute()
         self.print_and_log_info("bin_counts: " + str(self.bin_counts))
@@ -1660,6 +1665,7 @@ def main(cfg: DictConfig) -> None:
         description="Pipeline to train a NN model specified by a YML config"
     )
 
+    torch.backends.cudnn.enabled = False
     print(OmegaConf.to_yaml(cfg))
 
     dataset = cfg["dataset"]["name"]
