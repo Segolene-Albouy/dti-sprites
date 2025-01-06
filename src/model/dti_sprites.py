@@ -216,8 +216,13 @@ class DTISprites(nn.Module):
         self.freeze_bkg = freeze_bkg
         
         softmax_f = kwargs.get("softmax", "softmax")
-        self.tau = kwargs.get("tau",1)
-        self.softmax_f = softmax if softmax_f == "softmax" else F.gumbel_softmax 
+        if kwargs.get("learn_tau", False):
+            self.learn_tau=True
+            t_ = kwargs.get("tau",1)
+            self.tau = nn.Parameter(torch.tensor([t_],dtype=torch.float, device="cuda"))
+        else:
+            self.learn_tau=False
+            self.tau = kwargs.get("tau",1)
         
         # Sprite transformers
         L = n_objects
@@ -348,7 +353,6 @@ class DTISprites(nn.Module):
         proba = kwargs.get("proba", False)
         if proba:
             softmax_f = kwargs.get("softmax","gumbel_softmax")
-            self.tau = kwargs.get("tau",1)
             self.softmax_f = softmax if softmax_f == "softmax" else F.gumbel_softmax
             self.proba_type = kwargs.get("proba_type", "marionette")
             if self.proba_type == "linear":  # linear mapping
@@ -536,6 +540,8 @@ class DTISprites(nn.Module):
                 for p in self.proba:
                     params.extend(list(chain(*[p.parameters()])))
             else:
+                if self.learn_tau:
+                    params.append(self.tau)
                 params.extend(list(chain(*[self.proba.parameters()])))
         return iter(params)
 
