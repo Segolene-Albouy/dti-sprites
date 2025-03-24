@@ -6,7 +6,7 @@ DEFAULT_PROJECT_PATH = Path(__file__).parent.parent.parent
 
 # Allow overriding the project path with an environment variable
 ENV = Env()
-PROJECT_PATH = Path(ENV("DTI_DATA_FOLDER", default=DEFAULT_PROJECT_PATH))
+PROJECT_PATH = Path(ENV("API_DATA_FOLDER", default=DEFAULT_PROJECT_PATH)) / "dticlustering"
 
 DATASET_SCRATCH = Path('/lustre/fsn1/projects/rech/wgc/uze77wm')
 

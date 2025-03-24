@@ -63,7 +63,7 @@ class Trainer:
             "Trainer initialisation: run directory is {}".format(run_dir)
         )
 
-        shutil.copy(self.config_path, self.run_dir)
+        shutil.copyfile(self.config_path, self.run_dir / self.config_path.name)
         self.print_and_log_info(
             "Config {} copied to run directory".format(self.config_path)
         )

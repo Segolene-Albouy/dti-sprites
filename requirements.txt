@@ -1,9 +1,10 @@
 pyyaml
 tqdm
 pandas
-Pillow<10.0
+Pillow
 scipy
 kornia
+h5py
 scikit-learn
 torch==1.12.1+cu116
 torchvision==0.13.1+cu116

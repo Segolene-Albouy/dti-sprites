@@ -6,6 +6,10 @@ model:
   prototype:
     source: generator
     generator: mlp
+    proba: True
+    proba_type: marionette
+    proba_weight: weight_diff
+    lambda_freq: 0.0
   encoder_name: resnet20
   color_channels: 1
   transformation_sequence: identity_affine_morpho_tps

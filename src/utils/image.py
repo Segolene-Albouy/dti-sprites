@@ -11,7 +11,7 @@ from .logger import print_info, print_warning
 IMG_EXTENSIONS = ['jpeg', 'jpg', 'JPG', 'png', 'ppm']
 
 
-def resize(img, size, keep_aspect_ratio=True, resample=Image.LANCZOS, fit_inside=True):
+def resize(img, size, keep_aspect_ratio=True, resample=Image.Resampling.LANCZOS, fit_inside=True):
     if isinstance(size, int):
         return resize(img, (size, size), keep_aspect_ratio=keep_aspect_ratio, resample=resample, fit_inside=fit_inside)
     elif keep_aspect_ratio:
@@ -23,7 +23,7 @@ def resize(img, size, keep_aspect_ratio=True, resample=Image.LANCZOS, fit_inside
     return img.resize(size, resample=resample)
 
 
-def convert_to_img(arr):
+def convert_to_img(arr, with_alpha=False):
     if isinstance(arr, torch.Tensor):
         if len(arr.shape) == 4:
             arr = arr.squeeze(0)
@@ -34,9 +34,11 @@ def convert_to_img(arr):
     assert isinstance(arr, np.ndarray)
     if len(arr.shape) == 3 and arr.shape[2] == 1:
         arr = arr[:, :, 0]
+    if len(arr.shape) == 2 or arr.shape[2] == 3:
+        with_alpha = False
     if np.issubdtype(arr.dtype, np.floating):
         arr = (arr.clip(0, 1) * 255)
-    return Image.fromarray(arr.astype(np.uint8)).convert('RGB')
+    return Image.fromarray(arr.astype(np.uint8)).convert('RGBA' if with_alpha else 'RGB')
 
 
 def convert_to_rgba(t):
@@ -73,7 +75,7 @@ def draw_border(img, color, width):
 class ImageResizer:
     """Resize images from a given input directory, keeping aspect ratio or not."""
     def __init__(self, input_dir, output_dir, size, in_ext=IMG_EXTENSIONS, out_ext='jpg', keep_aspect_ratio=True,
-                 resample=Image.LANCZOS, fit_inside=True, rename=False, verbose=True):
+                 resample=Image.Resampling.LANCZOS, fit_inside=True, rename=False, verbose=True):
         self.input_dir = coerce_to_path_and_check_exist(input_dir)
         self.files = get_files_from_dir(input_dir, valid_extensions=in_ext, recursive=True, sort=True)
         self.output_dir = coerce_to_path_and_create_dir(output_dir)

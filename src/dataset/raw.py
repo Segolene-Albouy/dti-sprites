@@ -19,6 +19,7 @@ class _AbstractCollectionDataset(TorchDataset):
     name = NotImplementedError
     n_channels = 3
     include_recursive = False
+    output_paths = False
 
     def __init__(self, split, img_size, **kwargs):
         tag = kwargs.get("tag", "")

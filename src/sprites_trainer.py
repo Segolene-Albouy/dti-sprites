@@ -88,7 +88,10 @@ class Trainer:
 
         self.save_img = save
         OmegaConf.save(cfg, self.run_dir/"config.yaml")
-        self.print_and_log_info("Current config copied to run directory")
+        self.print_and_log_info(f"Current config copied to run directory")
+
+        # with open(self.config_path) as fp:
+        #     cfg = yaml.load(fp, Loader=yaml.FullLoader)
 
         if torch.cuda.is_available():
             type_device = "cuda"
@@ -591,11 +594,11 @@ class Trainer:
         prototypes = self.model.prototypes
         masks = self.model.masks
         for k in range(self.n_prototypes):
-            img = convert_to_img(prototypes[k] * masks[k])
             if cur_iter is not None:
-                img.save(self.masked_prototypes_path / f"proto{k}" / f"{cur_iter}.jpg")
+                convert_to_img(prototypes[k] * masks[k]).save(self.masked_prototypes_path / f"proto{k}" / f"{cur_iter}.jpg")
             else:
-                img.save(self.masked_prototypes_path / f"prototype{k}.png")
+                img = torch.vstack([prototypes[k] * masks[k], masks[k]])
+                convert_to_img(img, with_alpha=True).save(self.masked_prototypes_path / f"prototype{k}.png")
 
     @torch.no_grad()
     def save_masks(self, cur_iter=None):
