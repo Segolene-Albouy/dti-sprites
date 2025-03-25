@@ -20,7 +20,7 @@ from torch import set_rng_state as torch_set_state
 def coerce_to_path_and_check_exist(path):
     path = Path(path)
     if not path.exists():
-        raise FileNotFoundError('{} does not exist'.format(path.absolute()))
+        raise FileNotFoundError(f'{path.absolute()} does not exist')
     return path
 
 
@@ -32,10 +32,8 @@ def coerce_to_path_and_create_dir(path):
 
 def get_files_from_dir(dir_path, valid_extensions=None, recursive=False, sort=False):
     path = coerce_to_path_and_check_exist(dir_path)
-    if recursive:
-        files = [f.absolute() for f in path.glob('**/*') if f.is_file()]
-    else:
-        files = [f.absolute() for f in path.glob('*') if f.is_file()]
+    pattern = '**/*' if recursive else '*'
+    files = [f.absolute() for f in path.glob(pattern) if f.is_file()]
 
     if valid_extensions is not None:
         valid_extensions = [valid_extensions] if isinstance(valid_extensions, str) else valid_extensions
