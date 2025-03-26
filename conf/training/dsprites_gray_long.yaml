@@ -5,7 +5,7 @@ optimizer:
 scheduler:
   gamma: [1, 0.1]
   milestones: [500, 1000]
-n_epoches: 1020
+n_epochs: 1020
 train_stat_interval: 2000
 val_stat_interval: 400
 check_cluster_interval: 100
