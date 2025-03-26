@@ -6,11 +6,14 @@ scipy
 kornia
 h5py
 scikit-learn
+visdom
+django-environ
+hydra-core
+fvcore
+matplotlib
+seaborn
+
 torch==1.12.1+cu116
 torchvision==0.13.1+cu116
 torchaudio==0.12.1
-matplotlib
-seaborn
 --extra-index-url https://download.pytorch.org/whl/cu116
-visdom
-django-environ

@@ -79,7 +79,7 @@ class Trainer:
     """Pipeline to train a NN model using a certain dataset, both specified by an YML config."""
 
     @use_seed()
-    def __init__(self, cfg, run_dir, save):
+    def __init__(self, cfg, run_dir, save=False):
         self.run_dir = coerce_to_path_and_create_dir(run_dir)
         self.logger = get_logger(self.run_dir, name="trainer")
         self.print_and_log_info(
@@ -87,7 +87,7 @@ class Trainer:
         )
 
         self.save_img = save
-        OmegaConf.save(cfg, self.run_dir/"config.yaml")
+        OmegaConf.save(cfg, self.run_dir / "config.yaml")
         self.print_and_log_info(f"Current config copied to run directory")
 
         # with open(self.config_path) as fp:
@@ -161,9 +161,10 @@ class Trainer:
         self.model_kwargs = cfg["model"]
         self.model_name = self.model_kwargs["name"]
         self.is_gmm = "gmm" in self.model_name
-        self.model = get_model(self.model_name)(self.n_epoches,
-            self.train_loader.dataset, **self.model_kwargs
+        self.model = get_model(self.model_name)(
+            self.n_epoches, self.train_loader.dataset, **self.model_kwargs
         ).to(self.device)
+
         self.print_and_log_info(
             "Using model {} with kwargs {}".format(self.model_name, self.model_kwargs)
         )
@@ -187,11 +188,13 @@ class Trainer:
         self.learn_masks = getattr(self.model, "learn_masks", False)
         self.learn_backgrounds = getattr(self.model, "learn_backgrounds", False)
         self.learn_proba = getattr(self.model, "proba", False)
+
         # Optimizer
-        opt_params = cfg["training"]["optimizer"] or {}
-        optimizer_name = cfg["training"]["optimizer_name"]
-        cluster_kwargs = cfg["training"].get("cluster_optimizer", {})
-        tsf_kwargs = cfg["training"]["transformer_optimizer"] or {}
+        training = cfg.get("training", {})
+        opt_params = training.get("optimizer", {})
+        optimizer_name = training.get("optimizer_name", "adam")
+        cluster_kwargs = training.get("cluster_optimizer", {})
+        tsf_kwargs = training.get("transformer_optimizer", {})
         self.optimizer = get_optimizer(optimizer_name)(
             [
                 dict(params=self.model.cluster_parameters(), **cluster_kwargs),
@@ -199,6 +202,7 @@ class Trainer:
             ],
             **opt_params,
         )
+
         self.model.set_optimizer(self.optimizer)
         self.print_and_log_info(
             "Using optimizer {} with kwargs {}".format(optimizer_name, opt_params)
@@ -490,14 +494,17 @@ class Trainer:
         B = images.size(0)
         self.model.train()
         images = images.to(self.device)
-        if masks != []:
-            masks = masks.to(self.device)
-        else:
-            masks = None
-        self.optimizer.zero_grad()
+        masks = masks.to(self.device) if masks else None
 
+        self.optimizer.zero_grad()
         loss, distances, class_prob = self.model(images, masks)
         loss[0].backward()
+
+        for param_group in self.optimizer.param_groups:
+            for param in param_group['params']:
+                if param.grad is not None:
+                    param.grad = param.grad.clone()
+
         self.optimizer.step()
 
         with torch.no_grad():
