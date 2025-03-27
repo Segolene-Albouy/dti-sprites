@@ -608,11 +608,8 @@ class Trainer(AbstractTrainer):
     #   LOGGING METHODS  #
     ######################
 
-    @torch.no_grad()
-    def log_images(self, cur_iter):
-        self.model.eval()
-        self.save_prototypes(cur_iter)
-        self.update_visualizer_images(self.model.prototypes, "prototypes", nrow=5)
+    def _log_model_specific_images(self, cur_iter):
+        """Visualize masks, masked prototypes, and backgrounds if applicable."""
         if self.learn_masks:
             self.save_masked_prototypes(cur_iter)
             self.update_visualizer_images(
@@ -620,25 +617,22 @@ class Trainer(AbstractTrainer):
             )
             self.save_masks(cur_iter)
             self.update_visualizer_images(self.model.masks, "masks", nrow=5)
+
         if self.learn_backgrounds:
             self.save_backgrounds(cur_iter)
             self.update_visualizer_images(self.model.backgrounds, "backgrounds", nrow=5)
 
-        # Transformations
-        tsf_imgs, compositions = self.save_transformed_images(cur_iter)
-        C, H, W = tsf_imgs.shape[2:]
-        self.update_visualizer_images(
-            tsf_imgs.reshape(-1, C, H, W), "transformations", nrow=tsf_imgs.size(1)
-        )
-
-        # Compositions
+    def _log_transformation_compositions(self, compositions, C, H, W):
         if len(compositions) > 0:
             k = 0
+            # Visualize foreground and mask transformations
             for imgs, name in zip(compositions[:2], ["frg_tsf", "mask_tsf"]):
                 self.update_visualizer_images(
                     imgs.view(-1, imgs.size(2), H, W), name, nrow=self.n_prototypes + 1
                 )
                 k += 1
+
+            # Visualize background transformations
             if self.learn_backgrounds:
                 imgs = compositions[k]
                 self.update_visualizer_images(
@@ -647,6 +641,8 @@ class Trainer(AbstractTrainer):
                     nrow=self.n_backgrounds + 1,
                 )
                 k += 1
+
+            # Visualize auxiliary transformations for multi-object models
             if self.n_objects > 1:
                 for name in ["frg_tsf_aux", "mask_tsf_aux"]:
                     imgs = compositions[k]
@@ -656,6 +652,10 @@ class Trainer(AbstractTrainer):
                         nrow=self.n_prototypes + 1,
                     )
                     k += 1
+
+    def get_transformation_nrow(self, tsf_imgs):
+        """Custom row count for transformation visualization."""
+        return tsf_imgs.size(1)
 
     ######################
     # VALIDATION METHODS #

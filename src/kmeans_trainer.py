@@ -447,24 +447,15 @@ class Trainer(AbstractTrainer):
     #   LOGGING METHODS  #
     ######################
 
-    @torch.no_grad()
-    def log_images(self, cur_iter):
-        self.save_prototypes(cur_iter)
-        self.update_visualizer_images(self.model.prototypes, "prototypes", nrow=5)
+    def _log_model_specific_images(self, cur_iter):
+        """Visualize GMM variances if applicable."""
         if self.is_gmm:
             self.save_variances(cur_iter)
             variances = self.model.variances
+            # Normalize variances for visualization
             M = variances.flatten(1).max(1)[0][:, None, None, None]
-            variances = (variances - self.model.var_min) / (
-                M - self.model.var_min + 1e-7
-            )
+            variances = (variances - self.model.var_min) / (M - self.model.var_min + 1e-7)
             self.update_visualizer_images(variances, "variances", nrow=5)
-
-        tsf_imgs = self.save_transformed_images(cur_iter)
-        C, H, W = tsf_imgs.shape[2:]
-        self.update_visualizer_images(
-            tsf_imgs.view(-1, C, H, W), "transformations", nrow=self.n_prototypes + 1
-        )
 
     ######################
     # VALIDATION METHODS #

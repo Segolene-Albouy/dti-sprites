@@ -393,10 +393,38 @@ class AbstractTrainer(ABC):
         print_info(string)
         self.logger.info(string)
 
-    @abstractmethod
+    def _log_model_specific_images(self, cur_iter):
+        pass
+
+    def _log_transformation_compositions(self, compositions, C, H, W):
+        pass
+
+    def get_transformation_nrow(self, tsf_imgs):
+        return self.n_prototypes + 1
+
+    @torch.no_grad()
     def log_images(self, cur_iter):
-        """Log images for visualization."""
-        raise NotImplementedError
+        """Log images for visualization"""
+        self.model.eval()
+        self.save_prototypes(cur_iter)
+        self.update_visualizer_images(self.model.prototypes, "prototypes", nrow=5)
+
+        self._log_model_specific_images(cur_iter)
+
+        tsf_result = self.save_transformed_images(cur_iter)
+
+        if isinstance(tsf_result, tuple):
+            tsf_imgs, compositions = tsf_result
+        else:
+            tsf_imgs, compositions = tsf_result, []
+
+        c, h, w = tsf_imgs.shape[2:]
+        nrow = self.get_transformation_nrow(tsf_imgs)
+        self.update_visualizer_images(
+            tsf_imgs.reshape(-1, c, h, w), "transformations", nrow=nrow
+        )
+
+        self._log_transformation_compositions(compositions, c, h, w)
 
     def print_memory_usage(self, prefix):
         """Print GPU memory usage information with the given prefix."""
