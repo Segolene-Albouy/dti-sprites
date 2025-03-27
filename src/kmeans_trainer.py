@@ -2,11 +2,15 @@ import argparse
 import os
 import shutil
 import time
+
+import hydra
 import yaml
 
 import numpy as np
 import pandas as pd
 import torch
+from hydra.core.hydra_config import HydraConfig
+from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader
 
 from .utils.consts import *
@@ -21,10 +25,9 @@ from .utils import (
     coerce_to_path_and_create_dir,
 )
 from .utils.image import convert_to_img, save_gif
-from .utils.logger import get_logger, print_info, print_warning
+from .utils.logger import get_logger, print_warning
 from .utils.metrics import AverageTensorMeter, AverageMeter, Metrics, Scores
 from .utils.path import CONFIGS_PATH, RUNS_PATH
-from .utils.plot import plot_lines, plot_bar
 
 from .abstract_trainer import AbstractTrainer, PRINT_CHECK_CLUSTERS_FMT
 
@@ -33,23 +36,17 @@ class Trainer(AbstractTrainer):
     """Pipeline to train a NN model using a certain dataset, both specified by an YML config."""
 
     @use_seed()
-    def __init__(self, config_path, run_dir, parent_model=None, recluster=False, save=False, *args, **kwargs):
+    def __init__(self, cfg, run_dir, parent_model=None, recluster=False, save=False, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.config_path = coerce_to_path_and_check_exist(config_path)
         self.run_dir = coerce_to_path_and_create_dir(run_dir)
         self.logger = get_logger(self.run_dir, name="trainer")
-        self.save_img = save
         self.print_and_log_info(
             "Trainer initialisation: run directory is {}".format(run_dir)
         )
 
-        shutil.copy(self.config_path, self.run_dir)
-        self.print_and_log_info(
-            "Config {} copied to run directory".format(self.config_path)
-        )
-
-        with open(self.config_path) as fp:
-            cfg = yaml.load(fp, Loader=yaml.FullLoader)
+        self.save_img = save
+        OmegaConf.save(cfg, self.run_dir / "config.yaml")
+        self.print_and_log_info("Current config saved to run directory")
 
         # Datasets and dataloaders
         self.dataset_kwargs = cfg["dataset"]
@@ -272,6 +269,50 @@ class Trainer(AbstractTrainer):
         else:
             self.visualizer = None
             self.print_and_log_info("No visualizer initialized")
+
+    ######################
+    #   SETUP METHODS    #
+    ######################
+
+    def setup_directories(self, *args, **kwargs):
+        """Set up necessary directories for saving results and artifacts."""
+        pass
+
+    def setup_logging(self):
+        """Set up logging configuration."""
+        pass
+
+    def setup_config(self, *args, **kwargs):
+        """Load and process configuration."""
+        pass
+
+    def setup_dataset(self, *args, **kwargs):
+        """Set up dataset parameters and load dataset."""
+        pass
+
+    def setup_dataloaders(self):
+        """Create data loaders from datasets."""
+        pass
+
+    def setup_model(self, *args, **kwargs):
+        """Initialize model architecture."""
+        pass
+
+    def setup_optimizer(self, *args, **kwargs):
+        """Configure optimizer for training."""
+        pass
+
+    def setup_scheduler(self, *args, **kwargs):
+        """Configure learning rate scheduler."""
+        pass
+
+    def setup_checkpoint_loading(self, *args, **kwargs):
+        """Handle loading from pretrained models or resuming training."""
+        pass
+
+    def setup_metrics(self, *args, **kwargs):
+        """Initialize metrics for training and evaluation."""
+        pass
 
     ######################
     #    MAIN METHODS    #
@@ -638,32 +679,25 @@ class Trainer(AbstractTrainer):
             )
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Pipeline to train a NN model specified by a YML config"
-    )
-    parser.add_argument(
-        "-t",
-        "--tag",
-        nargs="?",
-        type=str,
-        required=True,
-        help="Run tag of the experiment",
-    )
-    parser.add_argument(
-        "-c", "--config", nargs="?", type=str, required=True, help="Config file name"
-    )
-    parser.add_argument("--save", action="store_true")
-    parser.set_defaults(save=False)
-    args = parser.parse_args()
-
-    assert args.tag is not None and args.config is not None
-    config = coerce_to_path_and_check_exist(CONFIGS_PATH / args.config)
-    with open(config) as fp:
-        cfg = yaml.load(fp, Loader=yaml.FullLoader)
-    seed = cfg["training"].get("seed", 4321)
+@hydra.main(version_base=None, config_path="../conf", config_name="config")
+def main(cfg: DictConfig) -> None:
     dataset = cfg["dataset"]["name"]
+    seed = cfg["training"]["seed"]
+    save = cfg["training"]["save"]
 
-    run_dir = RUNS_PATH / dataset / args.tag
-    trainer = Trainer(config, run_dir, seed=seed, save=args.save)
+    job_name = HydraConfig.get().job.name
+    job_id = HydraConfig.get().job.num
+    tag = f"{dataset}_{job_name}_{job_id}"
+
+    if cfg["training"].get("cont", False):
+        cfg["training"]["resume"] = tag
+
+    run_dir = RUNS_PATH / dataset / tag
+    run_dir = str(run_dir)
+
+    trainer = Trainer(cfg, run_dir, seed=seed, save=save)
     trainer.run(seed=seed)
+
+
+if __name__ == "__main__":
+    main()

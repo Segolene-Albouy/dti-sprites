@@ -28,77 +28,163 @@ from abc import ABC, abstractmethod
 class AbstractTrainer(ABC):
     """Abstract base class for all Trainer implementations."""
 
+    run_dir = None
+    logger = None
+    save_img = False
+    device = None
+
+    # Dataset attributes
+    dataset_kwargs = None
+    dataset_name = None
+    n_classes = None
+    is_val_empty = None
+    img_size = None
+
+    # Data loaders
+    batch_size = None
+    n_workers = None
+    train_loader = None
+    val_loader = None
+    n_batches = None
+
+    # Training parameters
+    n_iterations = None
+    n_epochs = None
+    start_epoch = None
+    start_batch = None
+
+    # Model configuration
+    model_kwargs = None
+    model_name = None
+    is_gmm = None
+    model = None
+    n_prototypes = None
+
+    # Optimizer and scheduler
+    optimizer = None
+    scheduler = None
+    cur_lr = None
+    scheduler_update_range = None
+
+    # Metrics and logging
+    train_stat_interval = None
+    train_metrics = None
+    train_metrics_path = None
+    val_stat_interval = None
+    val_metrics = None
+    val_metrics_path = None
+    val_scores = None
+    val_scores_path = None
+
+    # Cluster checking
+    check_cluster_interval = None
+
+    # Visualization
+    visualizer = None
+
+    # Image transformation
+    images_to_tsf = None
+    prototypes_path = None
+    transformation_path = None
+
+    # Evaluation modes
+    seg_eval = None
+    instance_eval = None
+
+    interpolate_settings = {'mode': 'bilinear'}
+
     def __init__(self, *args, **kwargs):
-        self.run_dir = None
-        self.logger = None
-
-        # Device configuration
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        nb_device = torch.cuda.device_count() if self.device.type == "cuda" else 0
-        self.print_and_log_info(
-            f"Using {self.device} device, nb_device is {nb_device}"
-        )
+        self.print_device_info()
 
-        # Dataset attributes
-        self.dataset_kwargs = None
-        self.dataset_name = None
-        self.n_classes = None
-        self.is_val_empty = None
-        self.img_size = None
+        self.setup_directories(*args, **kwargs)
+        self.setup_logging()
+        self.setup_config(*args, **kwargs)
 
-        # Data loaders
-        self.batch_size = None
-        self.n_workers = None
-        self.train_loader = None
-        self.val_loader = None
-        self.n_batches = None
+        self.setup_dataset(*args, **kwargs)
+        self.setup_dataloaders()
 
-        # Training parameters
-        self.n_iterations = None
-        self.n_epochs = None
-        self.start_epoch = None
-        self.start_batch = None
+        self.setup_model(*args, **kwargs)
 
-        # Model configuration
-        self.model_kwargs = None
-        self.model_name = None
-        self.is_gmm = None
-        self.model = None
-        self.n_prototypes = None
+        self.setup_optimizer(*args, **kwargs)
+        self.setup_scheduler(*args, **kwargs)
 
-        # Optimizer and scheduler
-        self.optimizer = None
-        self.scheduler = None
-        self.cur_lr = None
-        self.scheduler_update_range = None
+        self.setup_checkpoint_loading(*args, **kwargs)
+        self.setup_metrics(*args, **kwargs)
 
-        # Metrics and logging
-        self.train_stat_interval = None
-        self.train_metrics = None
-        self.train_metrics_path = None
-        self.val_stat_interval = None
-        self.val_metrics = None
-        self.val_metrics_path = None
-        self.val_scores = None
-        self.val_scores_path = None
+        self.setup_visualization_artifacts(*args, **kwargs)
+        self.setup_visualizer(*args, **kwargs)
 
-        # Cluster checking
-        self.check_cluster_interval = None
+        self.setup_additional_components(*args, **kwargs)
 
-        # Visualization
-        self.visualizer = None
-        self.save_img = None
+    ######################
+    #   SETUP METHODS    #
+    ######################
 
-        # Image transformation
-        self.images_to_tsf = None
-        self.prototypes_path = None
-        self.transformation_path = None
+    @abstractmethod
+    def setup_directories(self, *args, **kwargs):
+        """Set up necessary directories for saving results and artifacts."""
+        raise NotImplementedError
 
-        # Evaluation modes
-        self.seg_eval = None
-        self.instance_eval = None
+    @abstractmethod
+    def setup_logging(self):
+        """Set up logging configuration."""
+        raise NotImplementedError
 
-        self.interpolate_settings = {'mode': 'bilinear'}
+    @abstractmethod
+    def setup_config(self, *args, **kwargs):
+        """Load and process configuration."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def setup_dataset(self, *args, **kwargs):
+        """Set up dataset parameters and load dataset."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def setup_dataloaders(self):
+        """Create data loaders from datasets."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def setup_model(self, *args, **kwargs):
+        """Initialize model architecture."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def setup_optimizer(self, *args, **kwargs):
+        """Configure optimizer for training."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def setup_scheduler(self, *args, **kwargs):
+        """Configure learning rate scheduler."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def setup_checkpoint_loading(self, *args, **kwargs):
+        """Handle loading from pretrained models or resuming training."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def setup_metrics(self, *args, **kwargs):
+        """Initialize metrics for training and evaluation."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def setup_visualization_artifacts(self, *args, **kwargs):
+        """Set up directories and templates for saving visualizations."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def setup_visualizer(self, *args, **kwargs):
+        """Set up real-time visualization (e.g., Visdom)."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def setup_additional_components(self, *args, **kwargs):
+        """Set up any additional trainer-specific components."""
+        raise NotImplementedError
 
     ######################
     #    MAIN METHODS    #
@@ -401,6 +487,13 @@ class AbstractTrainer(ABC):
 
     def get_transformation_nrow(self, tsf_imgs):
         return self.n_prototypes + 1
+
+    def print_device_info(self):
+        """Print information about the device configuration."""
+        nb_device = torch.cuda.device_count() if self.device.type == "cuda" else None
+        self.print_and_log_info(
+            f"Using {self.device.type} device, nb_device is {nb_device}"
+        )
 
     @torch.no_grad()
     def log_images(self, cur_iter):

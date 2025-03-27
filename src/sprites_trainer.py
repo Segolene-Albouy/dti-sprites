@@ -1,13 +1,12 @@
-import argparse
-import traceback
 import sys
-
 import os
 import shutil
+import datetime
+import time
+import argparse
+import traceback
 
 import seaborn as sns
-import time
-
 import numpy as np
 import pandas as pd
 
@@ -45,8 +44,7 @@ from .utils.metrics import (
     SegmentationScores,
     InstanceSegScores,
 )
-from .utils.path import CONFIGS_PATH, RUNS_PATH
-from .utils.plot import plot_bar, plot_lines
+from .utils.path import RUNS_PATH
 from .utils.consts import *
 
 from PIL import ImageDraw
@@ -65,11 +63,6 @@ class Trainer(AbstractTrainer):
         self.print_and_log_info(
             "Trainer initialisation: run directory is {}".format(run_dir)
         )
-
-        self.interpolate_settings = {
-            'mode': 'bilinear',
-            'align_corners': False
-        }
 
         self.save_img = save
         OmegaConf.save(cfg, self.run_dir / "config.yaml")
@@ -342,6 +335,70 @@ class Trainer(AbstractTrainer):
         else:
             self.visualizer = None
             self.print_and_log_info("No visualizer initialized")
+
+        self.interpolate_settings = {
+            'mode': 'bilinear',
+            'align_corners': False
+        }
+
+    ######################
+    #   SETUP METHODS    #
+    ######################
+
+    def setup_directories(self, *args, **kwargs):
+        """Set up necessary directories for saving results and artifacts."""
+        pass
+
+    def setup_logging(self):
+        """Set up logging configuration."""
+        pass
+
+    def setup_config(self, *args, **kwargs):
+        """Load and process configuration."""
+        pass
+
+    def setup_dataset(self, *args, **kwargs):
+        """Set up dataset parameters and load dataset."""
+        pass
+
+    def setup_dataloaders(self):
+        """Create data loaders from datasets."""
+        pass
+
+    def setup_model(self, *args, **kwargs):
+        """Initialize model architecture."""
+        pass
+
+    def setup_optimizer(self, *args, **kwargs):
+        """Configure optimizer for training."""
+        pass
+
+    def setup_scheduler(self, *args, **kwargs):
+        """Configure learning rate scheduler."""
+        pass
+
+    def setup_checkpoint_loading(self, *args, **kwargs):
+        """Handle loading from pretrained models or resuming training."""
+        pass
+
+    def setup_metrics(self, *args, **kwargs):
+        """Initialize metrics for training and evaluation."""
+        pass
+
+    @abstractmethod
+    def setup_visualization_artifacts(self, *args, **kwargs):
+        """Set up directories and templates for saving visualizations."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def setup_visualizer(self, *args, **kwargs):
+        """Set up real-time visualization (e.g., Visdom)."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def setup_additional_components(self, *args, **kwargs):
+        """Set up any additional trainer-specific components."""
+        raise NotImplementedError
 
     ######################
     #    MAIN METHODS    #
@@ -1418,9 +1475,6 @@ class Trainer(AbstractTrainer):
         if hasattr(self, 'seg_eval') and self.seg_eval:
             return "iou"
         return "acc"
-
-
-import datetime
 
 
 @hydra.main(version_base=None, config_path="../conf", config_name="config")
