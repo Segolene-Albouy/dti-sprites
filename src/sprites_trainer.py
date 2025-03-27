@@ -36,7 +36,7 @@ from .utils import (
     coerce_to_path_and_create_dir,
 )
 from .utils.image import convert_to_img, save_gif
-from .utils.logger import get_logger, print_warning
+from .utils.logger import get_logger, print_info, print_warning
 from .utils.metrics import (
     AverageTensorMeter,
     AverageMeter,
@@ -49,7 +49,8 @@ from .utils.path import CONFIGS_PATH, RUNS_PATH
 from .utils.plot import plot_bar, plot_lines
 from .utils.consts import *
 
-from PIL import Image, ImageFont, ImageDraw
+from PIL import ImageDraw
+
 from fvcore.nn import FlopCountAnalysis
 
 
@@ -71,9 +72,8 @@ class Trainer(AbstractTrainer):
         }
 
         self.save_img = save
-        OmegaConf.save(cfg, self.run_dir/"config.yaml")
+        OmegaConf.save(cfg, self.run_dir / "config.yaml")
         self.print_and_log_info("Current config copied to run directory")
-
 
         # Datasets and dataloaders
         self.dataset_kwargs = cfg["dataset"]
@@ -133,8 +133,8 @@ class Trainer(AbstractTrainer):
         self.model_name = self.model_kwargs["name"]
         self.is_gmm = "gmm" in self.model_name
         self.model = get_model(self.model_name)(self.n_epochs,
-            self.train_loader.dataset, **self.model_kwargs
-        ).to(self.device)
+                                                self.train_loader.dataset, **self.model_kwargs
+                                                ).to(self.device)
         self.print_and_log_info(
             "Using model {} with kwargs {}".format(self.model_name, self.model_kwargs)
         )
@@ -152,12 +152,13 @@ class Trainer(AbstractTrainer):
         if self.pred_class:
             self.n_clusters = self.n_prototypes * self.n_objects
         else:
-            self.n_clusters = self.n_prototypes**self.n_objects * max(
+            self.n_clusters = self.n_prototypes ** self.n_objects * max(
                 self.n_backgrounds, 1
             )
         self.learn_masks = getattr(self.model, "learn_masks", False)
         self.learn_backgrounds = getattr(self.model, "learn_backgrounds", False)
         self.learn_proba = getattr(self.model, "proba", False)
+
         # Optimizer
         opt_params = cfg["training"]["optimizer"] or {}
         optimizer_name = cfg["training"]["optimizer_name"]
@@ -179,11 +180,11 @@ class Trainer(AbstractTrainer):
 
         # Scheduler
         scheduler_params = cfg["training"].get("scheduler", {})
-        scheduler_name = cfg["training"].get("scheduler_name", {}) 
+        scheduler_name = cfg["training"].get("scheduler_name", {})
         self.scheduler_update_range = scheduler_params.get("update_range", "epoch")
         assert self.scheduler_update_range in ["epoch", "batch"]
         if scheduler_name == "multi_step" and isinstance(
-            scheduler_params["milestones"][0], float
+                scheduler_params["milestones"][0], float
         ):
             n_tot = (
                 self.n_epochs
@@ -305,8 +306,8 @@ class Trainer(AbstractTrainer):
                 self.run_dir / "transformations"
             )
             self.images_to_tsf = next(iter(self.train_loader))[0][
-                :N_TRANSFORMATION_PREDICTIONS
-            ].to(self.device)
+                                 :N_TRANSFORMATION_PREDICTIONS
+                                 ].to(self.device)
             for k in range(self.images_to_tsf.size(0)):
                 out = coerce_to_path_and_create_dir(
                     self.transformation_path / f"img{k}"
@@ -341,6 +342,10 @@ class Trainer(AbstractTrainer):
         else:
             self.visualizer = None
             self.print_and_log_info("No visualizer initialized")
+
+    ######################
+    #    MAIN METHODS    #
+    ######################
 
     def load_from_tag(self, tag, resume=False):
         self.print_and_log_info("Loading model from run {}".format(tag))
@@ -385,7 +390,7 @@ class Trainer(AbstractTrainer):
         for epoch in range(self.start_epoch, self.n_epochs + 1):
             batch_start = self.start_batch if epoch == self.start_epoch else 1
             for batch, (images, _, img_masks, _) in enumerate(
-                self.train_loader, start=1
+                    self.train_loader, start=1
             ):
                 if batch < batch_start:
                     continue
@@ -439,7 +444,7 @@ class Trainer(AbstractTrainer):
         self.optimizer.step()
 
         with torch.no_grad():
-            if self.learn_proba: 
+            if self.learn_proba:
                 class_oh = torch.zeros(class_prob.shape, device=class_prob.device).scatter_(
                     1, class_prob.argmax(1, keepdim=True), 1
                 )
@@ -468,54 +473,9 @@ class Trainer(AbstractTrainer):
             {f"prop_clus{i}": p.item() for i, p in enumerate(proportions)}
         )
 
-    @torch.no_grad()
-    def log_images(self, cur_iter):
-        self.model.eval()
-        self.save_prototypes(cur_iter)
-        self.update_visualizer_images(self.model.prototypes, "prototypes", nrow=5)
-        if self.learn_masks:
-            self.save_masked_prototypes(cur_iter)
-            self.update_visualizer_images(
-                self.model.prototypes * self.model.masks, "masked_prototypes", nrow=5
-            )
-            self.save_masks(cur_iter)
-            self.update_visualizer_images(self.model.masks, "masks", nrow=5)
-        if self.learn_backgrounds:
-            self.save_backgrounds(cur_iter)
-            self.update_visualizer_images(self.model.backgrounds, "backgrounds", nrow=5)
-
-        # Transformations
-        tsf_imgs, compositions = self.save_transformed_images(cur_iter)
-        C, H, W = tsf_imgs.shape[2:]
-        self.update_visualizer_images(
-            tsf_imgs.reshape(-1, C, H, W), "transformations", nrow=tsf_imgs.size(1)
-        )
-
-        # Compositions
-        if len(compositions) > 0:
-            k = 0
-            for imgs, name in zip(compositions[:2], ["frg_tsf", "mask_tsf"]):
-                self.update_visualizer_images(
-                    imgs.view(-1, imgs.size(2), H, W), name, nrow=self.n_prototypes + 1
-                )
-                k += 1
-            if self.learn_backgrounds:
-                imgs = compositions[k]
-                self.update_visualizer_images(
-                    imgs.view(-1, imgs.size(2), H, W),
-                    "bkg_tsf",
-                    nrow=self.n_backgrounds + 1,
-                )
-                k += 1
-            if self.n_objects > 1:
-                for name in ["frg_tsf_aux", "mask_tsf_aux"]:
-                    imgs = compositions[k]
-                    self.update_visualizer_images(
-                        imgs.view(-1, imgs.size(2), H, W),
-                        name,
-                        nrow=self.n_prototypes + 1,
-                    )
-                    k += 1
+    ######################
+    #   SAVING METHODS   #
+    ######################
 
     @torch.no_grad()
     def save_masked_prototypes(self, cur_iter=None):
@@ -584,184 +544,6 @@ class Trainer(AbstractTrainer):
 
         return transformed_imgs, compositions
 
-    def check_cluster(self, cur_iter, epoch, batch):
-        if hasattr(self.model, "_diff_selections") and self.visualizer is not None:
-            diff = self.model._diff_selections
-            x, y = [[cur_iter] * len(diff[0])], [diff[1]]
-            self.visualizer.line(
-                y,
-                x,
-                win="diff selection",
-                update="append",
-                opts=dict(
-                    title="diff selection",
-                    legend=diff[0],
-                    width=VIZ_WIDTH,
-                    height=VIZ_HEIGHT,
-                ),
-            )
-
-        proportions = torch.Tensor(
-            [self.train_metrics[f"prop_clus{i}"].avg for i in range(self.n_clusters)]
-        )
-        if self.n_backgrounds > 1:
-            proportions = proportions.view(self.n_prototypes, self.n_backgrounds)
-            for axis, is_bkg in zip([1, 0], [False, True]):
-                prop = proportions.sum(axis)
-                reassigned, idx = self.model.reassign_empty_clusters(
-                    prop, is_background=is_bkg
-                )
-                msg = PRINT_CHECK_CLUSTERS_FMT(
-                    epoch, self.n_epochs, batch, self.n_batches, reassigned, idx
-                )
-                if is_bkg:
-                    msg += " for backgrounds"
-                self.print_and_log_info(msg)
-                self.print_and_log_info(
-                    ", ".join(
-                        ["prop_{}={:.4f}".format(k, prop[k]) for k in range(len(prop))]
-                    )
-                )
-        elif self.n_objects > 1:
-            k = np.random.randint(0, self.n_objects)
-            if self.n_clusters == self.n_prototypes**self.n_objects:
-                prop = (
-                    proportions.view((self.n_prototypes,) * self.n_objects)
-                    .transpose(0, k)
-                    .flatten(1)
-                    .sum(1)
-                )
-            else:
-                prop = proportions.view(self.n_objects, self.n_prototypes)[k]
-            reassigned, idx = self.model.reassign_empty_clusters(prop)
-            msg = PRINT_CHECK_CLUSTERS_FMT(
-                epoch, self.n_epochs, batch, self.n_batches, reassigned, idx
-            )
-            msg += f" for object layer {k}"
-            self.print_and_log_info(msg)
-            self.print_and_log_info(
-                ", ".join(
-                    ["prop_{}={:.4f}".format(k, prop[k]) for k in range(len(prop))]
-                )
-            )
-        else:
-            reassigned, idx = self.model.reassign_empty_clusters(proportions)
-            msg = PRINT_CHECK_CLUSTERS_FMT(
-                epoch, self.n_epochs, batch, self.n_batches, reassigned, idx
-            )
-            self.print_and_log_info(msg)
-        self.train_metrics.reset(*[f"prop_clus{i}" for i in range(self.n_clusters)])
-
-    def win_loss(self, split):
-        return f"{split}_losses"
-
-    def get_n_clusters(self):
-        """Limit number of clusters displayed in visualization."""
-        return self.n_clusters if self.n_clusters <= 40 else 2 * self.n_prototypes
-
-    def should_visualize_cls_scores(self):
-        """Only show class scores if not instance evaluation."""
-        return not self.instance_eval
-
-    def cls_score_name(self):
-        """Use IOU for segmentation or ACC otherwise."""
-        return "iou" if self.seg_eval else "acc"
-
-    @torch.no_grad()
-    def run_val(self):
-        self.model.eval()
-        for images, labels, _, _ in self.val_loader:
-            B, C, H, W = images.shape
-            images = images.to(self.device)
-            loss_val, distances, class_prob = self.model(images)
-
-            if not self.pred_class:  # clustering
-                if self.n_backgrounds > 1:
-                    assert class_prob is None
-                    distances, bkg_idx = distances.view(
-                        B, self.n_prototypes, self.n_backgrounds
-                    ).min(2)
-                if self.n_objects > 1:
-                    assert class_prob is None
-                    distances = distances.view(
-                        B, *(self.n_prototypes,) * self.n_objects
-                    )
-                    other_idxs = []
-                    for k in range(self.n_objects, 1, -1):
-                        distances, idx = distances.min(k)
-                        other_idxs.insert(0, idx)
-                if self.learn_proba:
-                    class_oh = class_prob.permute(2, 0, 1).flatten(1)
-                    argmin_idx = class_oh.argmax(1)
-                else:
-                    argmin_idx = distances.argmin(1)
-
-            self.val_metrics.update({"loss_val": loss_val[0].item()})
-            if self.seg_eval:  # we account for probabilities within model.transform
-                if self.n_objects == 1:
-                    masks = self.model.transform(images, with_composition=True)[1][1]
-                    masks = masks[torch.arange(B), argmin_idx]
-                    self.val_scores.update(
-                        labels.long().numpy(), (masks > 0.5).long().cpu().numpy()
-                    )
-                else:
-                    target = self.model.transform(
-                        images, pred_semantic_labels=True
-                    ).cpu()
-                    if not self.pred_class:
-                        target = target.view(
-                            B, *(self.n_prototypes,) * self.n_objects, H, W
-                        )
-                        real_idxs = []
-                        for idx in [argmin_idx] + other_idxs:
-                            for i in real_idxs:
-                                idx = idx[torch.arange(B), i]
-                            real_idxs.insert(0, idx)
-                            target = target[torch.arange(B), idx]
-                    self.val_scores.update(
-                        labels.long().numpy(), target.long().cpu().numpy()
-                    )
-
-            elif (
-                self.instance_eval
-            ):  # we account for probabilities within model.transform
-                if self.n_objects == 1:
-                    masks = self.model.transform(images, with_composition=True)[1][1]
-                    self.val_scores.update(
-                        labels.long().numpy(), (masks > 0.5).long().cpu().numpy()
-                    )
-                else:
-                    target = self.model.transform(
-                        images, pred_instance_labels=True, with_bkg=self.eval_with_bkg
-                    ).cpu()
-                    if not self.pred_class:
-                        target = target.view(
-                            B,
-                            *(self.n_prototypes,) * self.n_objects,
-                            images.size(2),
-                            images.size(3),
-                        )
-                        real_idxs = []
-                        for idx in [argmin_idx] + other_idxs:
-                            for i in real_idxs:
-                                idx = idx[torch.arange(B), i]
-                            real_idxs.insert(0, idx)
-                            target = target[torch.arange(B), idx]
-                        if not self.eval_with_bkg:
-                            bkg_idx = target == 0
-                            tsf_layers = self.model.predict(images)[0]
-                            new_target = ((tsf_layers - images) ** 2).sum(3).min(1)[
-                                0
-                            ].argmin(0).long() + 1
-                            target[bkg_idx] = new_target[bkg_idx]
-
-                    self.val_scores.update(labels.long().numpy(), target.long().numpy())
-
-            else:
-                assert self.n_objects == 1
-                self.val_scores.update(labels.long().numpy(), argmin_idx.cpu().numpy())
-
-
     def save_metric_plots(self):
         self.model.eval()
         # Prototypes & transformation predictions
@@ -791,8 +573,8 @@ class Trainer(AbstractTrainer):
         # Cluster proportions
         N = self.n_clusters if self.n_clusters <= 40 else 2 * self.n_prototypes
         names = list(filter(lambda s: s.startswith("prop_"), self.train_metrics.names))[
-            :N
-        ]
+                :N
+                ]
         fig = plot_lines(df, names, title="Cluster proportions")
         fig.savefig(self.run_dir / "cluster_proportions.pdf")
         s = df[names].iloc[-1]
@@ -880,8 +662,231 @@ class Trainer(AbstractTrainer):
                         )
         self.print_and_log_info("Metrics and plots saved")
 
+    ######################
+    #   LOGGING METHODS  #
+    ######################
+
+    @torch.no_grad()
+    def log_images(self, cur_iter):
+        self.model.eval()
+        self.save_prototypes(cur_iter)
+        self.update_visualizer_images(self.model.prototypes, "prototypes", nrow=5)
+        if self.learn_masks:
+            self.save_masked_prototypes(cur_iter)
+            self.update_visualizer_images(
+                self.model.prototypes * self.model.masks, "masked_prototypes", nrow=5
+            )
+            self.save_masks(cur_iter)
+            self.update_visualizer_images(self.model.masks, "masks", nrow=5)
+        if self.learn_backgrounds:
+            self.save_backgrounds(cur_iter)
+            self.update_visualizer_images(self.model.backgrounds, "backgrounds", nrow=5)
+
+        # Transformations
+        tsf_imgs, compositions = self.save_transformed_images(cur_iter)
+        C, H, W = tsf_imgs.shape[2:]
+        self.update_visualizer_images(
+            tsf_imgs.reshape(-1, C, H, W), "transformations", nrow=tsf_imgs.size(1)
+        )
+
+        # Compositions
+        if len(compositions) > 0:
+            k = 0
+            for imgs, name in zip(compositions[:2], ["frg_tsf", "mask_tsf"]):
+                self.update_visualizer_images(
+                    imgs.view(-1, imgs.size(2), H, W), name, nrow=self.n_prototypes + 1
+                )
+                k += 1
+            if self.learn_backgrounds:
+                imgs = compositions[k]
+                self.update_visualizer_images(
+                    imgs.view(-1, imgs.size(2), H, W),
+                    "bkg_tsf",
+                    nrow=self.n_backgrounds + 1,
+                )
+                k += 1
+            if self.n_objects > 1:
+                for name in ["frg_tsf_aux", "mask_tsf_aux"]:
+                    imgs = compositions[k]
+                    self.update_visualizer_images(
+                        imgs.view(-1, imgs.size(2), H, W),
+                        name,
+                        nrow=self.n_prototypes + 1,
+                    )
+                    k += 1
+
+    ######################
+    # VALIDATION METHODS #
+    ######################
+
+    def check_cluster(self, cur_iter, epoch, batch):
+        if hasattr(self.model, "_diff_selections") and self.visualizer is not None:
+            diff = self.model._diff_selections
+            x, y = [[cur_iter] * len(diff[0])], [diff[1]]
+            self.visualizer.line(
+                y,
+                x,
+                win="diff selection",
+                update="append",
+                opts=dict(
+                    title="diff selection",
+                    legend=diff[0],
+                    width=VIZ_WIDTH,
+                    height=VIZ_HEIGHT,
+                ),
+            )
+
+        proportions = torch.Tensor(
+            [self.train_metrics[f"prop_clus{i}"].avg for i in range(self.n_clusters)]
+        )
+        if self.n_backgrounds > 1:
+            proportions = proportions.view(self.n_prototypes, self.n_backgrounds)
+            for axis, is_bkg in zip([1, 0], [False, True]):
+                prop = proportions.sum(axis)
+                reassigned, idx = self.model.reassign_empty_clusters(
+                    prop, is_background=is_bkg
+                )
+                msg = PRINT_CHECK_CLUSTERS_FMT(
+                    epoch, self.n_epochs, batch, self.n_batches, reassigned, idx
+                )
+                if is_bkg:
+                    msg += " for backgrounds"
+                self.print_and_log_info(msg)
+                self.print_and_log_info(
+                    ", ".join(
+                        ["prop_{}={:.4f}".format(k, prop[k]) for k in range(len(prop))]
+                    )
+                )
+        elif self.n_objects > 1:
+            k = np.random.randint(0, self.n_objects)
+            if self.n_clusters == self.n_prototypes ** self.n_objects:
+                prop = (
+                    proportions.view((self.n_prototypes,) * self.n_objects)
+                    .transpose(0, k)
+                    .flatten(1)
+                    .sum(1)
+                )
+            else:
+                prop = proportions.view(self.n_objects, self.n_prototypes)[k]
+            reassigned, idx = self.model.reassign_empty_clusters(prop)
+            msg = PRINT_CHECK_CLUSTERS_FMT(
+                epoch, self.n_epochs, batch, self.n_batches, reassigned, idx
+            )
+            msg += f" for object layer {k}"
+            self.print_and_log_info(msg)
+            self.print_and_log_info(
+                ", ".join(
+                    ["prop_{}={:.4f}".format(k, prop[k]) for k in range(len(prop))]
+                )
+            )
+        else:
+            reassigned, idx = self.model.reassign_empty_clusters(proportions)
+            msg = PRINT_CHECK_CLUSTERS_FMT(
+                epoch, self.n_epochs, batch, self.n_batches, reassigned, idx
+            )
+            self.print_and_log_info(msg)
+        self.train_metrics.reset(*[f"prop_clus{i}" for i in range(self.n_clusters)])
+
+    @torch.no_grad()
+    def run_val(self):
+        self.model.eval()
+        for images, labels, _, _ in self.val_loader:
+            B, C, H, W = images.shape
+            images = images.to(self.device)
+            loss_val, distances, class_prob = self.model(images)
+
+            if not self.pred_class:  # clustering
+                if self.n_backgrounds > 1:
+                    assert class_prob is None
+                    distances, bkg_idx = distances.view(
+                        B, self.n_prototypes, self.n_backgrounds
+                    ).min(2)
+                if self.n_objects > 1:
+                    assert class_prob is None
+                    distances = distances.view(
+                        B, *(self.n_prototypes,) * self.n_objects
+                    )
+                    other_idxs = []
+                    for k in range(self.n_objects, 1, -1):
+                        distances, idx = distances.min(k)
+                        other_idxs.insert(0, idx)
+                if self.learn_proba:
+                    class_oh = class_prob.permute(2, 0, 1).flatten(1)
+                    argmin_idx = class_oh.argmax(1)
+                else:
+                    argmin_idx = distances.argmin(1)
+
+            self.val_metrics.update({"loss_val": loss_val[0].item()})
+            if self.seg_eval:  # we account for probabilities within model.transform
+                if self.n_objects == 1:
+                    masks = self.model.transform(images, with_composition=True)[1][1]
+                    masks = masks[torch.arange(B), argmin_idx]
+                    self.val_scores.update(
+                        labels.long().numpy(), (masks > 0.5).long().cpu().numpy()
+                    )
+                else:
+                    target = self.model.transform(
+                        images, pred_semantic_labels=True
+                    ).cpu()
+                    if not self.pred_class:
+                        target = target.view(
+                            B, *(self.n_prototypes,) * self.n_objects, H, W
+                        )
+                        real_idxs = []
+                        for idx in [argmin_idx] + other_idxs:
+                            for i in real_idxs:
+                                idx = idx[torch.arange(B), i]
+                            real_idxs.insert(0, idx)
+                            target = target[torch.arange(B), idx]
+                    self.val_scores.update(
+                        labels.long().numpy(), target.long().cpu().numpy()
+                    )
+
+            elif (
+                    self.instance_eval
+            ):  # we account for probabilities within model.transform
+                if self.n_objects == 1:
+                    masks = self.model.transform(images, with_composition=True)[1][1]
+                    self.val_scores.update(
+                        labels.long().numpy(), (masks > 0.5).long().cpu().numpy()
+                    )
+                else:
+                    target = self.model.transform(
+                        images, pred_instance_labels=True, with_bkg=self.eval_with_bkg
+                    ).cpu()
+                    if not self.pred_class:
+                        target = target.view(
+                            B,
+                            *(self.n_prototypes,) * self.n_objects,
+                            images.size(2),
+                            images.size(3),
+                        )
+                        real_idxs = []
+                        for idx in [argmin_idx] + other_idxs:
+                            for i in real_idxs:
+                                idx = idx[torch.arange(B), i]
+                            real_idxs.insert(0, idx)
+                            target = target[torch.arange(B), idx]
+                        if not self.eval_with_bkg:
+                            bkg_idx = target == 0
+                            tsf_layers = self.model.predict(images)[0]
+                            new_target = ((tsf_layers - images) ** 2).sum(3).min(1)[
+                                             0
+                                         ].argmin(0).long() + 1
+                            target[bkg_idx] = new_target[bkg_idx]
+
+                    self.val_scores.update(labels.long().numpy(), target.long().numpy())
+
+            else:
+                assert self.n_objects == 1
+                self.val_scores.update(labels.long().numpy(), argmin_idx.cpu().numpy())
+
+    ######################
+    # EVALUATION METHODS #
+    ######################
+
     def evaluate(self):
-        print("TAU:",self.model.tau)
+        print("TAU:", self.model.tau)
         self.model.eval()
         label = self.train_loader.dataset[0][1]
         empty_label = isinstance(label, (int, np.integer)) and label == -1
@@ -898,7 +903,7 @@ class Trainer(AbstractTrainer):
                 self.segmentation_quantitative_eval()
                 self.segmentation_qualitative_eval()
             elif (
-                self.instance_eval and self.learn_masks
+                    self.instance_eval and self.learn_masks
             ):  # NOTE: evaluate either semantic or instance
                 self.print_and_log_info("Instance segmentation evaluation")
                 self.instance_seg_quantitative_eval()
@@ -1139,28 +1144,29 @@ class Trainer(AbstractTrainer):
             images, _, _, _ = next(iterator)
             images = images.to(self.device)
             if self.pred_class:
-                recons, composition, class_prob = self.model.transform(images, hard_occ_grid=False, with_composition=True)
+                recons, composition, class_prob = self.model.transform(images, hard_occ_grid=False,
+                                                                       with_composition=True)
                 class_prob = class_prob.permute(2, 0, 1)
                 if len(composition) % 2 != 0:
                     print("Omitting background from compositions")
                     composition = composition[:2] + composition[3:]
-                n_layers = int(len(composition)/2)
+                n_layers = int(len(composition) / 2)
                 for b in range(B):
                     for l in range(0, n_layers):
-                        tsf_layers, tsf_masks = composition[l*2], composition[l*2+1]
+                        tsf_layers, tsf_masks = composition[l * 2], composition[l * 2 + 1]
                         _, K, _, _, _ = tsf_layers.shape
                         for k in range(K):
                             name = f"image_{b}_layer_{l}_sprite_{k}"
                             convert_to_img(tsf_layers[b, k, ...]).save(out / f"frg_rec_{name}.png")
                             weight = class_prob[b, l, k].item()
-                            img_temp = convert_to_img(tsf_masks[b, k, ...]*weight)
+                            img_temp = convert_to_img(tsf_masks[b, k, ...] * weight)
                             draw = ImageDraw.Draw(img_temp)
-                            draw.text((0, 0),"%.3f" % weight,(255,255,255))
+                            draw.text((0, 0), "%.3f" % weight, (255, 255, 255))
                             img_temp.save(out / f"mask_rec_{name}.png")
-                        construction = torch.sum(tsf_layers[b] * tsf_masks[b] * class_prob[b, l, :][:, None, None, None], dim=0)
+                        construction = torch.sum(
+                            tsf_layers[b] * tsf_masks[b] * class_prob[b, l, :][:, None, None, None], dim=0)
                         convert_to_img(construction).save(out / f"rec_image_{b}_layer_{l}.png")
 
-                
                 recons = recons.cpu()
                 if self.model.return_map_out:
                     (infer_seg, bboxes, class_ids) = self.model.transform(
@@ -1212,7 +1218,7 @@ class Trainer(AbstractTrainer):
 
             images = images.cpu()
             for k in range(B):
-                name = f"{k+j*B}".zfill(2)
+                name = f"{k + j * B}".zfill(2)
                 convert_to_img(images[k]).save(out / f"{name}.png")
                 convert_to_img(recons[k]).save(out / f"{name}_recons.png")
                 convert_to_img(color_seg[k]).save(out / f"{name}_seg_full.png")
@@ -1287,12 +1293,12 @@ class Trainer(AbstractTrainer):
                         bkg_idx = target == 0
                         tsf_layers = self.model.predict(images)[0]
                         new_target = (
-                            ((tsf_layers - images) ** 2)
-                            .sum(3)
-                            .min(1)[0]
-                            .argmin(0)
-                            .long()
-                            + 1
+                                ((tsf_layers - images) ** 2)
+                                .sum(3)
+                                .min(1)[0]
+                                .argmin(0)
+                                .long()
+                                + 1
                         ).cpu()
                         target[bkg_idx] = new_target[bkg_idx]
                     scores.update(labels.long().numpy(), target.long().numpy())
@@ -1368,8 +1374,8 @@ class Trainer(AbstractTrainer):
                     bkg_idx = infer_seg == 0
                     tsf_layers = self.model.predict(images)[0]
                     new_target = (
-                        ((tsf_layers - images) ** 2).sum(3).min(1)[0].argmin(0).long()
-                        + 1
+                            ((tsf_layers - images) ** 2).sum(3).min(1)[0].argmin(0).long()
+                            + 1
                     ).cpu()
                     infer_seg[bkg_idx] = new_target[bkg_idx]
 
@@ -1386,7 +1392,7 @@ class Trainer(AbstractTrainer):
 
             images = images.cpu()
             for k in range(B):
-                name = f"{k+j*B}".zfill(2)
+                name = f"{k + j * B}".zfill(2)
                 convert_to_img(images[k]).save(out / f"{name}.png")
                 convert_to_img(recons[k]).save(out / f"{name}_recons.png")
                 convert_to_img(color_seg[k]).save(out / f"{name}_seg_full.png")
@@ -1448,7 +1454,29 @@ class Trainer(AbstractTrainer):
                 + "\n"
             )
 
+    ######################
+    #  VISUALIZE METHODS #
+    ######################
+
+    def win_loss(self, split):
+        return f"{split}_losses"
+
+    def get_n_clusters(self):
+        """Limit number of clusters displayed in visualization."""
+        return self.n_clusters if self.n_clusters <= 40 else 2 * self.n_prototypes
+
+    def should_visualize_cls_scores(self):
+        """Only show class scores if not instance evaluation."""
+        return not self.instance_eval
+
+    def cls_score_name(self):
+        """Use IOU for segmentation or ACC otherwise."""
+        return "iou" if self.seg_eval else "acc"
+
+
 import datetime
+
+
 @hydra.main(version_base=None, config_path="../conf", config_name="config")
 def main(cfg: DictConfig) -> None:
     parser = argparse.ArgumentParser(
@@ -1479,6 +1507,7 @@ def main(cfg: DictConfig) -> None:
     except Exception:
         traceback.print_exc(file=sys.stderr)
         raise
+
 
 if __name__ == "__main__":
     main()

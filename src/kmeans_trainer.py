@@ -273,8 +273,9 @@ class Trainer(AbstractTrainer):
             self.visualizer = None
             self.print_and_log_info("No visualizer initialized")
 
-    def save_variances(self, cur_iter=None):
-        self.save_pred(cur_iter, pred_name="variance", prefix="var", n_preds=self.n_prototypes)
+    ######################
+    #    MAIN METHODS    #
+    ######################
 
     def load_from_tag(self, tag, resume=False):
         self.print_and_log_info("Loading model from run {}".format(tag))
@@ -403,24 +404,12 @@ class Trainer(AbstractTrainer):
                 {f"prop_clus{i}": p for i, p in enumerate(proportions)}
             )
 
-    @torch.no_grad()
-    def log_images(self, cur_iter):
-        self.save_prototypes(cur_iter)
-        self.update_visualizer_images(self.model.prototypes, "prototypes", nrow=5)
-        if self.is_gmm:
-            self.save_variances(cur_iter)
-            variances = self.model.variances
-            M = variances.flatten(1).max(1)[0][:, None, None, None]
-            variances = (variances - self.model.var_min) / (
-                M - self.model.var_min + 1e-7
-            )
-            self.update_visualizer_images(variances, "variances", nrow=5)
+    ######################
+    #   SAVING METHODS   #
+    ######################
 
-        tsf_imgs = self.save_transformed_images(cur_iter)
-        C, H, W = tsf_imgs.shape[2:]
-        self.update_visualizer_images(
-            tsf_imgs.view(-1, C, H, W), "transformations", nrow=self.n_prototypes + 1
-        )
+    def save_variances(self, cur_iter=None):
+        self.save_pred(cur_iter, pred_name="variance", prefix="var", n_preds=self.n_prototypes)
 
     @torch.no_grad()
     def save_transformed_images(self, cur_iter=None):
@@ -442,35 +431,6 @@ class Trainer(AbstractTrainer):
                         self.transformation_path / f"img{k}" / f"tsf{j}.png"
                     )
         return transformed_imgs
-
-    def check_cluster(self, cur_iter, epoch, batch):
-        proportions = [
-            self.train_metrics[f"prop_clus{i}"].avg for i in range(self.n_prototypes)
-        ]
-        reassigned, idx = self.model.reassign_empty_clusters(proportions)
-        msg = PRINT_CHECK_CLUSTERS_FMT(
-            epoch, self.n_epochs, batch, self.n_batches, reassigned, idx
-        )
-        self.print_and_log_info(msg)
-        self.train_metrics.reset(*[f"prop_clus{i}" for i in range(self.n_prototypes)])
-        self.train_metrics.reset(*[f"proba_clus{i}" for i in range(self.n_prototypes)])
-
-    @torch.no_grad()
-    def run_val(self):
-        self.model.eval()
-        for images, labels, _, _ in self.val_loader:
-            images = images.to(self.device)
-            if hasattr(self.model, "proba"):
-                _, out, probas = self.model(images)
-                argmin_idx = probas.argmax(1)
-                dist_min_by_sample = out[:, argmin_idx]
-            else:
-                distances = self.model(images)[1]
-                dist_min_by_sample, argmin_idx = distances.min(1)
-            loss_val = dist_min_by_sample.mean()
-
-            self.val_metrics.update({"loss_val": loss_val.item()})
-            self.val_scores.update(labels.long().numpy(), argmin_idx.cpu().numpy())
 
     def save_training_metrics(self):
         df_train = pd.read_csv(self.train_metrics_path, sep="\t", index_col=0)
@@ -552,6 +512,66 @@ class Trainer(AbstractTrainer):
                         )
 
         self.print_and_log_info("Training metrics and visuals saved")
+
+    ######################
+    #   LOGGING METHODS  #
+    ######################
+
+    @torch.no_grad()
+    def log_images(self, cur_iter):
+        self.save_prototypes(cur_iter)
+        self.update_visualizer_images(self.model.prototypes, "prototypes", nrow=5)
+        if self.is_gmm:
+            self.save_variances(cur_iter)
+            variances = self.model.variances
+            M = variances.flatten(1).max(1)[0][:, None, None, None]
+            variances = (variances - self.model.var_min) / (
+                M - self.model.var_min + 1e-7
+            )
+            self.update_visualizer_images(variances, "variances", nrow=5)
+
+        tsf_imgs = self.save_transformed_images(cur_iter)
+        C, H, W = tsf_imgs.shape[2:]
+        self.update_visualizer_images(
+            tsf_imgs.view(-1, C, H, W), "transformations", nrow=self.n_prototypes + 1
+        )
+
+    ######################
+    # VALIDATION METHODS #
+    ######################
+
+    def check_cluster(self, cur_iter, epoch, batch):
+        proportions = [
+            self.train_metrics[f"prop_clus{i}"].avg for i in range(self.n_prototypes)
+        ]
+        reassigned, idx = self.model.reassign_empty_clusters(proportions)
+        msg = PRINT_CHECK_CLUSTERS_FMT(
+            epoch, self.n_epochs, batch, self.n_batches, reassigned, idx
+        )
+        self.print_and_log_info(msg)
+        self.train_metrics.reset(*[f"prop_clus{i}" for i in range(self.n_prototypes)])
+        self.train_metrics.reset(*[f"proba_clus{i}" for i in range(self.n_prototypes)])
+
+    @torch.no_grad()
+    def run_val(self):
+        self.model.eval()
+        for images, labels, _, _ in self.val_loader:
+            images = images.to(self.device)
+            if hasattr(self.model, "proba"):
+                _, out, probas = self.model(images)
+                argmin_idx = probas.argmax(1)
+                dist_min_by_sample = out[:, argmin_idx]
+            else:
+                distances = self.model(images)[1]
+                dist_min_by_sample, argmin_idx = distances.min(1)
+            loss_val = dist_min_by_sample.mean()
+
+            self.val_metrics.update({"loss_val": loss_val.item()})
+            self.val_scores.update(labels.long().numpy(), argmin_idx.cpu().numpy())
+
+    ######################
+    # EVALUATION METHODS #
+    ######################
 
     def evaluate(self):
         self.model.eval()
