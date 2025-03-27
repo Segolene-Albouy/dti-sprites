@@ -35,7 +35,7 @@ from .utils import (
     coerce_to_path_and_create_dir,
 )
 from .utils.image import convert_to_img, save_gif
-from .utils.logger import get_logger, print_info, print_warning
+from .utils.logger import get_logger, print_warning
 from .utils.metrics import (
     AverageTensorMeter,
     AverageMeter,
@@ -56,8 +56,8 @@ class Trainer(AbstractTrainer):
     """Pipeline to train a NN model using a certain dataset, both specified by an YML config."""
 
     @use_seed()
-    def __init__(self, cfg, run_dir, save):
-        super().__init__()
+    def __init__(self, cfg, run_dir, save=False):
+        super().__init__(cfg, run_dir, save)
         self.run_dir = coerce_to_path_and_create_dir(run_dir)
         self.logger = get_logger(self.run_dir, name="trainer")
         self.print_and_log_info(
@@ -345,9 +345,45 @@ class Trainer(AbstractTrainer):
     #   SETUP METHODS    #
     ######################
 
-    def setup_directories(self, *args, **kwargs):
-        """Set up necessary directories for saving results and artifacts."""
-        pass
+    def setup_directories(self, run_dir, save=False):
+        super().setup_directories(run_dir, save)
+
+        if not self.save_img:
+            return
+
+        for k in range(self.images_to_tsf.size(0)):
+            out = self.transformation_path / f"img{k}"
+            for j in range(self.get_n_clusters()):
+                coerce_to_path_and_create_dir(out / f"tsf{j}")
+
+        if self.learn_masks:
+            self.masked_prototypes_path = coerce_to_path_and_create_dir(
+                self.run_dir / "masked_prototypes"
+            )
+            for k in range(self.n_prototypes):
+                coerce_to_path_and_create_dir(self.masked_prototypes_path / f"proto{k}")
+
+            self.masks_path = coerce_to_path_and_create_dir(self.run_dir / "masks")
+            for k in range(self.n_prototypes):
+                coerce_to_path_and_create_dir(self.masks_path / f"mask{k}")
+
+            for k in range(self.images_to_tsf.size(0)):
+                img_path = self.transformation_path / f"img{k}"
+                for j in range(self.n_prototypes):
+                    coerce_to_path_and_create_dir(img_path / f"frg_tsf{j}")
+                    coerce_to_path_and_create_dir(img_path / f"mask_tsf{j}")
+
+        if self.learn_backgrounds:
+            self.backgrounds_path = coerce_to_path_and_create_dir(
+                self.run_dir / "backgrounds"
+            )
+            for k in range(self.n_backgrounds):
+                coerce_to_path_and_create_dir(self.backgrounds_path / f"bkg{k}")
+
+            for k in range(self.images_to_tsf.size(0)):
+                img_path = self.transformation_path / f"img{k}"
+                for j in range(self.n_backgrounds):
+                    coerce_to_path_and_create_dir(img_path / f"bkg_tsf{j}")
 
     def setup_logging(self):
         """Set up logging configuration."""

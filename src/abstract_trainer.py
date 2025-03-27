@@ -93,11 +93,10 @@ class AbstractTrainer(ABC):
 
     interpolate_settings = {'mode': 'bilinear'}
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, cfg, run_dir, save=False, *args, **kwargs):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.print_device_info()
 
-        self.setup_directories(*args, **kwargs)
         self.setup_logging()
         self.setup_config(*args, **kwargs)
 
@@ -105,6 +104,7 @@ class AbstractTrainer(ABC):
         self.setup_dataloaders()
 
         self.setup_model(*args, **kwargs)
+        self.setup_directories(run_dir, save=save)
 
         self.setup_optimizer(*args, **kwargs)
         self.setup_scheduler(*args, **kwargs)
@@ -121,10 +121,23 @@ class AbstractTrainer(ABC):
     #   SETUP METHODS    #
     ######################
 
-    @abstractmethod
-    def setup_directories(self, *args, **kwargs):
-        """Set up necessary directories for saving results and artifacts."""
-        raise NotImplementedError
+    def setup_directories(self, run_dir, save=False):
+        self.run_dir = coerce_to_path_and_create_dir(run_dir)
+        self.save_img = save
+
+        if not self.save_img:
+            return
+
+        self.prototypes_path = coerce_to_path_and_create_dir(self.run_dir / "prototypes")
+        for k in range(self.n_prototypes):
+            coerce_to_path_and_create_dir(self.prototypes_path / f"proto{k}")
+
+        self.transformation_path = coerce_to_path_and_create_dir(self.run_dir / "transformations")
+        self.images_to_tsf = next(iter(self.train_loader))[0][:N_TRANSFORMATION_PREDICTIONS].to(self.device)
+
+        for k in range(self.images_to_tsf.size(0)):
+            out = coerce_to_path_and_create_dir(self.transformation_path / f"img{k}")
+            convert_to_img(self.images_to_tsf[k]).save(out / "input.png")
 
     @abstractmethod
     def setup_logging(self):
