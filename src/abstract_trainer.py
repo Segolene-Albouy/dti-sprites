@@ -2,6 +2,7 @@ import shutil
 
 import pandas as pd
 import torch
+from omegaconf import OmegaConf
 
 from .utils import coerce_to_path_and_create_dir
 from .utils.plot import plot_lines, plot_bar
@@ -12,7 +13,7 @@ except ModuleNotFoundError:
     pass
 
 from .utils.image import convert_to_img, save_gif
-from .utils.logger import print_info
+from .utils.logger import print_info, get_logger
 from .utils.consts import *
 
 PRINT_TRAIN_STAT_FMT = "Epoch [{}/{}], Iter [{}/{}], train_metrics: {}".format
@@ -97,8 +98,11 @@ class AbstractTrainer(ABC):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.print_device_info()
 
+        self.run_dir = coerce_to_path_and_create_dir(run_dir)
+        self.save_img = save
+
         self.setup_logging()
-        self.setup_config(*args, **kwargs)
+        self.setup_config(cfg)
 
         self.setup_dataset(*args, **kwargs)
         self.setup_dataloaders()
@@ -121,33 +125,16 @@ class AbstractTrainer(ABC):
     #   SETUP METHODS    #
     ######################
 
-    def setup_directories(self, run_dir, save=False):
-        self.run_dir = coerce_to_path_and_create_dir(run_dir)
-        self.save_img = save
-
-        if not self.save_img:
-            return
-
-        self.prototypes_path = coerce_to_path_and_create_dir(self.run_dir / "prototypes")
-        for k in range(self.n_prototypes):
-            coerce_to_path_and_create_dir(self.prototypes_path / f"proto{k}")
-
-        self.transformation_path = coerce_to_path_and_create_dir(self.run_dir / "transformations")
-        self.images_to_tsf = next(iter(self.train_loader))[0][:N_TRANSFORMATION_PREDICTIONS].to(self.device)
-
-        for k in range(self.images_to_tsf.size(0)):
-            out = coerce_to_path_and_create_dir(self.transformation_path / f"img{k}")
-            convert_to_img(self.images_to_tsf[k]).save(out / "input.png")
-
-    @abstractmethod
     def setup_logging(self):
-        """Set up logging configuration."""
-        raise NotImplementedError
+        self.logger = get_logger(self.run_dir, name="trainer")
+        self.print_and_log_info(
+            f"Trainer initialisation: run directory is {self.run_dir}"
+        )
 
-    @abstractmethod
-    def setup_config(self, *args, **kwargs):
+    def setup_config(self, cfg, *args, **kwargs):
         """Load and process configuration."""
-        raise NotImplementedError
+        OmegaConf.save(cfg, self.run_dir / "config.yaml")
+        self.print_and_log_info(f"Current config saved to {self.run_dir}")
 
     @abstractmethod
     def setup_dataset(self, *args, **kwargs):
@@ -163,6 +150,21 @@ class AbstractTrainer(ABC):
     def setup_model(self, *args, **kwargs):
         """Initialize model architecture."""
         raise NotImplementedError
+
+    def setup_directories(self, run_dir, save=False):
+        if not self.save_img:
+            return
+
+        self.prototypes_path = coerce_to_path_and_create_dir(self.run_dir / "prototypes")
+        for k in range(self.n_prototypes):
+            coerce_to_path_and_create_dir(self.prototypes_path / f"proto{k}")
+
+        self.transformation_path = coerce_to_path_and_create_dir(self.run_dir / "transformations")
+        self.images_to_tsf = next(iter(self.train_loader))[0][:N_TRANSFORMATION_PREDICTIONS].to(self.device)
+
+        for k in range(self.images_to_tsf.size(0)):
+            out = coerce_to_path_and_create_dir(self.transformation_path / f"img{k}")
+            convert_to_img(self.images_to_tsf[k]).save(out / "input.png")
 
     @abstractmethod
     def setup_optimizer(self, *args, **kwargs):
@@ -213,22 +215,6 @@ class AbstractTrainer(ABC):
         #
         # self._finalize()
         # return self.results
-        pass
-
-    def _setup(self):
-        # """Setup training environment, metrics, visualization."""
-        # self.logger = self._setup_logger()
-        #
-        # # Initialize common components
-        # self.device = self._setup_device()
-        # self.train_loader, self.val_loader = self._setup_data()
-        # self.model = self._setup_model()
-        # self.optimizer = self._setup_optimizer()
-        # self.scheduler = self._setup_scheduler()
-        #
-        # # Metrics and visualization
-        # self.metrics = self._setup_metrics()
-        # self.visualizer = self._setup_visualizer()
         pass
 
     def _run_epoch(self, epoch):

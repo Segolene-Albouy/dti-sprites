@@ -274,6 +274,18 @@ class Trainer(AbstractTrainer):
     #   SETUP METHODS    #
     ######################
 
+    def setup_dataset(self, *args, **kwargs):
+        """Set up dataset parameters and load dataset."""
+        pass
+
+    def setup_dataloaders(self):
+        """Create data loaders from datasets."""
+        pass
+
+    def setup_model(self, *args, **kwargs):
+        """Initialize model architecture."""
+        pass
+
     def setup_directories(self, run_dir, save=False):
         super().setup_directories(run_dir, save)
 
@@ -289,26 +301,6 @@ class Trainer(AbstractTrainer):
             self.variances_path = coerce_to_path_and_create_dir(self.run_dir / "variances")
             for k in range(self.n_prototypes):
                 coerce_to_path_and_create_dir(self.variances_path / f"var{k}")
-
-    def setup_logging(self):
-        """Set up logging configuration."""
-        pass
-
-    def setup_config(self, *args, **kwargs):
-        """Load and process configuration."""
-        pass
-
-    def setup_dataset(self, *args, **kwargs):
-        """Set up dataset parameters and load dataset."""
-        pass
-
-    def setup_dataloaders(self):
-        """Create data loaders from datasets."""
-        pass
-
-    def setup_model(self, *args, **kwargs):
-        """Initialize model architecture."""
-        pass
 
     def setup_optimizer(self, *args, **kwargs):
         """Configure optimizer for training."""

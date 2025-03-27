@@ -55,6 +55,11 @@ from fvcore.nn import FlopCountAnalysis
 class Trainer(AbstractTrainer):
     """Pipeline to train a NN model using a certain dataset, both specified by an YML config."""
 
+    interpolate_settings = {
+        'mode': 'bilinear',
+        'align_corners': False
+    }
+
     @use_seed()
     def __init__(self, cfg, run_dir, save=False):
         super().__init__(cfg, run_dir, save)
@@ -345,6 +350,18 @@ class Trainer(AbstractTrainer):
     #   SETUP METHODS    #
     ######################
 
+    def setup_dataset(self, *args, **kwargs):
+        """Set up dataset parameters and load dataset."""
+        pass
+
+    def setup_dataloaders(self):
+        """Create data loaders from datasets."""
+        pass
+
+    def setup_model(self, *args, **kwargs):
+        """Initialize model architecture."""
+        pass
+
     def setup_directories(self, run_dir, save=False):
         super().setup_directories(run_dir, save)
 
@@ -384,26 +401,6 @@ class Trainer(AbstractTrainer):
                 img_path = self.transformation_path / f"img{k}"
                 for j in range(self.n_backgrounds):
                     coerce_to_path_and_create_dir(img_path / f"bkg_tsf{j}")
-
-    def setup_logging(self):
-        """Set up logging configuration."""
-        pass
-
-    def setup_config(self, *args, **kwargs):
-        """Load and process configuration."""
-        pass
-
-    def setup_dataset(self, *args, **kwargs):
-        """Set up dataset parameters and load dataset."""
-        pass
-
-    def setup_dataloaders(self):
-        """Create data loaders from datasets."""
-        pass
-
-    def setup_model(self, *args, **kwargs):
-        """Initialize model architecture."""
-        pass
 
     def setup_optimizer(self, *args, **kwargs):
         """Configure optimizer for training."""
