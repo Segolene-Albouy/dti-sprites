@@ -204,8 +204,10 @@ class AbstractTrainer(ABC):
             "optimizer_state": self.optimizer.state_dict(),
             "scheduler_state": self.scheduler.state_dict(),
         }
-        if hasattr(self, "sprite_optimizer"): # NOTE only for kmeans trainer
+
+        if hasattr(self, "sprite_optimizer"): # NOTE condition only present in kmeans_trainer
             state["sprite_optimizer_state"] = self.sprite_optimizer.state_dict()
+
         save_path = self.run_dir / MODEL_FILE
         torch.save(state, save_path)
         self.print_and_log_info(f"Model saved at {save_path}")
@@ -241,6 +243,141 @@ class AbstractTrainer(ABC):
     def save_transformed_images(self, cur_iter=None):
         """Save transformed images."""
         raise NotImplementedError
+
+    def save_metric_plots(self):
+        """Save training metrics, plots, and visualizations.
+
+        This method handles:
+        1. Loading metrics from CSV files
+        2. Creating and saving plots for losses, cluster proportions, etc.
+        3. Saving image artifacts as GIFs
+        """
+        self.model.eval()
+
+        # Load metrics data
+        df_train = pd.read_csv(self.train_metrics_path, sep="\t", index_col=0)
+        df_val = pd.read_csv(self.val_metrics_path, sep="\t", index_col=0)
+        df_scores = pd.read_csv(self.val_scores_path, sep="\t", index_col=0)
+
+        if len(df_train) == 0:
+            self.print_and_log_info("No metrics or plots to save")
+            return
+
+        self._save_loss_plots(df_train, df_val)
+        self._save_cluster_plots(df_train)
+        self._save_additional_metric_plots(df_train)
+
+        if not self.is_val_empty:
+            self._save_validation_plots(df_scores)
+
+        if self.save_img:
+            self._save_image_gifs()
+
+        self.print_and_log_info("Training metrics and visualizations saved")
+
+    def _save_loss_plots(self, df_train, df_val):
+        """Save plots for loss metrics."""
+        losses = self.get_metrics_names(prefix="loss")
+
+        # Handle validation loss if available
+        if not self.is_val_empty and "loss_val" in df_val.columns:
+            df = df_train.join(df_val[["loss_val"]], how="outer")
+            fig = plot_lines(df, losses + ["loss_val"], title="Loss")
+        else:
+            df = df_train
+            fig = plot_lines(df, losses, title="Loss")
+
+        fig.savefig(self.run_dir / "loss.pdf")
+
+    def _save_cluster_plots(self, df_train):
+        """Save plots for cluster proportions."""
+        # Get cluster proportion metrics
+        n_clusters = self.get_n_clusters()
+        names = self.get_metrics_names(prefix"prop_")
+        if n_clusters < len(names):
+            names = names[:n_clusters]
+
+        # Plot cluster proportions over time
+        fig = plot_lines(df_train, names, title="Cluster proportions")
+        fig.savefig(self.run_dir / "cluster_proportions.pdf")
+
+        # Plot final cluster proportions as bar chart
+        s = df_train[names].iloc[-1]
+        s.index = list(map(lambda n: n.replace("prop_clus", ""), names))
+        fig = plot_bar(s, title="Final cluster proportions")
+        fig.savefig(self.run_dir / "cluster_proportions_final.pdf")
+
+    def _save_additional_metric_plots(self, df_train):
+        """Save additional metric plots.
+
+        This is a hook for subclasses to override to save additional metrics.
+        Default implementation saves cluster probabilities if available.
+        """
+        # Save cluster probabilities if available
+        proba_names = self.get_metrics_names(prefix="proba_")
+        if proba_names:
+            fig = plot_lines(df_train, proba_names, title="Cluster Probabilities")
+            fig.savefig(self.run_dir / "cluster_probabilities.pdf")
+
+    def _save_validation_plots(self, df_scores):
+        """Save plots for validation scores."""
+        # Save global scores
+        names = list(filter(lambda name: "cls" not in name, self.val_scores.names))
+        fig = plot_lines(df_scores, names, title="Global scores", unit_yaxis=True)
+        fig.savefig(self.run_dir / "global_scores.pdf")
+
+        # Save class-specific scores
+        if self.should_visualize_cls_scores():
+            name = self.cls_score_name()
+            N = self.n_classes
+            fig = plot_lines(
+                df_scores,
+                [f"{name}_cls{i}" for i in range(N)],
+                title="Scores by cls",
+                unit_yaxis=True,
+            )
+            fig.savefig(self.run_dir / "scores_by_cls.pdf")
+
+    def _save_image_gifs(self):
+        """Save image artifacts as GIFs."""
+        size = MAX_GIF_SIZE if MAX_GIF_SIZE < max(self.img_size) else self.img_size
+
+        # Ensure prototypes are saved
+        with torch.no_grad():
+            self.save_prototypes()
+
+        # Save prototype GIFs
+        for k in range(self.n_prototypes):
+            save_gif(
+                self.prototypes_path / f"proto{k}", f"prototype{k}.gif", size=size
+            )
+            shutil.rmtree(str(self.prototypes_path / f"proto{k}"))
+
+        # Save transformation predictions if not identity transformer
+        if not hasattr(self.model.transformer, "is_identity") or not self.model.transformer.is_identity:
+            self.save_transformed_images()
+            for i in range(self.images_to_tsf.size(0)):
+                for k in range(min(self.n_prototypes, self.get_n_clusters())):
+                    save_gif(
+                        self.transformation_path / f"img{i}" / f"tsf{k}",
+                        f"tsf{k}.gif",
+                        size=size,
+                    )
+                    shutil.rmtree(str(self.transformation_path / f"img{i}" / f"tsf{k}"))
+        else:
+            shutil.rmtree(str(self.transformation_path))
+            coerce_to_path_and_create_dir(self.transformation_path)
+
+        self._save_additional_image_gifs(size)
+
+    @abstractmethod
+    def _save_additional_image_gifs(self, size):
+        """Save additional model-specific image GIFs.
+
+        This is a hook for subclasses to override for model-specific visualizations.
+        Default implementation does nothing.
+        """
+        pass
 
     ######################
     #   LOGGING METHODS  #
@@ -375,9 +512,16 @@ class AbstractTrainer(ABC):
             ),
         )
 
+    def get_metrics_names(self, metrics=None, prefix="loss"):
+        if not metrics:
+            metrics = self.train_metrics
+        # NOTE kmeans => if "loss" in n and not n.startswith("loss")
+        # return [n for n in metrics.names if n.startswith(prefix)]
+        return list(filter(lambda s: s.startswith(prefix), metrics.names))
+
     def _visualize_losses(self, cur_iter, split, metrics):
         """Visualize loss metrics."""
-        losses = [n for n in metrics.names if n.startswith("loss")]  # NOTE kmeans => if "loss" in n
+        losses = self.get_metrics_names(metrics)
         y, x = [[metrics[n].avg for n in losses]], [[cur_iter] * len(losses)]
 
         self.visualizer.line(

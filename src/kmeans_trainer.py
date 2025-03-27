@@ -353,7 +353,7 @@ class Trainer(AbstractTrainer):
             if self.scheduler_update_range == "epoch" and batch_start == 1:
                 self.update_scheduler(epoch + 1, batch=1)
 
-        self.save_training_metrics()
+        self.save_metric_plots()
         self.evaluate()
 
         self.print_and_log_info("Training run is over")
@@ -432,86 +432,16 @@ class Trainer(AbstractTrainer):
                     )
         return transformed_imgs
 
-    def save_training_metrics(self):
-        df_train = pd.read_csv(self.train_metrics_path, sep="\t", index_col=0)
-        df_val = pd.read_csv(self.val_metrics_path, sep="\t", index_col=0)
-        df_scores = pd.read_csv(self.val_scores_path, sep="\t", index_col=0)
-        if len(df_train) == 0:
-            self.print_and_log_info("No metrics or plots to save")
-            return
-
-        # Losses
-        losses = list(filter(lambda s: s.startswith("loss"), self.train_metrics.names))
-        # df = df_train.join(df_val[["loss_val"]], how="outer")
-        df = df_train
-        fig = plot_lines(df, losses, title="Loss")  # + ["loss_val"], title="Loss")
-        fig.savefig(self.run_dir / "loss.pdf")
-
-        # Cluster proportions
-        names = list(filter(lambda s: s.startswith("prop_"), self.train_metrics.names))
-        fig = plot_lines(df, names, title="Cluster proportions")
-        fig.savefig(self.run_dir / "cluster_proportions.pdf")
-        s = df[names].iloc[-1]
-        s.index = list(map(lambda n: n.replace("prop_clus", ""), names))
-        fig = plot_bar(s, title="Final cluster proportions")
-        fig.savefig(self.run_dir / "cluster_proportions_final.pdf")
-
-        # Cluster probabilities
-        names = list(filter(lambda s: s.startswith("proba_"), self.train_metrics.names))
-        fig = plot_lines(df, names, title="Cluster Probabilities")
-        fig.savefig(self.run_dir / "cluster_probabilities.pdf")
-
-        # Validation
-        if not self.is_val_empty:
-            names = list(filter(lambda name: "cls" not in name, self.val_scores.names))
-            fig = plot_lines(df_scores, names, title="Global scores", unit_yaxis=True)
-            fig.savefig(self.run_dir / "global_scores.pdf")
-
-            fig = plot_lines(
-                df_scores,
-                [f"acc_cls{i}" for i in range(self.n_classes)],
-                title="Scores by cls",
-                unit_yaxis=True,
-            )
-            fig.savefig(self.run_dir / "scores_by_cls.pdf")
-
-        # Prototypes & Variances
-        if self.save_img:
-            size = MAX_GIF_SIZE if MAX_GIF_SIZE < max(self.img_size) else self.img_size
-            with torch.no_grad():
-                self.save_prototypes()
-            if self.is_gmm:
-                self.save_variances()
+    def _save_additional_image_gifs(self, size):
+        """Save additional image GIFs specific to KMeans trainer."""
+        # Save variance GIFs for GMM models
+        if self.is_gmm:
+            self.save_variances()
             for k in range(self.n_prototypes):
                 save_gif(
-                    self.prototypes_path / f"proto{k}", f"prototype{k}.gif", size=size
+                    self.variances_path / f"var{k}", f"variance{k}.gif", size=size
                 )
-                shutil.rmtree(str(self.prototypes_path / f"proto{k}"))
-                if self.is_gmm:
-                    save_gif(
-                        self.variances_path / f"var{k}", f"variance{k}.gif", size=size
-                    )
-                    shutil.rmtree(str(self.variances_path / f"var{k}"))
-
-            # Transformation predictions
-            if self.model.transformer.is_identity:
-                # no need to keep transformation predictions
-                shutil.rmtree(str(self.transformation_path))
-                coerce_to_path_and_create_dir(self.transformation_path)
-            else:
-                self.save_transformed_images()
-                for i in range(self.images_to_tsf.size(0)):
-                    for k in range(self.n_prototypes):
-                        save_gif(
-                            self.transformation_path / f"img{i}" / f"tsf{k}",
-                            f"tsf{k}.gif",
-                            size=size,
-                        )
-                        shutil.rmtree(
-                            str(self.transformation_path / f"img{i}" / f"tsf{k}")
-                        )
-
-        self.print_and_log_info("Training metrics and visuals saved")
+                shutil.rmtree(str(self.variances_path / f"var{k}"))
 
     ######################
     #   LOGGING METHODS  #

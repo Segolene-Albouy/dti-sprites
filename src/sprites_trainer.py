@@ -544,114 +544,54 @@ class Trainer(AbstractTrainer):
 
         return transformed_imgs, compositions
 
-    def save_metric_plots(self):
-        self.model.eval()
-        # Prototypes & transformation predictions
-        size = MAX_GIF_SIZE if MAX_GIF_SIZE < max(self.img_size) else self.img_size
-        if self.save_img:
-            self.save_prototypes()
-            if self.learn_masks:
-                self.save_masked_prototypes()
-                self.save_masks()
-            if self.learn_backgrounds:
-                self.save_backgrounds()
-            self.save_transformed_images()
-        # Train metrics
-        df_train = pd.read_csv(self.train_metrics_path, sep="\t", index_col=0)
-        df_val = pd.read_csv(self.val_metrics_path, sep="\t", index_col=0)
-        df_scores = pd.read_csv(self.val_scores_path, sep="\t", index_col=0)
-        if len(df_train) == 0:
-            self.print_and_log_info("No metrics or plots to save")
-            return
-
-        # Losses
-        losses = list(filter(lambda s: s.startswith("loss"), self.train_metrics.names))
-        df = df_train.join(df_val[["loss_val"]], how="outer")
-        fig = plot_lines(df, losses + ["loss_val"], title="Loss")
-        fig.savefig(self.run_dir / "loss.pdf")
-
-        # Cluster proportions
-        N = self.n_clusters if self.n_clusters <= 40 else 2 * self.n_prototypes
-        names = list(filter(lambda s: s.startswith("prop_"), self.train_metrics.names))[
-                :N
-                ]
-        fig = plot_lines(df, names, title="Cluster proportions")
-        fig.savefig(self.run_dir / "cluster_proportions.pdf")
-        s = df[names].iloc[-1]
-        s.index = list(map(lambda n: n.replace("prop_clus", ""), names))
-        fig = plot_bar(s, title="Final cluster proportions")
-        fig.savefig(self.run_dir / "cluster_proportions_final.pdf")
-
-        # Validation
-        if not self.is_val_empty:
-            names = list(filter(lambda name: "cls" not in name, self.val_scores.names))
-            fig = plot_lines(df_scores, names, title="Global scores", unit_yaxis=True)
-            fig.savefig(self.run_dir / "global_scores.pdf")
-
-            if not self.instance_eval:
-                name = "acc" if not self.seg_eval else "iou"
-                N = self.n_classes
-                fig = plot_lines(
-                    df_scores,
-                    [f"{name}_cls{i}" for i in range(N)],
-                    title="Scores by cls",
-                    unit_yaxis=True,
-                )
-                fig.savefig(self.run_dir / "scores_by_cls.pdf")
-        if self.save_img:
-            # Save gifs for prototypes
+    def _save_additional_image_gifs(self, size):
+        """Save additional image GIFs specific to Sprites trainer."""
+        # Save masked prototypes and masks if enabled
+        if hasattr(self, 'learn_masks') and self.learn_masks:
+            self.save_masked_prototypes()
+            self.save_masks()
             for k in range(self.n_prototypes):
                 save_gif(
-                    self.prototypes_path / f"proto{k}", f"prototype{k}.gif", size=size
+                    self.masked_prototypes_path / f"proto{k}",
+                    f"prototype{k}.gif",
+                    size=size,
                 )
-                shutil.rmtree(str(self.prototypes_path / f"proto{k}"))
-                if self.learn_masks:
-                    save_gif(
-                        self.masked_prototypes_path / f"proto{k}",
-                        f"prototype{k}.gif",
-                        size=size,
-                    )
-                    shutil.rmtree(str(self.masked_prototypes_path / f"proto{k}"))
-                    save_gif(self.masks_path / f"mask{k}", f"mask{k}.gif", size=size)
-                    shutil.rmtree(str(self.masks_path / f"mask{k}"))
+                shutil.rmtree(str(self.masked_prototypes_path / f"proto{k}"))
+                save_gif(self.masks_path / f"mask{k}", f"mask{k}.gif", size=size)
+                shutil.rmtree(str(self.masks_path / f"mask{k}"))
 
+        # Save backgrounds if enabled
+        if hasattr(self, 'learn_backgrounds') and self.learn_backgrounds:
+            self.save_backgrounds()
             for k in range(self.n_backgrounds):
                 save_gif(
                     self.backgrounds_path / f"bkg{k}", f"background{k}.gif", size=size
                 )
                 shutil.rmtree(str(self.backgrounds_path / f"bkg{k}"))
 
-            # Save gifs for transformation predictions
+        # Save specialized mask transformations if available
+        if hasattr(self, 'learn_masks') and self.learn_masks:
             for i in range(self.images_to_tsf.size(0)):
-                N = self.n_clusters if self.n_clusters <= 40 else 2 * self.n_prototypes
-                for k in range(N):
-                    save_gif(
-                        self.transformation_path / f"img{i}" / f"tsf{k}",
-                        f"tsf{k}.gif",
-                        size=size,
-                    )
-                    shutil.rmtree(str(self.transformation_path / f"img{i}" / f"tsf{k}"))
+                for k in range(self.n_prototypes):
+                    for component in ["frg", "mask"]:
+                        try:
+                            save_gif(
+                                self.transformation_path / f"img{i}" / f"{component}_tsf{k}",
+                                f"{component}_tsf{k}.gif",
+                                size=size,
+                            )
+                            shutil.rmtree(
+                                str(self.transformation_path / f"img{i}" / f"{component}_tsf{k}")
+                            )
+                        except FileNotFoundError:
+                            # Skip if directory doesn't exist
+                            pass
 
-                if self.learn_masks:
-                    for k in range(self.n_prototypes):
-                        save_gif(
-                            self.transformation_path / f"img{i}" / f"frg_tsf{k}",
-                            f"frg_tsf{k}.gif",
-                            size=size,
-                        )
-                        save_gif(
-                            self.transformation_path / f"img{i}" / f"mask_tsf{k}",
-                            f"mask_tsf{k}.gif",
-                            size=size,
-                        )
-                        shutil.rmtree(
-                            str(self.transformation_path / f"img{i}" / f"frg_tsf{k}")
-                        )
-                        shutil.rmtree(
-                            str(self.transformation_path / f"img{i}" / f"mask_tsf{k}")
-                        )
-                if self.learn_backgrounds:
-                    for k in range(self.n_backgrounds):
+        # Save background transformations if available
+        if hasattr(self, 'learn_backgrounds') and self.learn_backgrounds:
+            for i in range(self.images_to_tsf.size(0)):
+                for k in range(self.n_backgrounds):
+                    try:
                         save_gif(
                             self.transformation_path / f"img{i}" / f"bkg_tsf{k}",
                             f"bkg_tsf{k}.gif",
@@ -660,7 +600,9 @@ class Trainer(AbstractTrainer):
                         shutil.rmtree(
                             str(self.transformation_path / f"img{i}" / f"bkg_tsf{k}")
                         )
-        self.print_and_log_info("Metrics and plots saved")
+                    except FileNotFoundError:
+                        # Skip if directory doesn't exist
+                        pass
 
     ######################
     #   LOGGING METHODS  #
@@ -1462,16 +1404,20 @@ class Trainer(AbstractTrainer):
         return f"{split}_losses"
 
     def get_n_clusters(self):
-        """Limit number of clusters displayed in visualization."""
-        return self.n_clusters if self.n_clusters <= 40 else 2 * self.n_prototypes
+        """Return number of clusters for visualization."""
+        if hasattr(self, 'n_clusters'):
+            return self.n_clusters if self.n_clusters <= 40 else 2 * self.n_prototypes
+        return super().get_n_clusters()
 
     def should_visualize_cls_scores(self):
-        """Only show class scores if not instance evaluation."""
-        return not self.instance_eval
+        """Determine if class scores should be visualized."""
+        return not hasattr(self, 'instance_eval') or not self.instance_eval
 
     def cls_score_name(self):
-        """Use IOU for segmentation or ACC otherwise."""
-        return "iou" if self.seg_eval else "acc"
+        """Return score name based on evaluation type."""
+        if hasattr(self, 'seg_eval') and self.seg_eval:
+            return "iou"
+        return "acc"
 
 
 import datetime
