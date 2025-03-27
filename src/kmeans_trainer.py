@@ -10,6 +10,7 @@ import pandas as pd
 import torch
 from torch.utils.data import DataLoader
 
+from .utils.consts import *
 from .dataset import get_dataset
 from .model import get_model
 from .model.tools import count_parameters, safe_model_state_dict
@@ -26,26 +27,8 @@ from .utils.metrics import AverageTensorMeter, AverageMeter, Metrics, Scores
 from .utils.path import CONFIGS_PATH, RUNS_PATH
 from .utils.plot import plot_lines, plot_bar
 
+from .abstract_trainer import PRINT_LR_UPD_FMT, PRINT_CHECK_CLUSTERS_FMT, PRINT_TRAIN_STAT_FMT, PRINT_VAL_STAT_FMT
 
-PRINT_TRAIN_STAT_FMT = "Epoch [{}/{}], Iter [{}/{}], train_metrics: {}".format
-PRINT_VAL_STAT_FMT = "Epoch [{}/{}], Iter [{}/{}], val_metrics: {}".format
-PRINT_CHECK_CLUSTERS_FMT = (
-    "Epoch [{}/{}], Iter [{}/{}]: Reassigned clusters {} from cluster {}".format
-)
-PRINT_LR_UPD_FMT = "Epoch [{}/{}], Iter [{}/{}], LR update: lr = {}".format
-
-TRAIN_METRICS_FILE = "train_metrics.tsv"
-VAL_METRICS_FILE = "val_metrics.tsv"
-VAL_SCORES_FILE = "val_scores.tsv"
-FINAL_SCORES_FILE = "final_scores.tsv"
-MODEL_FILE = "model.pkl"
-
-N_TRANSFORMATION_PREDICTIONS = 4
-N_CLUSTER_SAMPLES = 5
-MAX_GIF_SIZE = 64
-VIZ_HEIGHT = 300
-VIZ_WIDTH = 500
-VIZ_MAX_IMG_SIZE = 64
 
 
 class Trainer:
@@ -70,17 +53,6 @@ class Trainer:
 
         with open(self.config_path) as fp:
             cfg = yaml.load(fp, Loader=yaml.FullLoader)
-
-        if torch.cuda.is_available():
-            type_device = "cuda"
-            nb_device = torch.cuda.device_count()
-        else:
-            type_device = "cpu"
-            nb_device = None
-        self.device = torch.device(type_device)
-        self.print_and_log_info(
-            "Using {} device, nb_device is {}".format(type_device, nb_device)
-        )
 
         # Datasets and dataloaders
         self.dataset_kwargs = cfg["dataset"]
@@ -340,9 +312,11 @@ class Trainer:
 
     @property
     def score_name(self):
+        # TODO to be overriden
         return self.val_scores.score_name
 
     def print_memory_usage(self, prefix):
+        # TODO to be overriden
         usage = {}
         for attr in [
             "memory_allocated",
@@ -410,6 +384,7 @@ class Trainer:
         self.print_and_log_info("Training run is over")
 
     def update_scheduler(self, epoch, batch):
+        # TODO to be overriden
         self.scheduler.step()
         lr = self.scheduler.get_last_lr()[0]
         if lr != self.cur_lr:
@@ -484,6 +459,7 @@ class Trainer:
         )
 
     def save_prototypes(self, cur_iter=None):
+        # TODO to be overriden
         prototypes = self.model.prototypes
         for k in range(self.n_prototypes):
             img = convert_to_img(prototypes[k])
@@ -493,6 +469,7 @@ class Trainer:
                 img.save(self.prototypes_path / f"prototype{k}.png")
 
     def save_variances(self, cur_iter=None):
+        # TODO self.save_pred(cur_iter, pred_name="variance", prefix="var", n_preds=self.n_prototypes)
         variances = self.model.variances
         for k in range(self.n_prototypes):
             img = convert_to_img(variances[k])
@@ -522,7 +499,9 @@ class Trainer:
                     )
         return transformed_imgs
 
+    @torch.no_grad()
     def update_visualizer_images(self, images, title, nrow):
+        # TODO to be overriden
         if self.visualizer is None:
             return None
 
@@ -552,6 +531,7 @@ class Trainer:
         self.train_metrics.reset(*[f"proba_clus{i}" for i in range(self.n_prototypes)])
 
     def log_train_metrics(self, cur_iter, epoch, batch):
+        # TODO to be overriden
         # Print & write metrics to file
         stat = PRINT_TRAIN_STAT_FMT(
             epoch, self.n_epochs, batch, self.n_batches, self.train_metrics
@@ -568,6 +548,7 @@ class Trainer:
         self.train_metrics.reset("time/img", "loss")
 
     def update_visualizer_metrics(self, cur_iter, train):
+        # TODO to be overriden
         if self.visualizer is None:
             return None
 
@@ -655,6 +636,7 @@ class Trainer:
             self.val_scores.update(labels.long().numpy(), argmin_idx.cpu().numpy())
 
     def log_val_metrics(self, cur_iter, epoch, batch):
+        # TODO to be overriden
         stat = PRINT_VAL_STAT_FMT(
             epoch, self.n_epochs, batch, self.n_batches, self.val_metrics
         )
@@ -682,7 +664,9 @@ class Trainer:
         self.val_scores.reset()
         self.val_metrics.reset()
 
+
     def save(self, epoch, batch):
+        # TODO to be overriden
         state = {
             "epoch": epoch,
             "batch": batch,

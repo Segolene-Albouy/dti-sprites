@@ -19,6 +19,8 @@ import hydra
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, OmegaConf
 
+from .abstract_trainer import PRINT_LR_UPD_FMT, PRINT_CHECK_CLUSTERS_FMT, PRINT_TRAIN_STAT_FMT, PRINT_VAL_STAT_FMT
+
 try:
     import visdom
 except ModuleNotFoundError:
@@ -46,33 +48,12 @@ from .utils.metrics import (
 )
 from .utils.path import CONFIGS_PATH, RUNS_PATH
 from .utils.plot import plot_bar, plot_lines
+from .utils.consts import *
 
 from PIL import Image, ImageFont, ImageDraw
 
 from torch.profiler import profile, record_function, ProfilerActivity
 from fvcore.nn import FlopCountAnalysis
-
-PRINT_TRAIN_STAT_FMT = "Epoch [{}/{}], Iter [{}/{}], train_metrics: {}".format
-PRINT_VAL_STAT_FMT = "Epoch [{}/{}], Iter [{}/{}], val_metrics: {}".format
-PRINT_CHECK_CLUSTERS_FMT = (
-    "Epoch [{}/{}], Iter [{}/{}]: Reassigned clusters {} from cluster {}".format
-)
-PRINT_LR_UPD_FMT = "Epoch [{}/{}], Iter [{}/{}], LR update: lr = {}".format
-
-TRAIN_METRICS_FILE = "train_metrics.tsv"
-VAL_METRICS_FILE = "val_metrics.tsv"
-VAL_SCORES_FILE = "val_scores.tsv"
-FINAL_SCORES_FILE = "final_scores.tsv"
-FINAL_SEG_SCORES_FILE = "final_seg_scores.tsv"
-FINAL_SEMANTIC_SCORES_FILE = "final_semantic_scores.tsv"
-MODEL_FILE = "model.pkl"
-
-N_TRANSFORMATION_PREDICTIONS = 4
-N_CLUSTER_SAMPLES = 5
-MAX_GIF_SIZE = 64
-VIZ_HEIGHT = 300
-VIZ_WIDTH = 500
-VIZ_MAX_IMG_SIZE = 64
 
 
 class Trainer:
@@ -86,20 +67,15 @@ class Trainer:
             "Trainer initialisation: run directory is {}".format(run_dir)
         )
 
+        self.interpolate_settings = {
+            'mode': 'bilinear',
+            'align_corners': False
+        }
+
         self.save_img = save
         OmegaConf.save(cfg, self.run_dir/"config.yaml")
         self.print_and_log_info("Current config copied to run directory")
 
-        if torch.cuda.is_available():
-            type_device = "cuda"
-            nb_device = torch.cuda.device_count()
-        else:
-            type_device = "cpu"
-            nb_device = None
-        self.device = torch.device(type_device)
-        self.print_and_log_info(
-            "Using {} device, nb_device is {}".format(type_device, nb_device)
-        )
 
         # Datasets and dataloaders
         self.dataset_kwargs = cfg["dataset"]
@@ -369,6 +345,7 @@ class Trainer:
             self.print_and_log_info("No visualizer initialized")
 
     def print_and_log_info(self, string):
+        # TODO to be overriden
         print_info(string)
         self.logger.info(string)
 
@@ -403,9 +380,11 @@ class Trainer:
 
     @property
     def score_name(self):
+        # TODO to be overriden
         return self.val_scores.score_name
 
     def print_memory_usage(self, prefix):
+        # TODO to be overriden
         usage = {}
         for attr in [
             "memory_allocated",
@@ -474,6 +453,7 @@ class Trainer:
         self.print_and_log_info("Training run is over")
 
     def update_scheduler(self, epoch, batch):
+        # TODO to be overriden
         self.scheduler.step()
         lr = self.scheduler.get_last_lr()[0]
         if lr != self.cur_lr:
@@ -578,6 +558,7 @@ class Trainer:
 
     @torch.no_grad()
     def save_prototypes(self, cur_iter=None):
+        # TODO to be overriden
         prototypes = self.model.prototypes
         for k in range(self.n_prototypes):
             img = convert_to_img(prototypes[k])
@@ -588,6 +569,7 @@ class Trainer:
 
     @torch.no_grad()
     def save_masked_prototypes(self, cur_iter=None):
+        # TODO self.save_pred(
         #     cur_iter,
         #     pred_name="prototype",
         #     transform_fn=lambda proto, k: proto * self.model.masks[k],
@@ -604,6 +586,7 @@ class Trainer:
 
     @torch.no_grad()
     def save_masks(self, cur_iter=None):
+        # TODO self.save_pred(cur_iter, pred_name="mask")
         masks = self.model.masks
         for k in range(self.n_prototypes):
             img = convert_to_img(masks[k])
@@ -614,6 +597,7 @@ class Trainer:
 
     @torch.no_grad()
     def save_backgrounds(self, cur_iter=None):
+        # TODO self.save_pred(cur_iter, pred_name="background", prefix="bkg")
         backgrounds = self.model.backgrounds
         for k in range(self.n_backgrounds):
             img = convert_to_img(backgrounds[k])
@@ -674,6 +658,7 @@ class Trainer:
 
     @torch.no_grad()
     def update_visualizer_images(self, images, title, nrow):
+        # TODO to be overriden
         if self.visualizer is None:
             return None
 
@@ -759,6 +744,7 @@ class Trainer:
         self.train_metrics.reset(*[f"prop_clus{i}" for i in range(self.n_clusters)])
 
     def log_train_metrics(self, cur_iter, epoch, batch):
+        # TODO to be overriden
         # Print & write metrics to file
         stat = PRINT_TRAIN_STAT_FMT(
             epoch, self.n_epochs, batch, self.n_batches, self.train_metrics
@@ -773,7 +759,23 @@ class Trainer:
 
         self.update_visualizer_metrics(cur_iter, train=True)
 
+    def win_loss(self, split):
+        return f"{split}_losses"
+
+    def get_n_clusters(self):
+        """Limit number of clusters displayed in visualization."""
+        return self.n_clusters if self.n_clusters <= 40 else 2 * self.n_prototypes
+
+    def should_visualize_cls_scores(self):
+        """Only show class scores if not instance evaluation."""
+        return not self.instance_eval
+
+    def cls_score_name(self):
+        """Use IOU for segmentation or ACC otherwise."""
+        return "iou" if self.seg_eval else "acc"
+
     def update_visualizer_metrics(self, cur_iter, train):
+        # TODO to be overriden
         if self.visualizer is None:
             return None
 
@@ -938,6 +940,7 @@ class Trainer:
                 self.val_scores.update(labels.long().numpy(), argmin_idx.cpu().numpy())
 
     def log_val_metrics(self, cur_iter, epoch, batch):
+        # TODO to be overriden
         stat = PRINT_VAL_STAT_FMT(
             epoch, self.n_epochs, batch, self.n_batches, self.val_metrics
         )
@@ -966,6 +969,7 @@ class Trainer:
         self.val_metrics.reset()
 
     def save(self, epoch, batch):
+        # TODO to be overriden
         state = {
             "epoch": epoch,
             "batch": batch,
@@ -979,6 +983,7 @@ class Trainer:
         save_path = self.run_dir / MODEL_FILE
         torch.save(state, save_path)
         self.print_and_log_info("Model saved at {}".format(save_path))
+
 
     def save_metric_plots(self):
         self.model.eval()
