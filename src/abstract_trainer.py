@@ -1,11 +1,17 @@
+import shutil
+
+import pandas as pd
 import torch
+
+from .utils import coerce_to_path_and_create_dir
+from .utils.plot import plot_lines, plot_bar
 
 try:
     import visdom
 except ModuleNotFoundError:
     pass
 
-from .utils.image import convert_to_img
+from .utils.image import convert_to_img, save_gif
 from .utils.logger import print_info
 from .utils.consts import *
 
@@ -293,7 +299,7 @@ class AbstractTrainer(ABC):
         """Save plots for cluster proportions."""
         # Get cluster proportion metrics
         n_clusters = self.get_n_clusters()
-        names = self.get_metrics_names(prefix"prop_")
+        names = self.get_metrics_names(prefix="prop_")
         if n_clusters < len(names):
             names = names[:n_clusters]
 
