@@ -108,3 +108,5 @@ __pypackages__/
 
 node_modules/
 celerybeat-schedule.db
+
+datasets/*
