@@ -385,20 +385,17 @@ class Trainer(AbstractTrainer):
         """Initialize metrics for training and evaluation."""
         pass
 
-    @abstractmethod
     def setup_visualization_artifacts(self, *args, **kwargs):
         """Set up directories and templates for saving visualizations."""
-        raise NotImplementedError
+        pass
 
-    @abstractmethod
     def setup_visualizer(self, *args, **kwargs):
         """Set up real-time visualization (e.g., Visdom)."""
-        raise NotImplementedError
+        pass
 
-    @abstractmethod
     def setup_additional_components(self, *args, **kwargs):
         """Set up any additional trainer-specific components."""
-        raise NotImplementedError
+        pass
 
     ######################
     #    MAIN METHODS    #

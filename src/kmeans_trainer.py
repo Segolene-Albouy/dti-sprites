@@ -314,6 +314,18 @@ class Trainer(AbstractTrainer):
         """Initialize metrics for training and evaluation."""
         pass
 
+    def setup_visualization_artifacts(self, *args, **kwargs):
+        """Set up directories and templates for saving visualizations."""
+        pass
+
+    def setup_visualizer(self, *args, **kwargs):
+        """Set up real-time visualization (e.g., Visdom)."""
+        pass
+
+    def setup_additional_components(self, *args, **kwargs):
+        """Set up any additional trainer-specific components."""
+        pass
+
     ######################
     #    MAIN METHODS    #
     ######################
