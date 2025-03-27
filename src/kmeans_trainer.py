@@ -3,7 +3,6 @@ import os
 import shutil
 import time
 import yaml
-import copy
 
 import numpy as np
 import pandas as pd
@@ -27,17 +26,15 @@ from .utils.metrics import AverageTensorMeter, AverageMeter, Metrics, Scores
 from .utils.path import CONFIGS_PATH, RUNS_PATH
 from .utils.plot import plot_lines, plot_bar
 
-from .abstract_trainer import PRINT_LR_UPD_FMT, PRINT_CHECK_CLUSTERS_FMT, PRINT_TRAIN_STAT_FMT, PRINT_VAL_STAT_FMT
+from .abstract_trainer import AbstractTrainer, PRINT_CHECK_CLUSTERS_FMT
 
 
-
-class Trainer:
+class Trainer(AbstractTrainer):
     """Pipeline to train a NN model using a certain dataset, both specified by an YML config."""
 
     @use_seed()
-    def __init__(
-        self, config_path, run_dir, parent_model=None, recluster=False, save=False
-    ):
+    def __init__(self, config_path, run_dir, parent_model=None, recluster=False, save=False, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.config_path = coerce_to_path_and_check_exist(config_path)
         self.run_dir = coerce_to_path_and_create_dir(run_dir)
         self.logger = get_logger(self.run_dir, name="trainer")
@@ -276,9 +273,8 @@ class Trainer:
             self.visualizer = None
             self.print_and_log_info("No visualizer initialized")
 
-    def print_and_log_info(self, string):
-        print_info(string)
-        self.logger.info(string)
+    def save_variances(self, cur_iter=None):
+        self.save_pred(cur_iter, pred_name="variance", prefix="var", n_preds=self.n_prototypes)
 
     def load_from_tag(self, tag, resume=False):
         self.print_and_log_info("Loading model from run {}".format(tag))
@@ -307,28 +303,6 @@ class Trainer:
         self.print_and_log_info(
             "Checkpoint loaded at epoch {}, batch {}".format(
                 self.start_epoch, self.start_batch - 1
-            )
-        )
-
-    @property
-    def score_name(self):
-        # TODO to be overriden
-        return self.val_scores.score_name
-
-    def print_memory_usage(self, prefix):
-        # TODO to be overriden
-        usage = {}
-        for attr in [
-            "memory_allocated",
-            "max_memory_allocated",
-            "memory_cached",
-            "max_memory_cached",
-        ]:
-            usage[attr] = getattr(torch.cuda, attr)() * 0.000001
-        self.print_and_log_info(
-            "{}:\t{}".format(
-                prefix,
-                " / ".join(["{}: {:.0f}MiB".format(k, v) for k, v in usage.items()]),
             )
         )
 
@@ -382,16 +356,6 @@ class Trainer:
         self.evaluate()
 
         self.print_and_log_info("Training run is over")
-
-    def update_scheduler(self, epoch, batch):
-        # TODO to be overriden
-        self.scheduler.step()
-        lr = self.scheduler.get_last_lr()[0]
-        if lr != self.cur_lr:
-            self.cur_lr = lr
-            self.print_and_log_info(
-                PRINT_LR_UPD_FMT(epoch, self.n_epochs, batch, self.n_batches, lr)
-            )
 
     def single_train_batch_run(self, images, labels):
         start_time = time.time()
@@ -458,26 +422,6 @@ class Trainer:
             tsf_imgs.view(-1, C, H, W), "transformations", nrow=self.n_prototypes + 1
         )
 
-    def save_prototypes(self, cur_iter=None):
-        # TODO to be overriden
-        prototypes = self.model.prototypes
-        for k in range(self.n_prototypes):
-            img = convert_to_img(prototypes[k])
-            if cur_iter is not None:
-                img.save(self.prototypes_path / f"proto{k}" / f"{cur_iter}.jpg")
-            else:
-                img.save(self.prototypes_path / f"prototype{k}.png")
-
-    def save_variances(self, cur_iter=None):
-        # TODO self.save_pred(cur_iter, pred_name="variance", prefix="var", n_preds=self.n_prototypes)
-        variances = self.model.variances
-        for k in range(self.n_prototypes):
-            img = convert_to_img(variances[k])
-            if cur_iter is not None:
-                img.save(self.variances_path / f"var{k}" / f"{cur_iter}.jpg")
-            else:
-                img.save(self.variances_path / f"variance{k}.png")
-
     @torch.no_grad()
     def save_transformed_images(self, cur_iter=None):
         self.model.eval()
@@ -499,25 +443,6 @@ class Trainer:
                     )
         return transformed_imgs
 
-    @torch.no_grad()
-    def update_visualizer_images(self, images, title, nrow):
-        # TODO to be overriden
-        if self.visualizer is None:
-            return None
-
-        if max(images.shape[1:]) > VIZ_MAX_IMG_SIZE:
-            images = torch.nn.functional.interpolate(
-                images, size=VIZ_MAX_IMG_SIZE, mode="bilinear"
-            )
-        self.visualizer.images(
-            images.clamp(0, 1),
-            win=title,
-            nrow=nrow,
-            opts=dict(
-                title=title, store_history=True, width=VIZ_WIDTH, height=VIZ_HEIGHT
-            ),
-        )
-
     def check_cluster(self, cur_iter, epoch, batch):
         proportions = [
             self.train_metrics[f"prop_clus{i}"].avg for i in range(self.n_prototypes)
@@ -529,94 +454,6 @@ class Trainer:
         self.print_and_log_info(msg)
         self.train_metrics.reset(*[f"prop_clus{i}" for i in range(self.n_prototypes)])
         self.train_metrics.reset(*[f"proba_clus{i}" for i in range(self.n_prototypes)])
-
-    def log_train_metrics(self, cur_iter, epoch, batch):
-        # TODO to be overriden
-        # Print & write metrics to file
-        stat = PRINT_TRAIN_STAT_FMT(
-            epoch, self.n_epochs, batch, self.n_batches, self.train_metrics
-        )
-        self.print_and_log_info(stat)
-        with open(self.train_metrics_path, mode="a") as f:
-            f.write(
-                "{}\t{}\t{}\t".format(cur_iter, epoch, batch)
-                + "\t".join(map("{:.4f}".format, self.train_metrics.avg_values))
-                + "\n"
-            )
-
-        self.update_visualizer_metrics(cur_iter, train=True)
-        self.train_metrics.reset("time/img", "loss")
-
-    def update_visualizer_metrics(self, cur_iter, train):
-        # TODO to be overriden
-        if self.visualizer is None:
-            return None
-
-        split, metrics = (
-            ("train", self.train_metrics) if train else ("val", self.val_metrics)
-        )
-        loss_names = [n for n in metrics.names if "loss" in n]
-        y, x = [[metrics[n].avg for n in loss_names]], [[cur_iter] * len(loss_names)]
-        self.visualizer.line(
-            y,
-            x,
-            win=f"{split}_loss",
-            update="append",
-            opts=dict(
-                title=f"{split}_loss",
-                legend=loss_names,
-                width=VIZ_WIDTH,
-                height=VIZ_HEIGHT,
-            ),
-        )
-
-        if train:
-            if self.n_prototypes > 1:
-                # Cluster proportions
-                proportions = [
-                    metrics[f"prop_clus{i}"].avg for i in range(self.n_prototypes)
-                ]
-                self.visualizer.bar(
-                    proportions,
-                    win=f"train_cluster_prop",
-                    opts=dict(
-                        title=f"train_cluster_proportions",
-                        width=VIZ_HEIGHT,
-                        height=VIZ_HEIGHT,
-                    ),
-                )
-        else:
-            # Scores
-            names = list(filter(lambda name: "cls" not in name, self.val_scores.names))
-            y, x = [[self.val_scores[n] for n in names]], [[cur_iter] * len(names)]
-            self.visualizer.line(
-                y,
-                x,
-                win=f"global_scores",
-                update="append",
-                opts=dict(
-                    title=f"global_scores",
-                    legend=names,
-                    width=VIZ_WIDTH,
-                    height=VIZ_HEIGHT,
-                ),
-            )
-
-            y, x = [[self.val_scores[f"acc_cls{i}"] for i in range(self.n_classes)]], [
-                [cur_iter] * self.n_classes
-            ]
-            self.visualizer.line(
-                y,
-                x,
-                win=f"acc_by_cls",
-                update="append",
-                opts=dict(
-                    title=f"acc_by_cls",
-                    legend=[f"cls{i}" for i in range(self.n_classes)],
-                    width=VIZ_WIDTH,
-                    heigh=VIZ_HEIGHT,
-                ),
-            )
 
     @torch.no_grad()
     def run_val(self):
@@ -634,54 +471,6 @@ class Trainer:
 
             self.val_metrics.update({"loss_val": loss_val.item()})
             self.val_scores.update(labels.long().numpy(), argmin_idx.cpu().numpy())
-
-    def log_val_metrics(self, cur_iter, epoch, batch):
-        # TODO to be overriden
-        stat = PRINT_VAL_STAT_FMT(
-            epoch, self.n_epochs, batch, self.n_batches, self.val_metrics
-        )
-        self.print_and_log_info(stat)
-        with open(self.val_metrics_path, mode="a") as f:
-            f.write(
-                "{}\t{}\t{}\t".format(cur_iter, epoch, batch)
-                + "\t".join(map("{:.4f}".format, self.val_metrics.avg_values))
-                + "\n"
-            )
-
-        scores = self.val_scores.compute()
-        self.print_and_log_info(
-            "val_scores: "
-            + ", ".join(["{}={:.4f}".format(k, v) for k, v in scores.items()])
-        )
-        with open(self.val_scores_path, mode="a") as f:
-            f.write(
-                "{}\t{}\t{}\t".format(cur_iter, epoch, batch)
-                + "\t".join(map("{:.4f}".format, scores.values()))
-                + "\n"
-            )
-
-        self.update_visualizer_metrics(cur_iter, train=False)
-        self.val_scores.reset()
-        self.val_metrics.reset()
-
-
-    def save(self, epoch, batch):
-        # TODO to be overriden
-        state = {
-            "epoch": epoch,
-            "batch": batch,
-            "model_name": self.model_name,
-            "model_kwargs": self.model_kwargs,
-            "model_state": self.model.state_dict(),
-            "n_prototypes": self.n_prototypes,
-            "optimizer_state": self.optimizer.state_dict(),
-            "scheduler_state": self.scheduler.state_dict(),
-        }
-        if hasattr(self, "sprite_optimizer"):
-            state["sprite_optimizer_state"] = self.sprite_optimizer.state_dict()
-        save_path = self.run_dir / MODEL_FILE
-        torch.save(state, save_path)
-        self.print_and_log_info("Model saved at {}".format(save_path))
 
     def save_training_metrics(self):
         df_train = pd.read_csv(self.train_metrics_path, sep="\t", index_col=0)

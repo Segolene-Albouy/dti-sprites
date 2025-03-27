@@ -1,6 +1,9 @@
 import torch
-from torch.utils.data import DataLoader
-from torch.nn import functional as F
+
+try:
+    import visdom
+except ModuleNotFoundError:
+    pass
 
 from .utils.image import convert_to_img
 from .utils.logger import print_info
@@ -14,16 +17,11 @@ PRINT_CHECK_CLUSTERS_FMT = (
 PRINT_LR_UPD_FMT = "Epoch [{}/{}], Iter [{}/{}], LR update: lr = {}".format
 
 
-
 from abc import ABC, abstractmethod
-import torch
-import numpy as np
-from pathlib import Path
 
 class AbstractTrainer(ABC):
     """Abstract base class for all Trainer implementations."""
 
-    @abstractmethod
     def __init__(self, *args, **kwargs):
         self.run_dir = None
         self.logger = None
@@ -96,8 +94,11 @@ class AbstractTrainer(ABC):
 
         self.interpolate_settings = {'mode': 'bilinear'}
 
-        raise NotImplementedError
+    ######################
+    #    MAIN METHODS    #
+    ######################
 
+    @abstractmethod
     def run(self):
         # """Main training loop with defined sequence of operations."""
         # self._setup()
@@ -109,7 +110,6 @@ class AbstractTrainer(ABC):
         # return self.results
         pass
 
-    @abstractmethod
     def _setup(self):
         # """Setup training environment, metrics, visualization."""
         # self.logger = self._setup_logger()
@@ -125,7 +125,6 @@ class AbstractTrainer(ABC):
         # self.metrics = self._setup_metrics()
         # self.visualizer = self._setup_visualizer()
         pass
-
 
     def _run_epoch(self, epoch):
         """Run a single epoch."""
@@ -166,35 +165,10 @@ class AbstractTrainer(ABC):
         pass
 
     @abstractmethod
-    def print_and_log_info(self, string):
-        print_info(string)
-        self.logger.info(string)
-
-    @abstractmethod
     def load_from_tag(self, tag, resume=False):
         """Load model from a previous run tag."""
         raise NotImplementedError
 
-    @property
-    def score_name(self):
-        return self.val_scores.score_name
-
-    @abstractmethod
-    def print_memory_usage(self, prefix):
-        """Print GPU memory usage information with the given prefix."""
-        stats = [
-            "memory_allocated",
-            "max_memory_allocated",
-            "memory_cached",
-            "max_memory_cached"
-        ]
-        memory_stats = {stat: getattr(torch.cuda, stat)() / 1e6 for stat in stats}
-        stats_text = " / ".join(
-            f"{name}: {value:.0f}MiB" for name, value in memory_stats.items()
-        )
-        self.print_and_log_info(f"{prefix}:\t{stats_text}")
-
-    @abstractmethod
     def update_scheduler(self, epoch, batch):
         """Update the learning rate scheduler."""
         self.scheduler.step()
@@ -215,10 +189,26 @@ class AbstractTrainer(ABC):
         """Run validation process."""
         raise NotImplementedError
 
-    @abstractmethod
-    def log_images(self, cur_iter):
-        """Log images for visualization."""
-        raise NotImplementedError
+    ######################
+    #   SAVING METHODS   #
+    ######################
+
+    def save(self, epoch, batch):
+        state = {
+            "epoch": epoch,
+            "batch": batch,
+            "model_name": self.model_name,
+            "model_kwargs": self.model_kwargs,
+            "model_state": self.model.state_dict(),
+            "n_prototypes": self.n_prototypes,
+            "optimizer_state": self.optimizer.state_dict(),
+            "scheduler_state": self.scheduler.state_dict(),
+        }
+        if hasattr(self, "sprite_optimizer"): # NOTE only for kmeans trainer
+            state["sprite_optimizer_state"] = self.sprite_optimizer.state_dict()
+        save_path = self.run_dir / MODEL_FILE
+        torch.save(state, save_path)
+        self.print_and_log_info(f"Model saved at {save_path}")
 
     @torch.no_grad()
     def save_pred(self, cur_iter=None, pred_name="prototype", prefix=None, transform_fn=None, n_preds=None):
@@ -247,28 +237,119 @@ class AbstractTrainer(ABC):
     def save_prototypes(self, cur_iter=None):
         self.save_pred(cur_iter, pred_name="prototype", prefix="proto")
 
-    # def save_masks(self, cur_iter=None):
-    #     self.save_pred(cur_iter, pred_name="mask")
-    #
-    # def save_backgrounds(self, cur_iter=None):
-    #     self.save_pred(cur_iter, pred_name="background", prefix="bkg")
-    #
-    # def save_masked_prototypes(self, cur_iter=None):
-    #     self.save_pred(
-    #         cur_iter,
-    #         pred_name="prototype",
-    #         transform_fn=lambda proto, k: proto * self.model.masks[k],
-    #         prefix="proto"
-    #     )
-    #
-    # def save_variance(self, cur_iter=None):
-    #     self.save_pred(cur_iter, pred_name="variance", prefix="var", n_preds=self.n_prototypes)
-
     @abstractmethod
     def save_transformed_images(self, cur_iter=None):
         """Save transformed images."""
         raise NotImplementedError
 
+    ######################
+    #   LOGGING METHODS  #
+    ######################
+
+    def print_and_log_info(self, string):
+        print_info(string)
+        self.logger.info(string)
+
+    @abstractmethod
+    def log_images(self, cur_iter):
+        """Log images for visualization."""
+        raise NotImplementedError
+
+    def print_memory_usage(self, prefix):
+        """Print GPU memory usage information with the given prefix."""
+        stats = [
+            "memory_allocated",
+            "max_memory_allocated",
+            "memory_cached",
+            "max_memory_cached"
+        ]
+        memory_stats = {stat: getattr(torch.cuda, stat)() / 1e6 for stat in stats}
+        stats_text = " / ".join(
+            f"{name}: {value:.0f}MiB" for name, value in memory_stats.items()
+        )
+        self.print_and_log_info(f"{prefix}:\t{stats_text}")
+
+    def log_val_metrics(self, cur_iter, epoch, batch, precision=5):
+        stat = PRINT_VAL_STAT_FMT(
+            epoch, self.n_epochs, batch, self.n_batches, self.val_metrics
+        )
+
+        fmt = f"{{:.{precision}f}}".format
+        self.print_and_log_info(stat)
+        with open(self.val_metrics_path, mode="a") as f:
+            f.write(
+                f"{cur_iter}\t{epoch}\t{batch}\t"
+                + "\t".join(map(fmt, self.val_metrics.avg_values))
+                + "\n"
+            )
+
+        scores = self.val_scores.compute()
+        self.print_and_log_info(
+            "val_scores: "
+            + ", ".join([f"{k}={fmt(v)}" for k, v in scores.items()])
+        )
+        with open(self.val_scores_path, mode="a") as f:
+            f.write(
+                f"{cur_iter}\t{epoch}\t{batch}\t"
+                + "\t".join(map(fmt, scores.values()))
+                + "\n"
+            )
+
+        self.update_visualizer_metrics(cur_iter, train=False)
+        self.val_scores.reset()
+        self.val_metrics.reset()
+
+    def log_train_metrics(self, cur_iter, epoch, batch, precision=5):
+        stat = PRINT_TRAIN_STAT_FMT(
+            epoch, self.n_epochs, batch, self.n_batches, self.train_metrics
+        )
+        fmt = f"{{:.{precision}f}}".format
+
+        self.print_and_log_info(stat[:1000])
+        with open(self.train_metrics_path, mode="a") as f:
+            f.write(
+                f"{cur_iter}\t{epoch}\t{batch}\t"
+                + "\t".join(map(fmt, self.train_metrics.avg_values))
+                + "\n"
+            )
+
+        self.update_visualizer_metrics(cur_iter, train=True)
+        self.train_metrics.reset("time/img", "loss", "loss_em", "loss_bin", "loss_rec", "loss_freq")
+
+    ######################
+    # VALIDATION METHODS #
+    ######################
+
+    @abstractmethod
+    def check_cluster(self, cur_iter, epoch, batch):
+        """Check cluster assignments and reassign empty clusters."""
+        raise NotImplementedError
+
+    ######################
+    # EVALUATION METHODS #
+    ######################
+
+    @abstractmethod
+    def evaluate(self):
+        """Run evaluation process."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def qualitative_eval(self):
+        """Run qualitative evaluation."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def quantitative_eval(self):
+        """Run quantitative evaluation."""
+        raise NotImplementedError
+
+    ######################
+    #  VISUALIZE METHODS #
+    ######################
+
+    def win_loss(self, split):
+        return f"{split}_loss"
 
     @torch.no_grad()
     def update_visualizer_images(self, images, title, nrow):
@@ -294,45 +375,6 @@ class AbstractTrainer(ABC):
             ),
         )
 
-    @abstractmethod
-    def check_cluster(self, cur_iter, epoch, batch):
-        """Check cluster assignments and reassign empty clusters."""
-        raise NotImplementedError
-
-    @abstractmethod
-    def log_train_metrics(self, cur_iter, epoch, batch):
-        stat = PRINT_TRAIN_STAT_FMT(
-            epoch, self.n_epochs, batch, self.n_batches, self.train_metrics
-        )
-        self.print_and_log_info(stat[:1000])
-        with open(self.train_metrics_path, mode="a") as f:
-            f.write(
-                "{}\t{}\t{}\t".format(cur_iter, epoch, batch)
-                + "\t".join(map("{:.5f}".format, self.train_metrics.avg_values))
-                + "\n"
-            )
-
-        self.update_visualizer_metrics(cur_iter, train=True)
-        self.train_metrics.reset("time/img", "loss", "loss_em", "loss_bin", "loss_rec", "loss_freq")
-
-    def win_loss(self, split):
-        return f"{split}_loss"
-
-    def update_visualizer_metrics(self, cur_iter, train):
-        """Update visualizer with metrics."""
-        if self.visualizer is None:
-            return None
-
-        split, metrics = ("train", self.train_metrics) if train else ("val", self.val_metrics)
-        self._visualize_losses(cur_iter, split, metrics)
-
-        if train:
-            if self.n_prototypes > 1:
-                self._visualize_cluster_proportions(metrics)
-        else:
-            self._visualize_global_scores(cur_iter)
-            self._visualize_class_scores(cur_iter)
-
     def _visualize_losses(self, cur_iter, split, metrics):
         """Visualize loss metrics."""
         losses = [n for n in metrics.names if n.startswith("loss")]  # NOTE kmeans => if "loss" in n
@@ -349,6 +391,21 @@ class AbstractTrainer(ABC):
                 height=VIZ_HEIGHT,
             ),
         )
+
+    def update_visualizer_metrics(self, cur_iter, train):
+        """Update visualizer with metrics."""
+        if self.visualizer is None:
+            return None
+
+        split, metrics = ("train", self.train_metrics) if train else ("val", self.val_metrics)
+        self._visualize_losses(cur_iter, split, metrics)
+
+        if train:
+            if self.n_prototypes > 1:
+                self._visualize_cluster_proportions(metrics)
+        else:
+            self._visualize_global_scores(cur_iter)
+            self._visualize_class_scores(cur_iter)
 
     def get_n_clusters(self):
         """Return number of clusters to display in visualizations."""
@@ -414,67 +471,3 @@ class AbstractTrainer(ABC):
                 height=VIZ_HEIGHT,
             ),
         )
-
-    @abstractmethod
-    def log_val_metrics(self, cur_iter, epoch, batch, precision=5):
-        stat = PRINT_VAL_STAT_FMT(
-            epoch, self.n_epochs, batch, self.n_batches, self.val_metrics
-        )
-
-        fmt = f"{{:.{precision}f}}".format
-        self.print_and_log_info(stat)
-        with open(self.val_metrics_path, mode="a") as f:
-            f.write(
-                f"{cur_iter}\t{epoch}\t{batch}\t"
-                + "\t".join(map(fmt, self.val_metrics.avg_values))
-                + "\n"
-            )
-
-        scores = self.val_scores.compute()
-        self.print_and_log_info(
-            "val_scores: "
-            + ", ".join([f"{k}={fmt(v)}" for k, v in scores.items()])
-        )
-        with open(self.val_scores_path, mode="a") as f:
-            f.write(
-                f"{cur_iter}\t{epoch}\t{batch}\t"
-                + "\t".join(map(fmt, scores.values()))
-                + "\n"
-            )
-
-        self.update_visualizer_metrics(cur_iter, train=False)
-        self.val_scores.reset()
-        self.val_metrics.reset()
-
-    @abstractmethod
-    def save(self, epoch, batch):
-        state = {
-            "epoch": epoch,
-            "batch": batch,
-            "model_name": self.model_name,
-            "model_kwargs": self.model_kwargs,
-            "model_state": self.model.state_dict(),
-            "n_prototypes": self.n_prototypes,
-            "optimizer_state": self.optimizer.state_dict(),
-            "scheduler_state": self.scheduler.state_dict(),
-        }
-        if hasattr(self, "sprite_optimizer"): # NOTE only for kmeans trainer
-            state["sprite_optimizer_state"] = self.sprite_optimizer.state_dict()
-        save_path = self.run_dir / MODEL_FILE
-        torch.save(state, save_path)
-        self.print_and_log_info("Model saved at {}".format(save_path))
-
-    @abstractmethod
-    def evaluate(self):
-        """Run evaluation process."""
-        raise NotImplementedError
-
-    @abstractmethod
-    def qualitative_eval(self):
-        """Run qualitative evaluation."""
-        raise NotImplementedError
-
-    @abstractmethod
-    def quantitative_eval(self):
-        """Run quantitative evaluation."""
-        raise NotImplementedError
