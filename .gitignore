@@ -37,11 +37,7 @@ evaluate.sh
 recluster.sh
 debug.sh
 /multirun
-*.sh
 /outputs
-
-# Jupyter Notebook
-.ipynb_checkpoints
 
 # Environment variables
 .env

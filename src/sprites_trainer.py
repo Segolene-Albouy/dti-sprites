@@ -26,20 +26,18 @@ except ModuleNotFoundError:
 
 from .dataset import get_dataset
 from .model import get_model
-from .model.tools import count_parameters, safe_model_state_dict
+from .model.tools import safe_model_state_dict
 from .optimizer import get_optimizer
-from .scheduler import get_scheduler
 from .utils import (
     use_seed,
     coerce_to_path_and_check_exist,
     coerce_to_path_and_create_dir,
 )
 from .utils.image import convert_to_img, save_gif
-from .utils.logger import get_logger, print_warning
+from .utils.logger import print_warning
 from .utils.metrics import (
     AverageTensorMeter,
     AverageMeter,
-    Metrics,
     Scores,
     SegmentationScores,
     InstanceSegScores,
@@ -80,283 +78,6 @@ class Trainer(AbstractTrainer):
     @use_seed()
     def __init__(self, cfg, run_dir, save=False):
         super().__init__(cfg, run_dir, save)
-        # self.run_dir = coerce_to_path_and_create_dir(run_dir)
-        # self.logger = get_logger(self.run_dir, name="trainer")
-        # self.print_and_log_info(
-        #     "Trainer initialisation: run directory is {}".format(run_dir)
-        # )
-
-        # self.save_img = save
-        # OmegaConf.save(cfg, self.run_dir / "config.yaml")
-        # self.print_and_log_info("Current config copied to run directory")
-
-        # # Datasets and dataloaders
-        # self.dataset_kwargs = cfg["dataset"]
-        # self.dataset_name = self.dataset_kwargs["name"]
-        # train_dataset = get_dataset(self.dataset_name)("train", **self.dataset_kwargs)
-        # val_dataset = get_dataset(self.dataset_name)("val", **self.dataset_kwargs)
-        #
-        # self.n_classes = train_dataset.n_classes
-        # self.is_val_empty = len(val_dataset) == 0
-        # self.print_and_log_info(
-        #     "Dataset {} instantiated with {}".format(
-        #         self.dataset_name, self.dataset_kwargs
-        #     )
-        # )
-        # self.print_and_log_info(
-        #     "Found {} classes, {} train samples, {} val samples".format(
-        #         self.n_classes, len(train_dataset), len(val_dataset)
-        #     )
-        # )
-        #
-        # self.img_size = train_dataset.img_size
-        # self.batch_size = (
-        #     cfg["training"]["batch_size"]
-        #     if cfg["training"]["batch_size"] < len(train_dataset)
-        #     else len(train_dataset)
-        # )
-        # self.n_workers = cfg["training"].get("n_workers", 4)
-        # self.train_loader = DataLoader(
-        #     train_dataset,
-        #     batch_size=self.batch_size,
-        #     num_workers=self.n_workers,
-        #     shuffle=True,
-        # )
-        # self.val_loader = DataLoader(
-        #     val_dataset, batch_size=self.batch_size, num_workers=self.n_workers
-        # )
-        # self.print_and_log_info(
-        #     "Dataloaders instantiated with batch_size={} and n_workers={}".format(
-        #         self.batch_size, self.n_workers
-        #     )
-        # )
-        # self.seg_eval = getattr(train_dataset, "seg_eval", False)
-        # self.instance_eval = getattr(train_dataset, "instance_eval", False)
-        #
-        # self.n_batches = len(self.train_loader)
-        # self.n_iterations, self.n_epochs = cfg["training"].get("n_iterations"), cfg[
-        #     "training"
-        # ].get("n_epochs")
-        # assert not (self.n_iterations is not None and self.n_epochs is not None)
-        # if self.n_iterations is not None:
-        #     self.n_epochs = max(self.n_iterations // self.n_batches, 1)
-        # else:
-        #     self.n_iterations = self.n_epochs * len(self.train_loader)
-
-        # Model
-        # self.model_kwargs = cfg["model"]
-        # self.model_name = self.model_kwargs["name"]
-        # self.is_gmm = "gmm" in self.model_name
-        # self.model = get_model(self.model_name)(self.n_epochs,
-        #                                         self.train_loader.dataset, **self.model_kwargs
-        #                                         ).to(self.device)
-        # self.print_and_log_info(
-        #     "Using model {} with kwargs {}".format(self.model_name, self.model_kwargs)
-        # )
-        # self.print_and_log_info(
-        #     "Number of trainable parameters: {}".format(
-        #         f"{count_parameters(self.model):,}"
-        #     )
-        # )
-        # self.n_prototypes = self.model.n_prototypes
-        # self.n_backgrounds = getattr(self.model, "n_backgrounds", 0)
-        # self.n_objects = max(self.model.n_objects, 1)
-        # self.pred_class = getattr(self.model, "pred_class", False) or getattr(
-        #     self.model, "estimate_minimum", False
-        # )
-        # if self.pred_class:
-        #     self.n_clusters = self.n_prototypes * self.n_objects
-        # else:
-        #     self.n_clusters = self.n_prototypes ** self.n_objects * max(
-        #         self.n_backgrounds, 1
-        #     )
-        # self.learn_masks = getattr(self.model, "learn_masks", False)
-        # self.learn_backgrounds = getattr(self.model, "learn_backgrounds", False)
-        # self.learn_proba = getattr(self.model, "proba", False)
-
-        # # Optimizer
-        # opt_params = cfg["training"]["optimizer"] or {}
-        # optimizer_name = cfg["training"]["optimizer_name"]
-        # cluster_kwargs = cfg["training"].get("cluster_optimizer", {})
-        # tsf_kwargs = cfg["training"]["transformer_optimizer"] or {}
-        # self.optimizer = get_optimizer(optimizer_name)(
-        #     [
-        #         dict(params=self.model.cluster_parameters(), **cluster_kwargs),
-        #         dict(params=self.model.transformer_parameters(), **tsf_kwargs),
-        #     ],
-        #     **opt_params,
-        # )
-        # self.model.set_optimizer(self.optimizer)
-        # self.print_and_log_info(
-        #     "Using optimizer {} with kwargs {}".format(optimizer_name, opt_params)
-        # )
-        # self.print_and_log_info("cluster kwargs {}".format(cluster_kwargs))
-        # self.print_and_log_info("transformer kwargs {}".format(tsf_kwargs))
-
-        # # Scheduler
-        # scheduler_params = cfg["training"].get("scheduler", {})
-        # scheduler_name = cfg["training"].get("scheduler_name", {})
-        # self.scheduler_update_range = scheduler_params.get("update_range", "epoch")
-        # assert self.scheduler_update_range in ["epoch", "batch"]
-        # if scheduler_name == "multi_step" and isinstance(
-        #         scheduler_params["milestones"][0], float
-        # ):
-        #     n_tot = (
-        #         self.n_epochs
-        #         if self.scheduler_update_range == "epoch"
-        #         else self.n_iterations
-        #     )
-        #     scheduler_params["milestones"] = [
-        #         round(m * n_tot) for m in scheduler_params["milestones"]
-        #     ]
-        # self.scheduler = get_scheduler(scheduler_name)(
-        #     self.optimizer, **scheduler_params
-        # )
-        # self.cur_lr = self.scheduler.get_last_lr()[0]
-        # self.print_and_log_info(
-        #     "Using scheduler {} with parameters {}".format(
-        #         scheduler_name, scheduler_params
-        #     )
-        # )
-
-        # # Pretrained / Resume
-        # checkpoint_path = cfg["training"].get("pretrained")
-        # checkpoint_path_resume = cfg["training"].get("resume")
-        # assert not (checkpoint_path is not None and checkpoint_path_resume is not None)
-        # if checkpoint_path is not None:
-        #     self.load_from_tag(checkpoint_path)
-        # elif checkpoint_path_resume is not None:
-        #     self.load_from_tag(checkpoint_path_resume, resume=True)
-        # else:
-        #     self.start_epoch, self.start_batch = 1, 1
-
-        # # Train metrics
-        # metric_names = ["time/img", "loss_rec", "loss_em", "loss_bin", "loss_freq"]
-        # metric_names += [f"prop_clus{i}" for i in range(self.n_clusters)]
-        # self.bin_edges = np.arange(0, 1.1, 0.1)
-        # self.bin_counts = np.zeros(len(self.bin_edges) - 1)
-        #
-        # train_iter_interval = cfg["training"]["train_stat_interval"]
-        # self.train_stat_interval = train_iter_interval
-        # self.train_metrics = Metrics(*metric_names)
-        # self.train_metrics_path = self.run_dir / TRAIN_METRICS_FILE
-        # if not self.train_metrics_path.exists():
-        #     with open(self.train_metrics_path, mode="w") as f:
-        #         f.write(
-        #             "iteration\tepoch\tbatch\t"
-        #             + "\t".join(self.train_metrics.names)
-        #             + "\n"
-        #         )
-
-        # # Val metrics & scores
-        # val_iter_interval = cfg["training"]["val_stat_interval"]
-        # self.val_stat_interval = val_iter_interval
-        # self.val_metrics = Metrics("loss_val")
-        # self.val_metrics_path = self.run_dir / VAL_METRICS_FILE
-        # if not self.val_metrics_path.exists():
-        #     with open(self.val_metrics_path, mode="w") as f:
-        #         f.write(
-        #             "iteration\tepoch\tbatch\t"
-        #             + "\t".join(self.val_metrics.names)
-        #             + "\n"
-        #         )
-        #
-        # self.eval_semantic = cfg["training"].get("eval_semantic", False)
-        # self.eval_qualitative = cfg["training"].get("eval_qualitative", False)
-        # self.eval_with_bkg = cfg["training"].get("eval_with_bkg", False)
-        # if self.seg_eval:
-        #     self.val_scores = SegmentationScores(self.n_classes)
-        # elif self.instance_eval:
-        #     self.val_scores = InstanceSegScores(
-        #         self.n_objects + 1, with_bkg=self.eval_with_bkg
-        #     )
-        # else:
-        #     self.val_scores = Scores(self.n_classes, self.n_prototypes)
-        # self.val_scores_path = self.run_dir / VAL_SCORES_FILE
-        # if not self.val_scores_path.exists():
-        #     with open(self.val_scores_path, mode="w") as f:
-        #         f.write(
-        #             "iteration\tepoch\tbatch\t"
-        #             + "\t".join(self.val_scores.names)
-        #             + "\n"
-        #         )
-
-        # Prototypes
-        # self.check_cluster_interval = cfg["training"]["check_cluster_interval"]
-        # if self.save_img:
-        #     self.prototypes_path = coerce_to_path_and_create_dir(
-        #         self.run_dir / "prototypes"
-        #     )
-        #     [
-        #         coerce_to_path_and_create_dir(self.prototypes_path / f"proto{k}")
-        #         for k in range(self.n_prototypes)
-        #     ]
-        #
-        #     if self.learn_masks:
-        #         self.masked_prototypes_path = coerce_to_path_and_create_dir(
-        #             self.run_dir / "masked_prototypes"
-        #         )
-        #         [
-        #             coerce_to_path_and_create_dir(
-        #                 self.masked_prototypes_path / f"proto{k}"
-        #             )
-        #             for k in range(self.n_prototypes)
-        #         ]
-        #         self.masks_path = coerce_to_path_and_create_dir(self.run_dir / "masks")
-        #         [
-        #             coerce_to_path_and_create_dir(self.masks_path / f"mask{k}")
-        #             for k in range(self.n_prototypes)
-        #         ]
-        #     if self.learn_backgrounds:
-        #         self.backgrounds_path = coerce_to_path_and_create_dir(
-        #             self.run_dir / "backgrounds"
-        #         )
-        #         [
-        #             coerce_to_path_and_create_dir(self.backgrounds_path / f"bkg{k}")
-        #             for k in range(self.n_backgrounds)
-        #         ]
-        #
-        #     # Transformation predictions
-        #     self.transformation_path = coerce_to_path_and_create_dir(
-        #         self.run_dir / "transformations"
-        #     )
-        #     self.images_to_tsf = next(iter(self.train_loader))[0][
-        #                          :N_TRANSFORMATION_PREDICTIONS
-        #                          ].to(self.device)
-        #     for k in range(self.images_to_tsf.size(0)):
-        #         out = coerce_to_path_and_create_dir(
-        #             self.transformation_path / f"img{k}"
-        #         )
-        #         convert_to_img(self.images_to_tsf[k]).save(out / "input.png")
-        #         N = self.n_clusters if self.n_clusters <= 40 else 2 * self.n_prototypes
-        #         [coerce_to_path_and_create_dir(out / f"tsf{k}") for k in range(N)]
-        #         if self.learn_masks:
-        #             [
-        #                 coerce_to_path_and_create_dir(out / f"frg_tsf{k}")
-        #                 for k in range(self.n_prototypes)
-        #             ]
-        #             [
-        #                 coerce_to_path_and_create_dir(out / f"mask_tsf{k}")
-        #                 for k in range(self.n_prototypes)
-        #             ]
-        #         if self.learn_backgrounds:
-        #             [
-        #                 coerce_to_path_and_create_dir(out / f"bkg_tsf{k}")
-        #                 for k in range(self.n_backgrounds)
-        #             ]
-
-        # # Visdom
-        # viz_port = cfg["training"].get("visualizer_port")
-        # if viz_port is not None:
-        #     os.environ["http_proxy"] = ""
-        #     self.visualizer = visdom.Visdom(
-        #         port=viz_port, env=f"{self.run_dir.parent.name}_{self.run_dir.name}"
-        #     )
-        #     self.visualizer.delete_env(self.visualizer.env)  # Clean env before plotting
-        #     self.print_and_log_info(f"Visualizer initialised at {viz_port}")
-        # else:
-        #     self.visualizer = None
-        #     self.print_and_log_info("No visualizer initialized")
 
     ######################
     #   SETUP METHODS    #
@@ -1577,12 +1298,10 @@ def main(cfg: DictConfig) -> None:
     dataset = cfg["dataset"]["name"]
     seed = cfg["training"]["seed"]
     save = cfg["training"]["save"]
-    day = datetime.datetime.now().day
-    month = datetime.datetime.now().month
+    now = datetime.datetime.now().isoformat()
     job_name = HydraConfig.get().job.name
-    job_id = HydraConfig.get().job.num
 
-    tag = f"{dataset}_{job_name}_{job_id}"
+    tag = f"{dataset}_{job_name}_{now}"
 
     if cfg["training"]["cont"] == True:
         cfg["training"]["resume"] = tag

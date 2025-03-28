@@ -1,5 +1,5 @@
 defaults:
-  - override hydra/launcher: jz
+#  - override hydra/launcher: jz
   - _self_
 
 model:

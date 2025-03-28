@@ -108,15 +108,14 @@ class AbstractTrainer(ABC):
     interpolate_settings = {'mode': 'bilinear'}
 
     def __init__(self, cfg, run_dir, save=False, *args, **kwargs):
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.print_device_info()
-
         self.run_dir = coerce_to_path_and_create_dir(run_dir)
-        self.save_img = save
-
         self.setup_logging()
         self.setup_config(cfg)
 
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.print_device_info()
+
+        self.save_img = save
         self.setup_dataset()
         self.setup_dataloaders()
 

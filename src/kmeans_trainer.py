@@ -2,6 +2,7 @@ import argparse
 import os
 import shutil
 import time
+import datetime
 
 import hydra
 import yaml
@@ -24,9 +25,9 @@ from .utils import (
     coerce_to_path_and_create_dir,
 )
 from .utils.image import convert_to_img, save_gif
-from .utils.logger import get_logger, print_warning
-from .utils.metrics import AverageTensorMeter, AverageMeter, Metrics, Scores
-from .utils.path import CONFIGS_PATH, RUNS_PATH
+from .utils.logger import print_warning
+from .utils.metrics import AverageTensorMeter, AverageMeter, Scores
+from .utils.path import RUNS_PATH
 
 from .abstract_trainer import AbstractTrainer, PRINT_CHECK_CLUSTERS_FMT
 
@@ -43,237 +44,6 @@ class Trainer(AbstractTrainer):
     @use_seed()
     def __init__(self, cfg, run_dir, save=False, *args, **kwargs):
         super().__init__(cfg, run_dir, save, *args, **kwargs)
-        # self.run_dir = coerce_to_path_and_create_dir(run_dir)
-        # self.logger = get_logger(self.run_dir, name="trainer")
-        # self.print_and_log_info(
-        #     "Trainer initialisation: run directory is {}".format(run_dir)
-        # )
-        #
-        # self.save_img = save
-        # OmegaConf.save(cfg, self.run_dir / "config.yaml")
-        # self.print_and_log_info("Current config saved to run directory")
-
-        # # Datasets and dataloaders
-        # self.dataset_kwargs = cfg["dataset"]
-        # self.dataset_name = self.dataset_kwargs.pop("name")
-        # train_dataset = get_dataset(self.dataset_name)("train", **self.dataset_kwargs)
-        # val_dataset = get_dataset(self.dataset_name)("val", **self.dataset_kwargs)
-        #
-        # self.n_classes = train_dataset.n_classes
-        # self.is_val_empty = len(val_dataset) == 0
-        # self.print_and_log_info(
-        #     "Dataset {} instantiated with {}".format(
-        #         self.dataset_name, self.dataset_kwargs
-        #     )
-        # )
-        # self.print_and_log_info(
-        #     "Found {} classes, {} train samples, {} val samples".format(
-        #         self.n_classes, len(train_dataset), len(val_dataset)
-        #     )
-        # )
-        #
-        # self.img_size = train_dataset.img_size
-        # self.batch_size = (
-        #     cfg["training"]["batch_size"]
-        #     if cfg["training"]["batch_size"] < len(train_dataset)
-        #     else len(train_dataset)
-        # )
-        # self.n_workers = cfg["training"].get("n_workers", 4)
-        # self.train_loader = DataLoader(
-        #     train_dataset,
-        #     batch_size=self.batch_size,
-        #     num_workers=self.n_workers,
-        #     shuffle=True,
-        # )
-        # self.val_loader = DataLoader(
-        #     val_dataset, batch_size=self.batch_size, num_workers=self.n_workers
-        # )
-        # self.print_and_log_info(
-        #     "Dataloaders instantiated with batch_size={} and n_workers={}".format(
-        #         self.batch_size, self.n_workers
-        #     )
-        # )
-        #
-        # self.n_batches = len(self.train_loader)
-        # self.n_iterations, self.n_epochs = cfg["training"].get("n_iterations"), cfg[
-        #     "training"
-        # ].get("n_epochs")
-        # assert not (self.n_iterations is not None and self.n_epochs is not None)
-        # if self.n_iterations is not None:
-        #     self.n_epochs = max(self.n_iterations // self.n_batches, 1)
-        # else:
-        #     self.n_iterations = self.n_epochs * len(self.train_loader)
-
-        # # Model
-        # self.model_kwargs = cfg["model"]
-        # self.model_name = self.model_kwargs.pop("name")
-        # self.is_gmm = "gmm" in self.model_name
-        # self.model = get_model(self.model_name)(
-        #     self.train_loader.dataset, **self.model_kwargs
-        # ).to(self.device)
-        # self.print_and_log_info(
-        #     "Using model {} with kwargs {}".format(self.model_name, self.model_kwargs)
-        # )
-        # self.print_and_log_info(
-        #     "Number of trainable parameters: {}".format(
-        #         f"{count_parameters(self.model):,}"
-        #     )
-        # )
-        # self.n_prototypes = self.model.n_prototypes
-
-        # # Optimizer
-        # self.opt_params = cfg["training"]["optimizer"] or {}
-        # self.sprite_opt_params = cfg["training"].get("sprite_optimizer", {})
-        # self.optimizer_name = self.opt_params.pop("name")
-        # self.cluster_kwargs = self.opt_params.pop("cluster", {})
-        # self.tsf_kwargs = self.opt_params.pop("transformer", {})
-        # self.sprite_optimizer_name = self.sprite_opt_params.pop("name", None)
-        # if self.sprite_optimizer_name in ["SGD", "sgd"]:
-        #     self.sprite_optimizer = get_optimizer(self.sprite_optimizer_name)(
-        #         [dict(params=self.model.cluster_parameters(), **self.cluster_kwargs)],
-        #         **self.sprite_opt_params,
-        #     )
-        #     self.optimizer = get_optimizer(self.optimizer_name)(
-        #         [dict(params=self.model.transformer_parameters(), **self.tsf_kwargs)],
-        #         **self.opt_params,
-        #     )
-        #     self.model.set_optimizer(self.optimizer, self.sprite_optimizer)
-        # else:
-        #     self.optimizer = get_optimizer(self.optimizer_name)(
-        #         [dict(params=self.model.cluster_parameters(), **self.cluster_kwargs)]
-        #         + [dict(params=self.model.transformer_parameters(), **self.tsf_kwargs)],
-        #         **self.opt_params,
-        #     )
-        # self.model.set_optimizer(self.optimizer)
-        # self.print_and_log_info(
-        #     "Using optimizer {} with kwargs {}".format(
-        #         self.optimizer_name, self.opt_params
-        #     )
-        # )
-        # self.print_and_log_info("cluster kwargs {}".format(self.cluster_kwargs))
-        # self.print_and_log_info("transformer kwargs {}".format(self.tsf_kwargs))
-
-        # # Scheduler
-        # self.scheduler_params = cfg["training"].get("scheduler", {}) or {}
-        # self.scheduler_name = self.scheduler_params.pop("name", None)
-        # self.scheduler_update_range = self.scheduler_params.pop("update_range", "epoch")
-        # assert self.scheduler_update_range in ["epoch", "batch"]
-        # if self.scheduler_name == "multi_step" and isinstance(
-        #     self.scheduler_params["milestones"][0], float
-        # ):
-        #     n_tot = (
-        #         self.n_epochs
-        #         if self.scheduler_update_range == "epoch"
-        #         else self.n_iterations
-        #     )
-        #     self.scheduler_params["milestones"] = [
-        #         round(m * n_tot) for m in self.scheduler_params["milestones"]
-        #     ]
-        # self.scheduler = get_scheduler(self.scheduler_name)(
-        #     self.optimizer, **self.scheduler_params
-        # )
-        # self.cur_lr = self.scheduler.get_last_lr()[0]
-        # self.print_and_log_info(
-        #     "Using scheduler {} with parameters {}".format(
-        #         self.scheduler_name, self.scheduler_params
-        #     )
-        # )
-
-        # # Pretrained / Resume
-        # checkpoint_path = cfg["training"].get("pretrained")
-        # checkpoint_path_resume = cfg["training"].get("resume")
-        # assert not (checkpoint_path is not None and checkpoint_path_resume is not None)
-        # if checkpoint_path is not None:
-        #     self.load_from_tag(checkpoint_path)
-        # elif checkpoint_path_resume is not None:
-        #     self.load_from_tag(checkpoint_path_resume, resume=True)
-        # else:
-        #     self.start_epoch, self.start_batch = 1, 1
-        #
-        # self.parent_model = None
-
-        # Train metrics & check_cluster interval
-        # metric_names = ["time/img", "loss"]
-        # metric_names += [f"prop_clus{i}" for i in range(self.n_prototypes)]
-        # metric_names += [f"proba_clus{i}" for i in range(self.n_prototypes)]
-        # self.bin_edges = np.arange(0, 1.1, 0.1)
-        # self.bin_counts = np.zeros(len(self.bin_edges) - 1)
-        # train_iter_interval = cfg["training"]["train_stat_interval"]
-        # self.train_stat_interval = train_iter_interval
-        # self.train_metrics = Metrics(*metric_names)
-        # self.train_metrics_path = self.run_dir / TRAIN_METRICS_FILE
-        # with open(self.train_metrics_path, mode="w") as f:
-        #     f.write(
-        #         "iteration\tepoch\tbatch\t" + "\t".join(self.train_metrics.names) + "\n"
-        #     )
-        # self.check_cluster_interval = cfg["training"]["check_cluster_interval"]
-
-        # # Val metrics & scores
-        # val_iter_interval = cfg["training"]["val_stat_interval"]
-        # self.val_stat_interval = val_iter_interval
-        # val_metric_names = ["loss_val"]
-        # train_iter_interval = cfg["training"]["train_stat_interval"]
-        # self.val_metrics = Metrics(*val_metric_names)
-        # self.val_metrics_path = self.run_dir / VAL_METRICS_FILE
-        # with open(self.val_metrics_path, mode="w") as f:
-        #     f.write(
-        #         "iteration\tepoch\tbatch\t" + "\t".join(self.val_metrics.names) + "\n"
-        #     )
-        #
-        # self.val_scores = Scores(self.n_classes, self.n_prototypes)
-        # self.val_scores_path = self.run_dir / VAL_SCORES_FILE
-        # with open(self.val_scores_path, mode="w") as f:
-        #     f.write(
-        #         "iteration\tepoch\tbatch\t" + "\t".join(self.val_scores.names) + "\n"
-        #     )
-
-        # # Prototypes & Variances
-        # if self.save_img:
-        #     # self.prototypes_path = coerce_to_path_and_create_dir(
-        #     #     self.run_dir / "prototypes"
-        #     # )
-        #     # [
-        #     #     coerce_to_path_and_create_dir(self.prototypes_path / f"proto{k}")
-        #     #     for k in range(self.n_prototypes)
-        #     # ]
-        #     # if self.is_gmm:
-        #     #     self.variances_path = coerce_to_path_and_create_dir(
-        #     #         self.run_dir / "variances"
-        #     #     )
-        #     #     [
-        #     #         coerce_to_path_and_create_dir(self.variances_path / f"var{k}")
-        #     #         for k in range(self.n_prototypes)
-        #     #     ]
-        #
-        #     # Transformation predictions
-        #     # self.transformation_path = coerce_to_path_and_create_dir(
-        #     #     self.run_dir / "transformations"
-        #     # )
-        #     # self.images_to_tsf = next(iter(self.train_loader))[0][
-        #     #     :N_TRANSFORMATION_PREDICTIONS
-        #     # ].to(self.device)
-        #     for k in range(self.images_to_tsf.size(0)):
-        #         out = coerce_to_path_and_create_dir(self.transformation_path / f"img{k}")
-        #         convert_to_img(self.images_to_tsf[k]).save(out / "input.png")
-        #         [
-        #             coerce_to_path_and_create_dir(out / f"tsf{k}")
-        #             for k in range(self.n_prototypes)
-        #         ]
-
-        # # Visdom
-        # viz_port = cfg["training"].get("visualizer_port")
-        # if viz_port is not None:
-        #     from visdom import Visdom
-        #
-        #     os.environ["http_proxy"] = ""
-        #     self.visualizer = Visdom(
-        #         port=viz_port, env=f"{self.run_dir.parent.name}_{self.run_dir.name}"
-        #     )
-        #     self.visualizer.delete_env(self.visualizer.env)  # Clean env before plotting
-        #     self.print_and_log_info(f"Visualizer initialised at {viz_port}")
-        # else:
-        #     self.visualizer = None
-        #     self.print_and_log_info("No visualizer initialized")
 
     ######################
     #   SETUP METHODS    #
@@ -729,8 +499,9 @@ def main(cfg: DictConfig) -> None:
     save = cfg["training"]["save"]
 
     job_name = HydraConfig.get().job.name
-    job_id = HydraConfig.get().job.num
-    tag = f"{dataset}_{job_name}_{job_id}"
+    # job_id = HydraConfig.get().job.num
+    now = datetime.datetime.now().isoformat()
+    tag = f"{dataset}_{job_name}_{now}"
 
     if cfg["training"].get("cont", False):
         cfg["training"]["resume"] = tag
