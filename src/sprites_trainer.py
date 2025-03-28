@@ -69,6 +69,10 @@ class Trainer(AbstractTrainer):
     learn_backgrounds = None
     learn_proba = None
 
+    masked_prototypes_path = None
+    masks_path = None
+    backgrounds_path = None
+
     eval_semantic = None
     eval_qualitative = None
     eval_with_bkg = None
@@ -278,68 +282,68 @@ class Trainer(AbstractTrainer):
         #         )
 
         # Prototypes
-        self.check_cluster_interval = cfg["training"]["check_cluster_interval"]
-        if self.save_img:
-            self.prototypes_path = coerce_to_path_and_create_dir(
-                self.run_dir / "prototypes"
-            )
-            [
-                coerce_to_path_and_create_dir(self.prototypes_path / f"proto{k}")
-                for k in range(self.n_prototypes)
-            ]
-
-            if self.learn_masks:
-                self.masked_prototypes_path = coerce_to_path_and_create_dir(
-                    self.run_dir / "masked_prototypes"
-                )
-                [
-                    coerce_to_path_and_create_dir(
-                        self.masked_prototypes_path / f"proto{k}"
-                    )
-                    for k in range(self.n_prototypes)
-                ]
-                self.masks_path = coerce_to_path_and_create_dir(self.run_dir / "masks")
-                [
-                    coerce_to_path_and_create_dir(self.masks_path / f"mask{k}")
-                    for k in range(self.n_prototypes)
-                ]
-            if self.learn_backgrounds:
-                self.backgrounds_path = coerce_to_path_and_create_dir(
-                    self.run_dir / "backgrounds"
-                )
-                [
-                    coerce_to_path_and_create_dir(self.backgrounds_path / f"bkg{k}")
-                    for k in range(self.n_backgrounds)
-                ]
-
-            # Transformation predictions
-            self.transformation_path = coerce_to_path_and_create_dir(
-                self.run_dir / "transformations"
-            )
-            self.images_to_tsf = next(iter(self.train_loader))[0][
-                                 :N_TRANSFORMATION_PREDICTIONS
-                                 ].to(self.device)
-            for k in range(self.images_to_tsf.size(0)):
-                out = coerce_to_path_and_create_dir(
-                    self.transformation_path / f"img{k}"
-                )
-                convert_to_img(self.images_to_tsf[k]).save(out / "input.png")
-                N = self.n_clusters if self.n_clusters <= 40 else 2 * self.n_prototypes
-                [coerce_to_path_and_create_dir(out / f"tsf{k}") for k in range(N)]
-                if self.learn_masks:
-                    [
-                        coerce_to_path_and_create_dir(out / f"frg_tsf{k}")
-                        for k in range(self.n_prototypes)
-                    ]
-                    [
-                        coerce_to_path_and_create_dir(out / f"mask_tsf{k}")
-                        for k in range(self.n_prototypes)
-                    ]
-                if self.learn_backgrounds:
-                    [
-                        coerce_to_path_and_create_dir(out / f"bkg_tsf{k}")
-                        for k in range(self.n_backgrounds)
-                    ]
+        # self.check_cluster_interval = cfg["training"]["check_cluster_interval"]
+        # if self.save_img:
+        #     self.prototypes_path = coerce_to_path_and_create_dir(
+        #         self.run_dir / "prototypes"
+        #     )
+        #     [
+        #         coerce_to_path_and_create_dir(self.prototypes_path / f"proto{k}")
+        #         for k in range(self.n_prototypes)
+        #     ]
+        #
+        #     if self.learn_masks:
+        #         self.masked_prototypes_path = coerce_to_path_and_create_dir(
+        #             self.run_dir / "masked_prototypes"
+        #         )
+        #         [
+        #             coerce_to_path_and_create_dir(
+        #                 self.masked_prototypes_path / f"proto{k}"
+        #             )
+        #             for k in range(self.n_prototypes)
+        #         ]
+        #         self.masks_path = coerce_to_path_and_create_dir(self.run_dir / "masks")
+        #         [
+        #             coerce_to_path_and_create_dir(self.masks_path / f"mask{k}")
+        #             for k in range(self.n_prototypes)
+        #         ]
+        #     if self.learn_backgrounds:
+        #         self.backgrounds_path = coerce_to_path_and_create_dir(
+        #             self.run_dir / "backgrounds"
+        #         )
+        #         [
+        #             coerce_to_path_and_create_dir(self.backgrounds_path / f"bkg{k}")
+        #             for k in range(self.n_backgrounds)
+        #         ]
+        #
+        #     # Transformation predictions
+        #     self.transformation_path = coerce_to_path_and_create_dir(
+        #         self.run_dir / "transformations"
+        #     )
+        #     self.images_to_tsf = next(iter(self.train_loader))[0][
+        #                          :N_TRANSFORMATION_PREDICTIONS
+        #                          ].to(self.device)
+        #     for k in range(self.images_to_tsf.size(0)):
+        #         out = coerce_to_path_and_create_dir(
+        #             self.transformation_path / f"img{k}"
+        #         )
+        #         convert_to_img(self.images_to_tsf[k]).save(out / "input.png")
+        #         N = self.n_clusters if self.n_clusters <= 40 else 2 * self.n_prototypes
+        #         [coerce_to_path_and_create_dir(out / f"tsf{k}") for k in range(N)]
+        #         if self.learn_masks:
+        #             [
+        #                 coerce_to_path_and_create_dir(out / f"frg_tsf{k}")
+        #                 for k in range(self.n_prototypes)
+        #             ]
+        #             [
+        #                 coerce_to_path_and_create_dir(out / f"mask_tsf{k}")
+        #                 for k in range(self.n_prototypes)
+        #             ]
+        #         if self.learn_backgrounds:
+        #             [
+        #                 coerce_to_path_and_create_dir(out / f"bkg_tsf{k}")
+        #                 for k in range(self.n_backgrounds)
+        #             ]
 
         # Visdom
         viz_port = cfg["training"].get("visualizer_port")
@@ -353,11 +357,6 @@ class Trainer(AbstractTrainer):
         else:
             self.visualizer = None
             self.print_and_log_info("No visualizer initialized")
-
-        self.interpolate_settings = {
-            'mode': 'bilinear',
-            'align_corners': False
-        }
 
     ######################
     #   SETUP METHODS    #
@@ -406,39 +405,26 @@ class Trainer(AbstractTrainer):
         if not self.save_img:
             return
 
-        for k in range(self.images_to_tsf.size(0)):
-            out = self.transformation_path / f"img{k}"
-            for j in range(self.get_n_clusters()):
-                coerce_to_path_and_create_dir(out / f"tsf{j}")
-
         if self.learn_masks:
-            self.masked_prototypes_path = coerce_to_path_and_create_dir(
-                self.run_dir / "masked_prototypes"
-            )
-            for k in range(self.n_prototypes):
-                coerce_to_path_and_create_dir(self.masked_prototypes_path / f"proto{k}")
-
+            self.masked_prototypes_path = coerce_to_path_and_create_dir(self.run_dir / "masked_prototypes")
             self.masks_path = coerce_to_path_and_create_dir(self.run_dir / "masks")
             for k in range(self.n_prototypes):
+                coerce_to_path_and_create_dir(self.masked_prototypes_path / f"proto{k}")
                 coerce_to_path_and_create_dir(self.masks_path / f"mask{k}")
 
-            for k in range(self.images_to_tsf.size(0)):
-                img_path = self.transformation_path / f"img{k}"
-                for j in range(self.n_prototypes):
-                    coerce_to_path_and_create_dir(img_path / f"frg_tsf{j}")
-                    coerce_to_path_and_create_dir(img_path / f"mask_tsf{j}")
+                for j in range(self.images_to_tsf.size(0)):
+                    img_path = self.transformation_path / f"img{j}"
+                    coerce_to_path_and_create_dir(img_path / f"frg_tsf{k}")
+                    coerce_to_path_and_create_dir(img_path / f"mask_tsf{k}")
 
         if self.learn_backgrounds:
-            self.backgrounds_path = coerce_to_path_and_create_dir(
-                self.run_dir / "backgrounds"
-            )
+            self.backgrounds_path = coerce_to_path_and_create_dir(self.run_dir / "backgrounds")
             for k in range(self.n_backgrounds):
                 coerce_to_path_and_create_dir(self.backgrounds_path / f"bkg{k}")
 
-            for k in range(self.images_to_tsf.size(0)):
-                img_path = self.transformation_path / f"img{k}"
-                for j in range(self.n_backgrounds):
-                    coerce_to_path_and_create_dir(img_path / f"bkg_tsf{j}")
+                for j in range(self.images_to_tsf.size(0)):
+                    img_path = self.transformation_path / f"img{j}"
+                    coerce_to_path_and_create_dir(img_path / f"bkg_tsf{k}")
 
     def setup_optimizer(self):
         """Configure optimizer for Sprites model."""
@@ -486,9 +472,13 @@ class Trainer(AbstractTrainer):
         else:
             self.val_scores = Scores(self.n_classes, self.n_prototypes)
 
-    def setup_visualization_artifacts(self, *args, **kwargs):
-        """Set up directories and templates for saving visualizations."""
-        pass
+    def setup_prototypes(self):
+        super().save_prototypes()
+        self.check_cluster_interval = self.cfg["training"]["check_cluster_interval"]
+        if not self.save_img:
+            return
+        for k in range(self.images_to_tsf.size(0)):
+            convert_to_img(self.images_to_tsf[k]).save(self.transformation_path / f"img{k}" / "input.png")
 
     def setup_visualizer(self, *args, **kwargs):
         """Set up real-time visualization (e.g., Visdom)."""
@@ -660,7 +650,7 @@ class Trainer(AbstractTrainer):
             output, compositions = self.model.transform(self.images_to_tsf), []
 
         transformed_imgs = torch.cat([self.images_to_tsf.unsqueeze(1), output], 1)
-        N = self.n_clusters if self.n_clusters <= 40 else 2 * self.n_prototypes
+        N = self.get_n_clusters()
         transformed_imgs = transformed_imgs[:, : N + 1]
         for k in range(transformed_imgs.size(0)):
             for j, img in enumerate(transformed_imgs[k][1:]):

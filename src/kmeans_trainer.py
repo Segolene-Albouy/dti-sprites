@@ -227,38 +227,38 @@ class Trainer(AbstractTrainer):
         #         "iteration\tepoch\tbatch\t" + "\t".join(self.val_scores.names) + "\n"
         #     )
 
-        # Prototypes & Variances
-        if self.save_img:
-            self.prototypes_path = coerce_to_path_and_create_dir(
-                self.run_dir / "prototypes"
-            )
-            [
-                coerce_to_path_and_create_dir(self.prototypes_path / f"proto{k}")
-                for k in range(self.n_prototypes)
-            ]
-            if self.is_gmm:
-                self.variances_path = coerce_to_path_and_create_dir(
-                    self.run_dir / "variances"
-                )
-                [
-                    coerce_to_path_and_create_dir(self.variances_path / f"var{k}")
-                    for k in range(self.n_prototypes)
-                ]
-
-            # Transformation predictions
-            self.transformation_path = coerce_to_path_and_create_dir(
-                self.run_dir / "transformations"
-            )
-            self.images_to_tsf = next(iter(self.train_loader))[0][
-                :N_TRANSFORMATION_PREDICTIONS
-            ].to(self.device)
-            for k in range(self.images_to_tsf.size(0)):
-                out = coerce_to_path_and_create_dir(self.transformation_path / f"img{k}")
-                convert_to_img(self.images_to_tsf[k]).save(out / "input.png")
-                [
-                    coerce_to_path_and_create_dir(out / f"tsf{k}")
-                    for k in range(self.n_prototypes)
-                ]
+        # # Prototypes & Variances
+        # if self.save_img:
+        #     # self.prototypes_path = coerce_to_path_and_create_dir(
+        #     #     self.run_dir / "prototypes"
+        #     # )
+        #     # [
+        #     #     coerce_to_path_and_create_dir(self.prototypes_path / f"proto{k}")
+        #     #     for k in range(self.n_prototypes)
+        #     # ]
+        #     # if self.is_gmm:
+        #     #     self.variances_path = coerce_to_path_and_create_dir(
+        #     #         self.run_dir / "variances"
+        #     #     )
+        #     #     [
+        #     #         coerce_to_path_and_create_dir(self.variances_path / f"var{k}")
+        #     #         for k in range(self.n_prototypes)
+        #     #     ]
+        #
+        #     # Transformation predictions
+        #     # self.transformation_path = coerce_to_path_and_create_dir(
+        #     #     self.run_dir / "transformations"
+        #     # )
+        #     # self.images_to_tsf = next(iter(self.train_loader))[0][
+        #     #     :N_TRANSFORMATION_PREDICTIONS
+        #     # ].to(self.device)
+        #     for k in range(self.images_to_tsf.size(0)):
+        #         out = coerce_to_path_and_create_dir(self.transformation_path / f"img{k}")
+        #         convert_to_img(self.images_to_tsf[k]).save(out / "input.png")
+        #         [
+        #             coerce_to_path_and_create_dir(out / f"tsf{k}")
+        #             for k in range(self.n_prototypes)
+        #         ]
 
         # Visdom
         viz_port = cfg["training"].get("visualizer_port")
@@ -294,9 +294,8 @@ class Trainer(AbstractTrainer):
             return
 
         for k in range(self.images_to_tsf.size(0)):
-            out = self.transformation_path / f"img{k}"
             for j in range(self.n_prototypes):
-                coerce_to_path_and_create_dir(out / f"tsf{j}")
+                coerce_to_path_and_create_dir(self.transformation_path / f"img{k}" / f"tsf{j}")
 
         if self.is_gmm:
             self.variances_path = coerce_to_path_and_create_dir(self.run_dir / "variances")
@@ -349,10 +348,6 @@ class Trainer(AbstractTrainer):
 
     def setup_val_scores(self):
         self.val_scores = Scores(self.n_classes, self.n_prototypes)
-
-    def setup_visualization_artifacts(self, *args, **kwargs):
-        """Set up directories and templates for saving visualizations."""
-        pass
 
     def setup_visualizer(self, *args, **kwargs):
         """Set up real-time visualization (e.g., Visdom)."""

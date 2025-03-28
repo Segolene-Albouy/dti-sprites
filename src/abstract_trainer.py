@@ -128,7 +128,7 @@ class AbstractTrainer(ABC):
         self.setup_checkpoint_loading()
         self.setup_metrics()
 
-        self.setup_visualization_artifacts()
+        self.setup_prototypes()
         self.setup_visualizer()
 
         self.setup_additional_components()
@@ -196,8 +196,6 @@ class AbstractTrainer(ABC):
         self.print_and_log_info(
             f"Dataloaders instantiated with batch_size={self.batch_size} and n_workers={self.n_workers}"
         )
-
-        # Setup counters for training loop
         self.n_batches = len(self.train_loader)
         self._setup_iteration_counts()
 
@@ -245,7 +243,7 @@ class AbstractTrainer(ABC):
             coerce_to_path_and_create_dir(self.prototypes_path / f"proto{k}")
 
         self.transformation_path = coerce_to_path_and_create_dir(self.run_dir / "transformations")
-        self.images_to_tsf = next(iter(self.train_loader))[0][:N_TRANSFORMATION_PREDICTIONS].to(self.device)
+        # self.images_to_tsf = next(iter(self.train_loader))[0][:N_TRANSFORMATION_PREDICTIONS].to(self.device)
 
         for k in range(self.images_to_tsf.size(0)):
             out = coerce_to_path_and_create_dir(self.transformation_path / f"img{k}")
@@ -290,7 +288,6 @@ class AbstractTrainer(ABC):
         if name is None and "name" in scheduler_params:
             name = scheduler_params.pop("name", None)
         return name
-
 
     def setup_checkpoint_loading(self):
         """Handle loading from pretrained models or resuming training."""
@@ -343,10 +340,8 @@ class AbstractTrainer(ABC):
         self.val_scores_path = self.run_dir / VAL_SCORES_FILE
         self.save_metrics_file(self.val_scores_path, self.val_scores.names)
 
-    @abstractmethod
-    def setup_visualization_artifacts(self):
-        """Set up directories and templates for saving visualizations."""
-        raise NotImplementedError
+    def setup_prototypes(self):
+        self.images_to_tsf = next(iter(self.train_loader))[0][:N_TRANSFORMATION_PREDICTIONS].to(self.device)
 
     @abstractmethod
     def setup_visualizer(self):
