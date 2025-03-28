@@ -145,20 +145,20 @@ class Trainer:
         self.instance_eval = getattr(train_dataset, "instance_eval", False)
 
         self.n_batches = len(self.train_loader)
-        self.n_iterations, self.n_epoches = cfg["training"].get("n_iterations"), cfg[
+        self.n_iterations, self.n_epochs = cfg["training"].get("n_iterations"), cfg[
             "training"
-        ].get("n_epoches")
-        assert not (self.n_iterations is not None and self.n_epoches is not None)
+        ].get("n_epochs")
+        assert not (self.n_iterations is not None and self.n_epochs is not None)
         if self.n_iterations is not None:
-            self.n_epoches = max(self.n_iterations // self.n_batches, 1)
+            self.n_epochs = max(self.n_iterations // self.n_batches, 1)
         else:
-            self.n_iterations = self.n_epoches * len(self.train_loader)
+            self.n_iterations = self.n_epochs * len(self.train_loader)
 
         # Model
         self.model_kwargs = cfg["model"]
         self.model_name = self.model_kwargs["name"]
         self.is_gmm = "gmm" in self.model_name
-        self.model = get_model(self.model_name)(self.n_epoches,
+        self.model = get_model(self.model_name)(self.n_epochs,
                                                 self.train_loader.dataset, **self.model_kwargs
                                                 ).to(self.device)
         self.print_and_log_info(
@@ -212,7 +212,7 @@ class Trainer:
                 scheduler_params["milestones"][0], float
         ):
             n_tot = (
-                self.n_epoches
+                self.n_epochs
                 if self.scheduler_update_range == "epoch"
                 else self.n_iterations
             )
@@ -426,13 +426,13 @@ class Trainer:
         cur_iter = (self.start_epoch - 1) * self.n_batches + self.start_batch - 1
         prev_train_stat_iter, prev_val_stat_iter = cur_iter, cur_iter
         prev_check_cluster_iter = cur_iter
-        if self.start_epoch == self.n_epoches:
+        if self.start_epoch == self.n_epochs:
             self.print_and_log_info("No training, only evaluating")
             self.evaluate()
             self.save_metric_plots()
             self.print_and_log_info("Training run is over")
             return
-        for epoch in range(self.start_epoch, self.n_epoches + 1):
+        for epoch in range(self.start_epoch, self.n_epochs + 1):
             batch_start = self.start_batch if epoch == self.start_epoch else 1
             for batch, (images, _, img_masks, _) in enumerate(
                     self.train_loader, start=1
@@ -479,7 +479,7 @@ class Trainer:
         if lr != self.cur_lr:
             self.cur_lr = lr
             self.print_and_log_info(
-                PRINT_LR_UPD_FMT(epoch, self.n_epoches, batch, self.n_batches, lr)
+                PRINT_LR_UPD_FMT(epoch, self.n_epochs, batch, self.n_batches, lr)
             )
 
     def single_train_batch_run(self, images, masks):
@@ -713,7 +713,7 @@ class Trainer:
                     prop, is_background=is_bkg
                 )
                 msg = PRINT_CHECK_CLUSTERS_FMT(
-                    epoch, self.n_epoches, batch, self.n_batches, reassigned, idx
+                    epoch, self.n_epochs, batch, self.n_batches, reassigned, idx
                 )
                 if is_bkg:
                     msg += " for backgrounds"
@@ -736,7 +736,7 @@ class Trainer:
                 prop = proportions.view(self.n_objects, self.n_prototypes)[k]
             reassigned, idx = self.model.reassign_empty_clusters(prop)
             msg = PRINT_CHECK_CLUSTERS_FMT(
-                epoch, self.n_epoches, batch, self.n_batches, reassigned, idx
+                epoch, self.n_epochs, batch, self.n_batches, reassigned, idx
             )
             msg += f" for object layer {k}"
             self.print_and_log_info(msg)
@@ -748,7 +748,7 @@ class Trainer:
         else:
             reassigned, idx = self.model.reassign_empty_clusters(proportions)
             msg = PRINT_CHECK_CLUSTERS_FMT(
-                epoch, self.n_epoches, batch, self.n_batches, reassigned, idx
+                epoch, self.n_epochs, batch, self.n_batches, reassigned, idx
             )
             self.print_and_log_info(msg)
         self.train_metrics.reset(*[f"prop_clus{i}" for i in range(self.n_clusters)])
@@ -756,7 +756,7 @@ class Trainer:
     def log_train_metrics(self, cur_iter, epoch, batch):
         # Print & write metrics to file
         stat = PRINT_TRAIN_STAT_FMT(
-            epoch, self.n_epoches, batch, self.n_batches, self.train_metrics
+            epoch, self.n_epochs, batch, self.n_batches, self.train_metrics
         )
         self.print_and_log_info(stat[:1000])
         with open(self.train_metrics_path, mode="a") as f:
@@ -934,7 +934,7 @@ class Trainer:
 
     def log_val_metrics(self, cur_iter, epoch, batch):
         stat = PRINT_VAL_STAT_FMT(
-            epoch, self.n_epoches, batch, self.n_batches, self.val_metrics
+            epoch, self.n_epochs, batch, self.n_batches, self.val_metrics
         )
         self.print_and_log_info(stat)
         with open(self.val_metrics_path, mode="a") as f:
