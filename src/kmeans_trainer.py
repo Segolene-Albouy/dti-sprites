@@ -18,7 +18,6 @@ from .dataset import get_dataset
 from .model import get_model
 from .model.tools import count_parameters, safe_model_state_dict
 from .optimizer import get_optimizer
-from .scheduler import get_scheduler
 from .utils import (
     use_seed,
     coerce_to_path_and_check_exist,
@@ -37,192 +36,196 @@ class Trainer(AbstractTrainer):
 
     model_name = "dtikmeans"
 
+    # optimizer
+    sprite_optimizer = None
+    parent_model = None
+
     @use_seed()
     def __init__(self, cfg, run_dir, save=False, *args, **kwargs):
         super().__init__(cfg, run_dir, save, *args, **kwargs)
-        self.run_dir = coerce_to_path_and_create_dir(run_dir)
-        self.logger = get_logger(self.run_dir, name="trainer")
-        self.print_and_log_info(
-            "Trainer initialisation: run directory is {}".format(run_dir)
-        )
+        # self.run_dir = coerce_to_path_and_create_dir(run_dir)
+        # self.logger = get_logger(self.run_dir, name="trainer")
+        # self.print_and_log_info(
+        #     "Trainer initialisation: run directory is {}".format(run_dir)
+        # )
+        #
+        # self.save_img = save
+        # OmegaConf.save(cfg, self.run_dir / "config.yaml")
+        # self.print_and_log_info("Current config saved to run directory")
 
-        self.save_img = save
-        OmegaConf.save(cfg, self.run_dir / "config.yaml")
-        self.print_and_log_info("Current config saved to run directory")
+        # # Datasets and dataloaders
+        # self.dataset_kwargs = cfg["dataset"]
+        # self.dataset_name = self.dataset_kwargs.pop("name")
+        # train_dataset = get_dataset(self.dataset_name)("train", **self.dataset_kwargs)
+        # val_dataset = get_dataset(self.dataset_name)("val", **self.dataset_kwargs)
+        #
+        # self.n_classes = train_dataset.n_classes
+        # self.is_val_empty = len(val_dataset) == 0
+        # self.print_and_log_info(
+        #     "Dataset {} instantiated with {}".format(
+        #         self.dataset_name, self.dataset_kwargs
+        #     )
+        # )
+        # self.print_and_log_info(
+        #     "Found {} classes, {} train samples, {} val samples".format(
+        #         self.n_classes, len(train_dataset), len(val_dataset)
+        #     )
+        # )
+        #
+        # self.img_size = train_dataset.img_size
+        # self.batch_size = (
+        #     cfg["training"]["batch_size"]
+        #     if cfg["training"]["batch_size"] < len(train_dataset)
+        #     else len(train_dataset)
+        # )
+        # self.n_workers = cfg["training"].get("n_workers", 4)
+        # self.train_loader = DataLoader(
+        #     train_dataset,
+        #     batch_size=self.batch_size,
+        #     num_workers=self.n_workers,
+        #     shuffle=True,
+        # )
+        # self.val_loader = DataLoader(
+        #     val_dataset, batch_size=self.batch_size, num_workers=self.n_workers
+        # )
+        # self.print_and_log_info(
+        #     "Dataloaders instantiated with batch_size={} and n_workers={}".format(
+        #         self.batch_size, self.n_workers
+        #     )
+        # )
+        #
+        # self.n_batches = len(self.train_loader)
+        # self.n_iterations, self.n_epochs = cfg["training"].get("n_iterations"), cfg[
+        #     "training"
+        # ].get("n_epochs")
+        # assert not (self.n_iterations is not None and self.n_epochs is not None)
+        # if self.n_iterations is not None:
+        #     self.n_epochs = max(self.n_iterations // self.n_batches, 1)
+        # else:
+        #     self.n_iterations = self.n_epochs * len(self.train_loader)
 
-        # Datasets and dataloaders
-        self.dataset_kwargs = cfg["dataset"]
-        self.dataset_name = self.dataset_kwargs.pop("name")
-        train_dataset = get_dataset(self.dataset_name)("train", **self.dataset_kwargs)
-        val_dataset = get_dataset(self.dataset_name)("val", **self.dataset_kwargs)
+        # # Model
+        # self.model_kwargs = cfg["model"]
+        # self.model_name = self.model_kwargs.pop("name")
+        # self.is_gmm = "gmm" in self.model_name
+        # self.model = get_model(self.model_name)(
+        #     self.train_loader.dataset, **self.model_kwargs
+        # ).to(self.device)
+        # self.print_and_log_info(
+        #     "Using model {} with kwargs {}".format(self.model_name, self.model_kwargs)
+        # )
+        # self.print_and_log_info(
+        #     "Number of trainable parameters: {}".format(
+        #         f"{count_parameters(self.model):,}"
+        #     )
+        # )
+        # self.n_prototypes = self.model.n_prototypes
 
-        self.n_classes = train_dataset.n_classes
-        self.is_val_empty = len(val_dataset) == 0
-        self.print_and_log_info(
-            "Dataset {} instantiated with {}".format(
-                self.dataset_name, self.dataset_kwargs
-            )
-        )
-        self.print_and_log_info(
-            "Found {} classes, {} train samples, {} val samples".format(
-                self.n_classes, len(train_dataset), len(val_dataset)
-            )
-        )
+        # # Optimizer
+        # self.opt_params = cfg["training"]["optimizer"] or {}
+        # self.sprite_opt_params = cfg["training"].get("sprite_optimizer", {})
+        # self.optimizer_name = self.opt_params.pop("name")
+        # self.cluster_kwargs = self.opt_params.pop("cluster", {})
+        # self.tsf_kwargs = self.opt_params.pop("transformer", {})
+        # self.sprite_optimizer_name = self.sprite_opt_params.pop("name", None)
+        # if self.sprite_optimizer_name in ["SGD", "sgd"]:
+        #     self.sprite_optimizer = get_optimizer(self.sprite_optimizer_name)(
+        #         [dict(params=self.model.cluster_parameters(), **self.cluster_kwargs)],
+        #         **self.sprite_opt_params,
+        #     )
+        #     self.optimizer = get_optimizer(self.optimizer_name)(
+        #         [dict(params=self.model.transformer_parameters(), **self.tsf_kwargs)],
+        #         **self.opt_params,
+        #     )
+        #     self.model.set_optimizer(self.optimizer, self.sprite_optimizer)
+        # else:
+        #     self.optimizer = get_optimizer(self.optimizer_name)(
+        #         [dict(params=self.model.cluster_parameters(), **self.cluster_kwargs)]
+        #         + [dict(params=self.model.transformer_parameters(), **self.tsf_kwargs)],
+        #         **self.opt_params,
+        #     )
+        # self.model.set_optimizer(self.optimizer)
+        # self.print_and_log_info(
+        #     "Using optimizer {} with kwargs {}".format(
+        #         self.optimizer_name, self.opt_params
+        #     )
+        # )
+        # self.print_and_log_info("cluster kwargs {}".format(self.cluster_kwargs))
+        # self.print_and_log_info("transformer kwargs {}".format(self.tsf_kwargs))
 
-        self.img_size = train_dataset.img_size
-        self.batch_size = (
-            cfg["training"]["batch_size"]
-            if cfg["training"]["batch_size"] < len(train_dataset)
-            else len(train_dataset)
-        )
-        self.n_workers = cfg["training"].get("n_workers", 4)
-        self.train_loader = DataLoader(
-            train_dataset,
-            batch_size=self.batch_size,
-            num_workers=self.n_workers,
-            shuffle=True,
-        )
-        self.val_loader = DataLoader(
-            val_dataset, batch_size=self.batch_size, num_workers=self.n_workers
-        )
-        self.print_and_log_info(
-            "Dataloaders instantiated with batch_size={} and n_workers={}".format(
-                self.batch_size, self.n_workers
-            )
-        )
+        # # Scheduler
+        # self.scheduler_params = cfg["training"].get("scheduler", {}) or {}
+        # self.scheduler_name = self.scheduler_params.pop("name", None)
+        # self.scheduler_update_range = self.scheduler_params.pop("update_range", "epoch")
+        # assert self.scheduler_update_range in ["epoch", "batch"]
+        # if self.scheduler_name == "multi_step" and isinstance(
+        #     self.scheduler_params["milestones"][0], float
+        # ):
+        #     n_tot = (
+        #         self.n_epochs
+        #         if self.scheduler_update_range == "epoch"
+        #         else self.n_iterations
+        #     )
+        #     self.scheduler_params["milestones"] = [
+        #         round(m * n_tot) for m in self.scheduler_params["milestones"]
+        #     ]
+        # self.scheduler = get_scheduler(self.scheduler_name)(
+        #     self.optimizer, **self.scheduler_params
+        # )
+        # self.cur_lr = self.scheduler.get_last_lr()[0]
+        # self.print_and_log_info(
+        #     "Using scheduler {} with parameters {}".format(
+        #         self.scheduler_name, self.scheduler_params
+        #     )
+        # )
 
-        self.n_batches = len(self.train_loader)
-        self.n_iterations, self.n_epochs = cfg["training"].get("n_iterations"), cfg[
-            "training"
-        ].get("n_epochs")
-        assert not (self.n_iterations is not None and self.n_epochs is not None)
-        if self.n_iterations is not None:
-            self.n_epochs = max(self.n_iterations // self.n_batches, 1)
-        else:
-            self.n_iterations = self.n_epochs * len(self.train_loader)
-
-        # Model
-        self.model_kwargs = cfg["model"]
-        self.model_name = self.model_kwargs.pop("name")
-        self.is_gmm = "gmm" in self.model_name
-        self.model = get_model(self.model_name)(
-            self.train_loader.dataset, **self.model_kwargs
-        ).to(self.device)
-        self.print_and_log_info(
-            "Using model {} with kwargs {}".format(self.model_name, self.model_kwargs)
-        )
-        self.print_and_log_info(
-            "Number of trainable parameters: {}".format(
-                f"{count_parameters(self.model):,}"
-            )
-        )
-        self.n_prototypes = self.model.n_prototypes
-
-        # Optimizer
-        self.opt_params = cfg["training"]["optimizer"] or {}
-        self.sprite_opt_params = cfg["training"].get("sprite_optimizer", {})
-        self.optimizer_name = self.opt_params.pop("name")
-        self.cluster_kwargs = self.opt_params.pop("cluster", {})
-        self.tsf_kwargs = self.opt_params.pop("transformer", {})
-        self.sprite_optimizer_name = self.sprite_opt_params.pop("name", None)
-        if self.sprite_optimizer_name in ["SGD", "sgd"]:
-            self.sprite_optimizer = get_optimizer(self.sprite_optimizer_name)(
-                [dict(params=self.model.cluster_parameters(), **self.cluster_kwargs)],
-                **self.sprite_opt_params,
-            )
-            self.optimizer = get_optimizer(self.optimizer_name)(
-                [dict(params=self.model.transformer_parameters(), **self.tsf_kwargs)],
-                **self.opt_params,
-            )
-            self.model.set_optimizer(self.optimizer, self.sprite_optimizer)
-        else:
-            self.optimizer = get_optimizer(self.optimizer_name)(
-                [dict(params=self.model.cluster_parameters(), **self.cluster_kwargs)]
-                + [dict(params=self.model.transformer_parameters(), **self.tsf_kwargs)],
-                **self.opt_params,
-            )
-        self.model.set_optimizer(self.optimizer)
-        self.print_and_log_info(
-            "Using optimizer {} with kwargs {}".format(
-                self.optimizer_name, self.opt_params
-            )
-        )
-        self.print_and_log_info("cluster kwargs {}".format(self.cluster_kwargs))
-        self.print_and_log_info("transformer kwargs {}".format(self.tsf_kwargs))
-
-        # Scheduler
-        self.scheduler_params = cfg["training"].get("scheduler", {}) or {}
-        self.scheduler_name = self.scheduler_params.pop("name", None)
-        self.scheduler_update_range = self.scheduler_params.pop("update_range", "epoch")
-        assert self.scheduler_update_range in ["epoch", "batch"]
-        if self.scheduler_name == "multi_step" and isinstance(
-            self.scheduler_params["milestones"][0], float
-        ):
-            n_tot = (
-                self.n_epochs
-                if self.scheduler_update_range == "epoch"
-                else self.n_iterations
-            )
-            self.scheduler_params["milestones"] = [
-                round(m * n_tot) for m in self.scheduler_params["milestones"]
-            ]
-        self.scheduler = get_scheduler(self.scheduler_name)(
-            self.optimizer, **self.scheduler_params
-        )
-        self.cur_lr = self.scheduler.get_last_lr()[0]
-        self.print_and_log_info(
-            "Using scheduler {} with parameters {}".format(
-                self.scheduler_name, self.scheduler_params
-            )
-        )
-
-        # Pretrained / Resume
-        checkpoint_path = cfg["training"].get("pretrained")
-        checkpoint_path_resume = cfg["training"].get("resume")
-        assert not (checkpoint_path is not None and checkpoint_path_resume is not None)
-        if checkpoint_path is not None:
-            self.load_from_tag(checkpoint_path)
-        elif checkpoint_path_resume is not None:
-            self.load_from_tag(checkpoint_path_resume, resume=True)
-        else:
-            self.start_epoch, self.start_batch = 1, 1
-
-        self.parent_model = None
+        # # Pretrained / Resume
+        # checkpoint_path = cfg["training"].get("pretrained")
+        # checkpoint_path_resume = cfg["training"].get("resume")
+        # assert not (checkpoint_path is not None and checkpoint_path_resume is not None)
+        # if checkpoint_path is not None:
+        #     self.load_from_tag(checkpoint_path)
+        # elif checkpoint_path_resume is not None:
+        #     self.load_from_tag(checkpoint_path_resume, resume=True)
+        # else:
+        #     self.start_epoch, self.start_batch = 1, 1
+        #
+        # self.parent_model = None
 
         # Train metrics & check_cluster interval
-        metric_names = ["time/img", "loss"]
-        metric_names += [f"prop_clus{i}" for i in range(self.n_prototypes)]
-        metric_names += [f"proba_clus{i}" for i in range(self.n_prototypes)]
-        self.bin_edges = np.arange(0, 1.1, 0.1)
-        self.bin_counts = np.zeros(len(self.bin_edges) - 1)
-        train_iter_interval = cfg["training"]["train_stat_interval"]
-        self.train_stat_interval = train_iter_interval
-        self.train_metrics = Metrics(*metric_names)
-        self.train_metrics_path = self.run_dir / TRAIN_METRICS_FILE
-        with open(self.train_metrics_path, mode="w") as f:
-            f.write(
-                "iteration\tepoch\tbatch\t" + "\t".join(self.train_metrics.names) + "\n"
-            )
-        self.check_cluster_interval = cfg["training"]["check_cluster_interval"]
+        # metric_names = ["time/img", "loss"]
+        # metric_names += [f"prop_clus{i}" for i in range(self.n_prototypes)]
+        # metric_names += [f"proba_clus{i}" for i in range(self.n_prototypes)]
+        # self.bin_edges = np.arange(0, 1.1, 0.1)
+        # self.bin_counts = np.zeros(len(self.bin_edges) - 1)
+        # train_iter_interval = cfg["training"]["train_stat_interval"]
+        # self.train_stat_interval = train_iter_interval
+        # self.train_metrics = Metrics(*metric_names)
+        # self.train_metrics_path = self.run_dir / TRAIN_METRICS_FILE
+        # with open(self.train_metrics_path, mode="w") as f:
+        #     f.write(
+        #         "iteration\tepoch\tbatch\t" + "\t".join(self.train_metrics.names) + "\n"
+        #     )
+        # self.check_cluster_interval = cfg["training"]["check_cluster_interval"]
 
-        # Val metrics & scores
-        val_iter_interval = cfg["training"]["val_stat_interval"]
-        self.val_stat_interval = val_iter_interval
-        val_metric_names = ["loss_val"]
-        train_iter_interval = cfg["training"]["train_stat_interval"]
-        self.val_metrics = Metrics(*val_metric_names)
-        self.val_metrics_path = self.run_dir / VAL_METRICS_FILE
-        with open(self.val_metrics_path, mode="w") as f:
-            f.write(
-                "iteration\tepoch\tbatch\t" + "\t".join(self.val_metrics.names) + "\n"
-            )
-
-        self.val_scores = Scores(self.n_classes, self.n_prototypes)
-        self.val_scores_path = self.run_dir / VAL_SCORES_FILE
-        with open(self.val_scores_path, mode="w") as f:
-            f.write(
-                "iteration\tepoch\tbatch\t" + "\t".join(self.val_scores.names) + "\n"
-            )
+        # # Val metrics & scores
+        # val_iter_interval = cfg["training"]["val_stat_interval"]
+        # self.val_stat_interval = val_iter_interval
+        # val_metric_names = ["loss_val"]
+        # train_iter_interval = cfg["training"]["train_stat_interval"]
+        # self.val_metrics = Metrics(*val_metric_names)
+        # self.val_metrics_path = self.run_dir / VAL_METRICS_FILE
+        # with open(self.val_metrics_path, mode="w") as f:
+        #     f.write(
+        #         "iteration\tepoch\tbatch\t" + "\t".join(self.val_metrics.names) + "\n"
+        #     )
+        #
+        # self.val_scores = Scores(self.n_classes, self.n_prototypes)
+        # self.val_scores_path = self.run_dir / VAL_SCORES_FILE
+        # with open(self.val_scores_path, mode="w") as f:
+        #     f.write(
+        #         "iteration\tepoch\tbatch\t" + "\t".join(self.val_scores.names) + "\n"
+        #     )
 
         # Prototypes & Variances
         if self.save_img:
@@ -284,10 +287,6 @@ class Trainer(AbstractTrainer):
             **self.model_kwargs
         )
 
-    def setup_model(self, *args, **kwargs):
-        """Initialize model architecture."""
-        pass
-
     def setup_directories(self):
         super().setup_directories()
 
@@ -306,19 +305,50 @@ class Trainer(AbstractTrainer):
 
     def setup_optimizer(self, *args, **kwargs):
         """Configure optimizer for training."""
-        pass
+        opt_params = self.cfg["training"]["optimizer"] or {}
+        sprite_opt_params = self.cfg["training"].get("sprite_optimizer", {})
+        optimizer_name = opt_params.pop("name")
+        cluster_kwargs = opt_params.pop("cluster", {})
+        tsf_kwargs = opt_params.pop("transformer", {})
+        sprite_optimizer_name = sprite_opt_params.pop("name", None)
 
-    def setup_scheduler(self, *args, **kwargs):
-        """Configure learning rate scheduler."""
-        pass
+        # Create optimizers with appropriate parameter groups
+        if sprite_optimizer_name in ["SGD", "sgd"]:
+            # Special case: separate optimizers for clusters and transformers
+            self.sprite_optimizer = get_optimizer(sprite_optimizer_name)(
+                [dict(params=self.model.cluster_parameters(), **cluster_kwargs)],
+                **sprite_opt_params,
+            )
+            self.optimizer = get_optimizer(optimizer_name)(
+                [dict(params=self.model.transformer_parameters(), **tsf_kwargs)],
+                **opt_params,
+            )
+            self.model.set_optimizer(self.optimizer, self.sprite_optimizer)
+        else:
+            # Default case: single optimizer with multiple parameter groups
+            self.optimizer = get_optimizer(optimizer_name)(
+                [dict(params=self.model.cluster_parameters(), **cluster_kwargs)]
+                + [dict(params=self.model.transformer_parameters(), **tsf_kwargs)],
+                **opt_params,
+            )
+            self.model.set_optimizer(self.optimizer)
 
-    def setup_checkpoint_loading(self, *args, **kwargs):
-        """Handle loading from pretrained models or resuming training."""
-        pass
+        # Log optimizer configuration
+        self.print_and_log_info(
+            f"Using optimizer {optimizer_name} with kwargs {opt_params}"
+        )
+        self.print_and_log_info(f"cluster kwargs {cluster_kwargs}")
+        self.print_and_log_info(f"transformer kwargs {tsf_kwargs}")
 
-    def setup_metrics(self, *args, **kwargs):
-        """Initialize metrics for training and evaluation."""
-        pass
+    @property
+    def train_metric_names(self):
+        metric_names = ["time/img", "loss"]
+        metric_names += [f"prop_clus{i}" for i in range(self.n_prototypes)]
+        metric_names += [f"proba_clus{i}" for i in range(self.n_prototypes)]
+        return metric_names
+
+    def setup_val_scores(self):
+        self.val_scores = Scores(self.n_classes, self.n_prototypes)
 
     def setup_visualization_artifacts(self, *args, **kwargs):
         """Set up directories and templates for saving visualizations."""

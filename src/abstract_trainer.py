@@ -1,5 +1,6 @@
 import shutil
 
+import numpy as np
 import pandas as pd
 import torch
 from omegaconf import OmegaConf
@@ -8,7 +9,9 @@ from torch.utils.data import DataLoader
 from .dataset import get_dataset
 from .model import get_model
 from .model.tools import count_parameters
+from .scheduler import get_scheduler
 from .utils import coerce_to_path_and_create_dir
+from .utils.metrics import Metrics
 from .utils.plot import plot_lines, plot_bar
 
 try:
@@ -83,6 +86,8 @@ class AbstractTrainer(ABC):
     val_metrics_path = None
     val_scores = None
     val_scores_path = None
+    bin_edges = None
+    bin_counts = None
 
     # Cluster checking
     check_cluster_interval = None
@@ -117,16 +122,16 @@ class AbstractTrainer(ABC):
         self.setup_model()
         self.setup_directories()
 
-        self.setup_optimizer(*args, **kwargs)
-        self.setup_scheduler(*args, **kwargs)
+        self.setup_optimizer()
+        self.setup_scheduler()
 
-        self.setup_checkpoint_loading(*args, **kwargs)
-        self.setup_metrics(*args, **kwargs)
+        self.setup_checkpoint_loading()
+        self.setup_metrics()
 
-        self.setup_visualization_artifacts(*args, **kwargs)
-        self.setup_visualizer(*args, **kwargs)
+        self.setup_visualization_artifacts()
+        self.setup_visualizer()
 
-        self.setup_additional_components(*args, **kwargs)
+        self.setup_additional_components()
 
     ######################
     #   SETUP METHODS    #
@@ -247,37 +252,109 @@ class AbstractTrainer(ABC):
             convert_to_img(self.images_to_tsf[k]).save(out / "input.png")
 
     @abstractmethod
-    def setup_optimizer(self, *args, **kwargs):
+    def setup_optimizer(self):
         """Configure optimizer for training."""
         raise NotImplementedError
 
-    @abstractmethod
-    def setup_scheduler(self, *args, **kwargs):
-        """Configure learning rate scheduler."""
-        raise NotImplementedError
+    def setup_scheduler(self):
+        scheduler_params = self.cfg["training"].get("scheduler", {}) or {}
+        scheduler_name = self.get_scheduler_name(scheduler_params)
+        self.scheduler_update_range = scheduler_params.pop("update_range", "epoch")
 
-    @abstractmethod
-    def setup_checkpoint_loading(self, *args, **kwargs):
+        assert self.scheduler_update_range in ["epoch", "batch"]
+
+        milestones = scheduler_params.get("milestones", [])
+        if scheduler_name == "multi_step" and (len(milestones) > 0 and isinstance(milestones[0], float)):
+            n_tot = (
+                self.n_epochs
+                if self.scheduler_update_range == "epoch"
+                else self.n_iterations
+            )
+            scheduler_params["milestones"] = [
+                round(m * n_tot) for m in scheduler_params["milestones"]
+            ]
+
+        self.scheduler = get_scheduler(scheduler_name)(
+            self.optimizer, **scheduler_params
+        )
+        self.cur_lr = self.scheduler.get_last_lr()[0]
+
+        self.print_and_log_info(
+            f"Using scheduler {scheduler_name} with parameters {scheduler_params}"
+        )
+
+    def get_scheduler_name(self, scheduler_params):
+        """Extract scheduler name from config.
+        Subclasses can override this to customize name extraction."""
+        name = self.cfg["training"].get("scheduler_name")
+        if name is None and "name" in scheduler_params:
+            name = scheduler_params.pop("name", None)
+        return name
+
+
+    def setup_checkpoint_loading(self):
         """Handle loading from pretrained models or resuming training."""
-        raise NotImplementedError
+        checkpoint_path = self.cfg["training"].get("pretrained")
+        checkpoint_path_resume = self.cfg["training"].get("resume")
+        assert not (checkpoint_path is not None and checkpoint_path_resume is not None)
+        if checkpoint_path is not None:
+            self.load_from_tag(checkpoint_path)
+        elif checkpoint_path_resume is not None:
+            self.load_from_tag(checkpoint_path_resume, resume=True)
+        else:
+            self.start_epoch, self.start_batch = 1, 1
 
-    @abstractmethod
-    def setup_metrics(self, *args, **kwargs):
+
+    def setup_metrics(self):
         """Initialize metrics for training and evaluation."""
-        raise NotImplementedError
+        self.setup_train_metrics()
+        self.setup_val_metrics()
+        self.check_cluster_interval = self.cfg["training"]["check_cluster_interval"]
+
+    @property
+    def train_metric_names(self):
+        # overriden in child trainers
+        return ["time/img", "loss"]
+
+    def setup_train_metrics(self):
+        self.bin_edges = np.arange(0, 1.1, 0.1)
+        self.bin_counts = np.zeros(len(self.bin_edges) - 1)
+
+        self.train_stat_interval = self.cfg["training"]["train_stat_interval"]
+        self.train_metrics = Metrics(*self.train_metric_names)
+
+        self.train_metrics_path = self.run_dir / TRAIN_METRICS_FILE
+        self.save_metrics_file(self.train_metrics_path, self.train_metrics.names)
 
     @abstractmethod
-    def setup_visualization_artifacts(self, *args, **kwargs):
+    def setup_val_scores(self):
+        raise NotImplementedError
+
+    def setup_val_metrics(self):
+        self.val_stat_interval = self.cfg["training"]["val_stat_interval"]
+
+        self.val_metrics = Metrics("loss_val")
+
+        self.val_metrics_path = self.run_dir / VAL_METRICS_FILE
+        self.save_metrics_file(self.val_metrics_path, self.val_metrics.names)
+
+        self.setup_val_scores()
+
+        self.val_scores_path = self.run_dir / VAL_SCORES_FILE
+        self.save_metrics_file(self.val_scores_path, self.val_scores.names)
+
+    @abstractmethod
+    def setup_visualization_artifacts(self):
         """Set up directories and templates for saving visualizations."""
         raise NotImplementedError
 
     @abstractmethod
-    def setup_visualizer(self, *args, **kwargs):
+    def setup_visualizer(self):
         """Set up real-time visualization (e.g., Visdom)."""
         raise NotImplementedError
 
     @abstractmethod
-    def setup_additional_components(self, *args, **kwargs):
+    def setup_additional_components(self):
         """Set up any additional trainer-specific components."""
         raise NotImplementedError
 
@@ -549,6 +626,18 @@ class AbstractTrainer(ABC):
         Default implementation does nothing.
         """
         pass
+
+    @staticmethod
+    def save_metrics_file(path, column_names):
+        """Create or check a metrics output file.
+
+        Args:
+            path: Path to the metrics file
+            column_names: List of column names for the metrics
+        """
+        if not path.exists():
+            with open(path, mode="w") as f:
+                f.write("iteration\tepoch\tbatch\t" + "\t".join(column_names) + "\n")
 
     ######################
     #   LOGGING METHODS  #
