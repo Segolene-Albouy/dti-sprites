@@ -345,18 +345,18 @@ class Trainer(AbstractTrainer):
         #                 for k in range(self.n_backgrounds)
         #             ]
 
-        # Visdom
-        viz_port = cfg["training"].get("visualizer_port")
-        if viz_port is not None:
-            os.environ["http_proxy"] = ""
-            self.visualizer = visdom.Visdom(
-                port=viz_port, env=f"{self.run_dir.parent.name}_{self.run_dir.name}"
-            )
-            self.visualizer.delete_env(self.visualizer.env)  # Clean env before plotting
-            self.print_and_log_info(f"Visualizer initialised at {viz_port}")
-        else:
-            self.visualizer = None
-            self.print_and_log_info("No visualizer initialized")
+        # # Visdom
+        # viz_port = cfg["training"].get("visualizer_port")
+        # if viz_port is not None:
+        #     os.environ["http_proxy"] = ""
+        #     self.visualizer = visdom.Visdom(
+        #         port=viz_port, env=f"{self.run_dir.parent.name}_{self.run_dir.name}"
+        #     )
+        #     self.visualizer.delete_env(self.visualizer.env)  # Clean env before plotting
+        #     self.print_and_log_info(f"Visualizer initialised at {viz_port}")
+        # else:
+        #     self.visualizer = None
+        #     self.print_and_log_info("No visualizer initialized")
 
     ######################
     #   SETUP METHODS    #

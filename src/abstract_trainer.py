@@ -1,3 +1,4 @@
+import os
 import shutil
 
 import numpy as np
@@ -130,8 +131,6 @@ class AbstractTrainer(ABC):
 
         self.setup_prototypes()
         self.setup_visualizer()
-
-        self.setup_additional_components()
 
     ######################
     #   SETUP METHODS    #
@@ -345,13 +344,21 @@ class AbstractTrainer(ABC):
 
     @abstractmethod
     def setup_visualizer(self):
-        """Set up real-time visualization (e.g., Visdom)."""
-        raise NotImplementedError
+        viz_port = self.cfg["training"].get("visualizer_port")
 
-    @abstractmethod
-    def setup_additional_components(self):
-        """Set up any additional trainer-specific components."""
-        raise NotImplementedError
+        if viz_port is not None:
+            try:
+                import visdom
+                os.environ["http_proxy"] = ""
+                self.visualizer = visdom.Visdom(port=viz_port, env=f"{self.run_dir.parent.name}_{self.run_dir.name}")
+                self.visualizer.delete_env(self.visualizer.env) # Clean env before plotting
+
+                self.print_and_log_info(f"Visualizer initialized at port {viz_port}")
+            except (ImportError, Exception) as e:
+                self.visualizer = None
+                self.print_and_log_info(f"Visdom initialization failed: {e}")
+        else:
+            self.print_and_log_info("No visualizer initialized (no port specified)")
 
     ######################
     #    MAIN METHODS    #
