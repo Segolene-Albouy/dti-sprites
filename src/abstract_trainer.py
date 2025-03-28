@@ -3,7 +3,11 @@ import shutil
 import pandas as pd
 import torch
 from omegaconf import OmegaConf
+from torch.utils.data import DataLoader
 
+from .dataset import get_dataset
+from .model import get_model
+from .model.tools import count_parameters
 from .utils import coerce_to_path_and_create_dir
 from .utils.plot import plot_lines, plot_bar
 
@@ -33,6 +37,7 @@ class AbstractTrainer(ABC):
     logger = None
     save_img = False
     device = None
+    cfg = None
 
     # Dataset attributes
     dataset_kwargs = None
@@ -40,6 +45,8 @@ class AbstractTrainer(ABC):
     n_classes = None
     is_val_empty = None
     img_size = None
+    train_dataset = None
+    val_dataset = None
 
     # Data loaders
     batch_size = None
@@ -104,11 +111,11 @@ class AbstractTrainer(ABC):
         self.setup_logging()
         self.setup_config(cfg)
 
-        self.setup_dataset(*args, **kwargs)
+        self.setup_dataset()
         self.setup_dataloaders()
 
-        self.setup_model(*args, **kwargs)
-        self.setup_directories(run_dir, save=save)
+        self.setup_model()
+        self.setup_directories()
 
         self.setup_optimizer(*args, **kwargs)
         self.setup_scheduler(*args, **kwargs)
@@ -131,27 +138,100 @@ class AbstractTrainer(ABC):
             f"Trainer initialisation: run directory is {self.run_dir}"
         )
 
-    def setup_config(self, cfg, *args, **kwargs):
+    def setup_config(self, cfg):
         """Load and process configuration."""
         OmegaConf.save(cfg, self.run_dir / "config.yaml")
+        self.cfg = cfg
         self.print_and_log_info(f"Current config saved to {self.run_dir}")
 
-    @abstractmethod
-    def setup_dataset(self, *args, **kwargs):
+    def setup_dataset(self):
         """Set up dataset parameters and load dataset."""
-        raise NotImplementedError
+        self.dataset_kwargs = self.cfg["dataset"].copy()
+        self.dataset_name = self.dataset_kwargs["name"]
 
-    @abstractmethod
+        train_dataset = get_dataset(self.dataset_name)("train", **self.dataset_kwargs)
+        val_dataset = get_dataset(self.dataset_name)("val", **self.dataset_kwargs)
+
+        self.n_classes = train_dataset.n_classes
+        self.is_val_empty = len(val_dataset) == 0
+        self.img_size = train_dataset.img_size
+
+        self.print_and_log_info(
+            f"Dataset {self.dataset_name} instantiated with {self.dataset_kwargs}"
+        )
+        self.print_and_log_info(
+            f"Found {self.n_classes} classes, {len(train_dataset)} train samples, {len(val_dataset)} val samples"
+        )
+
+        self.train_dataset = train_dataset
+        self.val_dataset = val_dataset
+
     def setup_dataloaders(self):
         """Create data loaders from datasets."""
-        raise NotImplementedError
+        if not hasattr(self, 'train_dataset') or not hasattr(self, 'val_dataset'):
+            raise AttributeError("train_dataset and val_dataset must be set before calling setup_dataloaders")
+
+        self.batch_size = (
+            self.cfg["training"]["batch_size"]
+            if self.cfg["training"]["batch_size"] < len(self.train_dataset)
+            else len(self.train_dataset)
+        )
+        self.n_workers = self.cfg["training"].get("n_workers", 4)
+
+        self.train_loader = DataLoader(
+            self.train_dataset,
+            batch_size=self.batch_size,
+            num_workers=self.n_workers,
+            shuffle=True,
+        )
+        self.val_loader = DataLoader(
+            self.val_dataset, batch_size=self.batch_size, num_workers=self.n_workers
+        )
+
+        self.print_and_log_info(
+            f"Dataloaders instantiated with batch_size={self.batch_size} and n_workers={self.n_workers}"
+        )
+
+        # Setup counters for training loop
+        self.n_batches = len(self.train_loader)
+        self._setup_iteration_counts()
+
+    def _setup_iteration_counts(self):
+        """Setup iteration and epoch counts."""
+        self.n_iterations = self.cfg["training"].get("n_iterations")
+        self.n_epochs = self.cfg["training"].get("n_epochs")
+
+        assert not (self.n_iterations is not None and self.n_epochs is not None)
+
+        if self.n_iterations is not None:
+            self.n_epochs = max(self.n_iterations // self.n_batches, 1)
+        else:
+            self.n_iterations = self.n_epochs * len(self.train_loader)
+
 
     @abstractmethod
-    def setup_model(self, *args, **kwargs):
-        """Initialize model architecture."""
+    def get_model(self):
         raise NotImplementedError
 
-    def setup_directories(self, run_dir, save=False):
+    def setup_model(self):
+        """Initialize model architecture."""
+        self.model_kwargs = self.cfg["model"].copy()
+        self.model_name = self.model_kwargs["name"]
+
+        model = self.get_model()
+
+        self.model = model.to(self.device)
+        self.n_prototypes = self.model.n_prototypes
+        self.is_gmm = "gmm" in self.model_name
+
+        self.print_and_log_info(
+            f"Using model {self.model_name} with kwargs {self.model_kwargs}"
+        )
+        self.print_and_log_info(
+            f"Number of trainable parameters: {count_parameters(self.model):,}"
+        )
+
+    def setup_directories(self):
         if not self.save_img:
             return
 

@@ -35,6 +35,8 @@ from .abstract_trainer import AbstractTrainer, PRINT_CHECK_CLUSTERS_FMT
 class Trainer(AbstractTrainer):
     """Pipeline to train a NN model using a certain dataset, both specified by an YML config."""
 
+    model_name = "dtikmeans"
+
     @use_seed()
     def __init__(self, cfg, run_dir, save=False, *args, **kwargs):
         super().__init__(cfg, run_dir, save, *args, **kwargs)
@@ -274,20 +276,20 @@ class Trainer(AbstractTrainer):
     #   SETUP METHODS    #
     ######################
 
-    def setup_dataset(self, *args, **kwargs):
-        """Set up dataset parameters and load dataset."""
-        pass
-
-    def setup_dataloaders(self):
-        """Create data loaders from datasets."""
-        pass
+    def get_model(self):
+        """Return model instance."""
+        # model_name = dtikmeans
+        return get_model(self.model_name)(
+            self.train_loader.dataset,
+            **self.model_kwargs
+        )
 
     def setup_model(self, *args, **kwargs):
         """Initialize model architecture."""
         pass
 
-    def setup_directories(self, run_dir, save=False):
-        super().setup_directories(run_dir, save)
+    def setup_directories(self):
+        super().setup_directories()
 
         if not self.save_img:
             return

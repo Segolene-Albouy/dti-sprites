@@ -55,6 +55,7 @@ from fvcore.nn import FlopCountAnalysis
 class Trainer(AbstractTrainer):
     """Pipeline to train a NN model using a certain dataset, both specified by an YML config."""
 
+    model_name = "dti_sprites"
     interpolate_settings = {
         'mode': 'bilinear',
         'align_corners': False
@@ -350,20 +351,45 @@ class Trainer(AbstractTrainer):
     #   SETUP METHODS    #
     ######################
 
-    def setup_dataset(self, *args, **kwargs):
+    def setup_dataset(self):
         """Set up dataset parameters and load dataset."""
-        pass
+        super().setup_dataset()
+        self.seg_eval = getattr(self.train_dataset, "seg_eval", False)
+        self.instance_eval = getattr(self.train_dataset, "instance_eval", False)
 
-    def setup_dataloaders(self):
-        """Create data loaders from datasets."""
-        pass
+    def get_model(self):
+        """Return model instance."""
+        # model_name = dti_sprites
+        return get_model(self.model_name)(
+            n_epochs=self.n_epochs,
+            dataset=self.train_loader.dataset,
+            **self.model_kwargs
+        )
 
-    def setup_model(self, *args, **kwargs):
+    def setup_model(self):
         """Initialize model architecture."""
-        pass
+        super().setup_model()
+        self.n_backgrounds = getattr(self.model, "n_backgrounds", 0)
+        self.n_objects = max(self.model.n_objects, 1)
+        self.pred_class = getattr(self.model, "pred_class", False) or getattr(
+            self.model, "estimate_minimum", False
+        )
 
-    def setup_directories(self, run_dir, save=False):
-        super().setup_directories(run_dir, save)
+        # Calculate number of clusters
+        if self.pred_class:
+            self.n_clusters = self.n_prototypes * self.n_objects
+        else:
+            self.n_clusters = self.n_prototypes ** self.n_objects * max(
+                self.n_backgrounds, 1
+            )
+
+        # Additional sprite model properties
+        self.learn_masks = getattr(self.model, "learn_masks", False)
+        self.learn_backgrounds = getattr(self.model, "learn_backgrounds", False)
+        self.learn_proba = getattr(self.model, "proba", False)
+
+    def setup_directories(self):
+        super().setup_directories()
 
         if not self.save_img:
             return
