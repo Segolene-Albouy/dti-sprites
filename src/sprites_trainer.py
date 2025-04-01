@@ -212,7 +212,7 @@ class Trainer:
 
         # Scheduler
         scheduler_params = cfg["training"].get("scheduler", {})
-        scheduler_name = cfg["training"].get("scheduler_name", {}) 
+        scheduler_name = cfg["training"].get("scheduler_name", "constant_lr")
         self.scheduler_update_range = scheduler_params.get("update_range", "epoch")
         assert self.scheduler_update_range in ["epoch", "batch"]
         if scheduler_name == "multi_step" and isinstance(
@@ -494,7 +494,11 @@ class Trainer:
         B = images.size(0)
         self.model.train()
         images = images.to(self.device)
-        masks = masks.to(self.device) if masks else None
+
+        if isinstance(masks, torch.Tensor) and masks.numel() > 0:
+            masks = masks.to(self.device)
+        else:
+            masks = None
 
         self.optimizer.zero_grad()
         loss, distances, class_prob = self.model(images, masks)

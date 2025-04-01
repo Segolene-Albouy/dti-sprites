@@ -861,10 +861,10 @@ class DTISprites(nn.Module):
         L, K, B, C, H, W = layers.shape
         device = occ_grid.device
 
-        is_binary = (class_prob == 0) | (class_prob == 1)
-        is_only_0_or_1 = is_binary.all()
-
         if class_prob is not None:
+            is_binary = (class_prob == 0) | (class_prob == 1)
+            is_only_0_or_1 = is_binary.all()
+
             if is_only_0_or_1:
                 masks = (masks * class_prob[..., None, None, None]).sum(axis=1)
                 layers = (layers * class_prob[..., None, None, None]).sum(axis=1)

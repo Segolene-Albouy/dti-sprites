@@ -6,7 +6,7 @@ from torch.optim.lr_scheduler import CosineAnnealingLR, ExponentialLR, _LRSchedu
 
 
 def get_scheduler(name):
-    if name is None:
+    if name is None or type(name) is not str:
         name = 'constant_lr'
     return {
         "constant_lr": ConstantLR,
