@@ -241,7 +241,7 @@ class AbstractTrainer(ABC):
             coerce_to_path_and_create_dir(self.prototypes_path / f"proto{k}")
 
         self.transformation_path = coerce_to_path_and_create_dir(self.run_dir / "transformations")
-        # self.images_to_tsf = next(iter(self.train_loader))[0][:N_TRANSFORMATION_PREDICTIONS].to(self.device)
+        self.images_to_tsf = next(iter(self.train_loader))[0][:N_TRANSFORMATION_PREDICTIONS].to(self.device)
 
         for k in range(self.images_to_tsf.size(0)):
             out = coerce_to_path_and_create_dir(self.transformation_path / f"img{k}")
@@ -255,7 +255,7 @@ class AbstractTrainer(ABC):
     def setup_scheduler(self):
         scheduler_params = self.cfg["training"].get("scheduler", {}) or {}
         scheduler_name = self.get_scheduler_name(scheduler_params)
-        self.scheduler_update_range = scheduler_params.pop("update_range", "epoch")
+        self.scheduler_update_range = scheduler_params.get("update_range", "epoch")
 
         assert self.scheduler_update_range in ["epoch", "batch"]
 
@@ -339,7 +339,8 @@ class AbstractTrainer(ABC):
         self.save_metrics_file(self.val_scores_path, self.val_scores.names)
 
     def setup_prototypes(self):
-        self.images_to_tsf = next(iter(self.train_loader))[0][:N_TRANSFORMATION_PREDICTIONS].to(self.device)
+        # self.images_to_tsf = next(iter(self.train_loader))[0][:N_TRANSFORMATION_PREDICTIONS].to(self.device)
+        pass
 
     @abstractmethod
     def setup_visualizer(self):
