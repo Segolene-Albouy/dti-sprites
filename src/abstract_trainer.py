@@ -587,28 +587,27 @@ class AbstractTrainer(ABC):
         """Save image artifacts as GIFs."""
         size = MAX_GIF_SIZE if MAX_GIF_SIZE < max(self.img_size) else self.img_size
 
-        # Ensure prototypes are saved
         with torch.no_grad():
             self.save_prototypes()
 
-        # Save prototype GIFs
         for k in range(self.n_prototypes):
-            save_gif(
-                self.prototypes_path / f"proto{k}", f"prototype{k}.gif", size=size
-            )
-            shutil.rmtree(str(self.prototypes_path / f"proto{k}"))
+            self.save_gif_to_path(self.prototypes_path / f"proto{k}", f"prototype{k}.gif", size=size)
 
-        # Save transformation predictions if not identity transformer
-        if not hasattr(self.model.transformer, "is_identity") or not self.model.transformer.is_identity:
+        save_tsf = True
+        if hasattr(self.model, 'transformer'): # DTIKmeans has a single transformer
+            if hasattr(self.model.transformer, 'is_identity') and self.model.transformer.is_identity:
+                save_tsf = False
+        elif hasattr(self.model, 'transformer_is_identity'):
+            save_tsf = not self.model.transformer_is_identity
+        elif hasattr(self.model, 'is_layer_tsf_id'):
+            save_tsf = not self.model.is_layer_tsf_id
+
+        if save_tsf:
             self.save_transformed_images()
             for i in range(self.images_to_tsf.size(0)):
                 for k in range(min(self.n_prototypes, self.get_n_clusters())):
-                    save_gif(
-                        self.transformation_path / f"img{i}" / f"tsf{k}",
-                        f"tsf{k}.gif",
-                        size=size,
-                    )
-                    shutil.rmtree(str(self.transformation_path / f"img{i}" / f"tsf{k}"))
+                    tsf_path = self.transformation_path / f"img{i}" / f"tsf{k}"
+                    self.save_gif_to_path(tsf_path, f"tsf{k}.gif", size=size)
         else:
             shutil.rmtree(str(self.transformation_path))
             coerce_to_path_and_create_dir(self.transformation_path)
@@ -638,10 +637,27 @@ class AbstractTrainer(ABC):
 
     def save_img_to_path(self, img, path: Path, filename):
         """Save an image to the specified path."""
-        if self.save_img:
-            if not os.path.exists(path):
-                os.makedirs(path, exist_ok=True)
+        if not self.save_img:
+            return
+        if not os.path.exists(path):
+            os.makedirs(path, exist_ok=True)
+        try:
             convert_to_img(img).save(path / filename)
+        except Exception as e:
+            self.print_and_log_info(f"Could not save image {filename}: {e}")
+
+    def save_gif_to_path(self, path: Path, filename, size):
+        """Save a GIF to the specified path."""
+        if not self.save_img:
+            return
+        if not os.path.exists(path):
+            # self.print_and_log_info(f"Could not save GIF: {path} does not exist")
+            os.makedirs(path, exist_ok=True)
+        try:
+            save_gif(path, filename, size=size)
+            shutil.rmtree(str(path))
+        except Exception as e:
+            self.print_and_log_info(f"Could not save GIF {filename}: {e}")
 
     ######################
     #   LOGGING METHODS  #

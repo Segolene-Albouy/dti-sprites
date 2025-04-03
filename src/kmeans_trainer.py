@@ -288,14 +288,10 @@ class Trainer(AbstractTrainer):
 
     def _save_additional_image_gifs(self, size):
         """Save additional image GIFs specific to KMeans trainer."""
-        # Save variance GIFs for GMM models
         if self.is_gmm:
             self.save_variances()
             for k in range(self.n_prototypes):
-                save_gif(
-                    self.variances_path / f"var{k}", f"variance{k}.gif", size=size
-                )
-                shutil.rmtree(str(self.variances_path / f"var{k}"))
+                self.save_gif_to_path(self.variances_path / f"var{k}", f"variance{k}.gif", size=size)
 
     ######################
     #   LOGGING METHODS  #

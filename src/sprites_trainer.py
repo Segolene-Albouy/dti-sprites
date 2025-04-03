@@ -91,7 +91,6 @@ class Trainer(AbstractTrainer):
 
     def get_model(self):
         """Return model instance."""
-        # model_name = dti_sprites
         return get_model(self.model_name)(
             n_epochs=self.n_epochs,
             dataset=self.train_loader.dataset,
@@ -408,63 +407,30 @@ class Trainer(AbstractTrainer):
 
     def _save_additional_image_gifs(self, size):
         """Save additional image GIFs specific to Sprites trainer."""
-        # Save masked prototypes and masks if enabled
         if hasattr(self, 'learn_masks') and self.learn_masks:
-            self.save_masked_prototypes()
-            self.save_masks()
-            for k in range(self.n_prototypes):
-                save_gif(
-                    self.masked_prototypes_path / f"proto{k}",
-                    f"prototype{k}.gif",
-                    size=size,
-                )
-                shutil.rmtree(str(self.masked_prototypes_path / f"proto{k}"))
-                save_gif(self.masks_path / f"mask{k}", f"mask{k}.gif", size=size)
-                shutil.rmtree(str(self.masks_path / f"mask{k}"))
+            if hasattr(self, 'masked_prototypes_path') and os.path.exists(self.masked_prototypes_path):
+                for k in range(self.n_prototypes):
+                    self.save_gif_to_path(self.masked_prototypes_path / f"proto{k}", f"prototype{k}.gif", size=size)
 
-        # Save backgrounds if enabled
-        if hasattr(self, 'learn_backgrounds') and self.learn_backgrounds:
-            self.save_backgrounds()
-            for k in range(self.n_backgrounds):
-                save_gif(
-                    self.backgrounds_path / f"bkg{k}", f"background{k}.gif", size=size
-                )
-                shutil.rmtree(str(self.backgrounds_path / f"bkg{k}"))
+            if hasattr(self, 'masks_path') and os.path.exists(self.masks_path):
+                for k in range(self.n_prototypes):
+                    self.save_gif_to_path(self.masks_path / f"mask{k}", f"mask{k}.gif", size=size)
 
-        # Save specialized mask transformations if available
-        if hasattr(self, 'learn_masks') and self.learn_masks:
             for i in range(self.images_to_tsf.size(0)):
                 for k in range(self.n_prototypes):
                     for component in ["frg", "mask"]:
-                        try:
-                            save_gif(
-                                self.transformation_path / f"img{i}" / f"{component}_tsf{k}",
-                                f"{component}_tsf{k}.gif",
-                                size=size,
-                            )
-                            shutil.rmtree(
-                                str(self.transformation_path / f"img{i}" / f"{component}_tsf{k}")
-                            )
-                        except FileNotFoundError:
-                            # Skip if directory doesn't exist
-                            pass
+                        component_path = self.transformation_path / f"img{i}" / f"{component}_tsf{k}"
+                        self.save_gif_to_path(component_path, f"{component}_tsf{k}.gif", size=size)
 
-        # Save background transformations if available
         if hasattr(self, 'learn_backgrounds') and self.learn_backgrounds:
+            if hasattr(self, 'backgrounds_path') and os.path.exists(self.backgrounds_path):
+                for k in range(self.n_backgrounds):
+                    self.save_gif_to_path(self.backgrounds_path / f"bkg{k}", f"background{k}.gif", size=size)
+
             for i in range(self.images_to_tsf.size(0)):
                 for k in range(self.n_backgrounds):
-                    try:
-                        save_gif(
-                            self.transformation_path / f"img{i}" / f"bkg_tsf{k}",
-                            f"bkg_tsf{k}.gif",
-                            size=size,
-                        )
-                        shutil.rmtree(
-                            str(self.transformation_path / f"img{i}" / f"bkg_tsf{k}")
-                        )
-                    except FileNotFoundError:
-                        # Skip if directory doesn't exist
-                        pass
+                    bkg_tsf_path = self.transformation_path / f"img{i}" / f"bkg_tsf{k}"
+                    self.save_gif_to_path(bkg_tsf_path, f"bkg_tsf{k}.gif", size=size)
 
     ######################
     #   LOGGING METHODS  #

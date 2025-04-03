@@ -437,6 +437,21 @@ class DTISprites(nn.Module):
         return self.n_sprites
 
     @property
+    def transformer_is_identity(self):
+        """
+        Check if transformers are identity transformers.
+        This property is used by AbstractTrainer to determine whether to save transformation gifs.
+        """
+        if self.has_layer_tsf and hasattr(self.layer_transformer, 'only_id_activated'):
+            return self.layer_transformer.only_id_activated
+
+        for transformer in self.sprite_transformers:
+            if hasattr(transformer, 'is_identity') and not transformer.is_identity:
+                return False
+
+        return True
+
+    @property
     def masks(self):
         if self.proto_source == "data":
             masks = self.mask_params
