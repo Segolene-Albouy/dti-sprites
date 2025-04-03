@@ -1,5 +1,6 @@
 import os
 import shutil
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -469,7 +470,7 @@ class AbstractTrainer(ABC):
 
         try:
             preds = getattr(self.model, pred_names)
-            n_preds = n_preds or getattr(self, f"n_{pred_names}")
+            n_preds = n_preds or getattr(self, f"n_{pred_names}", None) or self.n_prototypes
             pred_path = getattr(self, f"{pred_names}_path")
 
             for k in range(n_preds):
@@ -495,13 +496,7 @@ class AbstractTrainer(ABC):
         raise NotImplementedError
 
     def save_metric_plots(self):
-        """Save training metrics, plots, and visualizations.
-
-        This method handles:
-        1. Loading metrics from CSV files
-        2. Creating and saving plots for losses, cluster proportions, etc.
-        3. Saving image artifacts as GIFs
-        """
+        """Save training metrics, plots, and visualizations"""
         self.model.eval()
 
         # Load metrics data
@@ -640,6 +635,13 @@ class AbstractTrainer(ABC):
         if not path.exists():
             with open(path, mode="w") as f:
                 f.write("iteration\tepoch\tbatch\t" + "\t".join(column_names) + "\n")
+
+    def save_img_to_path(self, img, path: Path, filename):
+        """Save an image to the specified path."""
+        if self.save_img:
+            if not os.path.exists(path):
+                os.makedirs(path, exist_ok=True)
+            convert_to_img(img).save(path / filename)
 
     ######################
     #   LOGGING METHODS  #

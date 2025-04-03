@@ -354,7 +354,11 @@ class Trainer(AbstractTrainer):
 
     @torch.no_grad()
     def save_masks(self, cur_iter=None):
-        self.save_pred(cur_iter, pred_name="mask")
+        self.save_pred(
+            cur_iter=cur_iter,
+            pred_name="mask",
+            n_preds=self.n_prototypes
+        )
 
     @torch.no_grad()
     def save_backgrounds(self, cur_iter=None):
@@ -375,17 +379,11 @@ class Trainer(AbstractTrainer):
         transformed_imgs = transformed_imgs[:, : N + 1]
         for k in range(transformed_imgs.size(0)):
             for j, img in enumerate(transformed_imgs[k][1:]):
+                tsf_path = self.transformation_path / f"img{k}"
                 if cur_iter is not None:
-                    convert_to_img(img).save(
-                        self.transformation_path
-                        / f"img{k}"
-                        / f"tsf{j}"
-                        / f"{cur_iter}.jpg"
-                    )
+                    self.save_img_to_path(img, tsf_path / f"tsf{j}", f"{cur_iter}.jpg")
                 else:
-                    convert_to_img(img).save(
-                        self.transformation_path / f"img{k}" / f"tsf{j}.png"
-                    )
+                    self.save_img_to_path(img, tsf_path, f"tsf{j}.png")
 
         i = 0
         for name in ["frg", "mask", "bkg", "frg_aux", "mask_aux"]:
@@ -401,11 +399,9 @@ class Trainer(AbstractTrainer):
                     tmp_path = self.transformation_path / f"img{k}"
                     for j, img in enumerate(compositions[i][k][1:]):
                         if cur_iter is not None:
-                            convert_to_img(img).save(
-                                tmp_path / f"{name}_tsf{j}" / f"{cur_iter}.jpg"
-                            )
+                            self.save_img_to_path(img, tmp_path / f"{name}_tsf{j}", f"{cur_iter}.jpg")
                         else:
-                            convert_to_img(img).save(tmp_path / f"{name}_tsf{j}.png")
+                            self.save_img_to_path(img, tmp_path, f"{name}_tsf{j}.png")
             i += 1
 
         return transformed_imgs, compositions
@@ -597,94 +593,41 @@ class Trainer(AbstractTrainer):
 
     @torch.no_grad()
     def run_val(self):
+        """Run validation step for current model."""
         self.model.eval()
+
         for images, labels, _, _ in self.val_loader:
             B, C, H, W = images.shape
             images = images.to(self.device)
+
+            # Get model outputs
             loss_val, distances, class_prob = self.model(images)
-
-            if not self.pred_class:  # clustering
-                if self.n_backgrounds > 1:
-                    assert class_prob is None
-                    distances, bkg_idx = distances.view(
-                        B, self.n_prototypes, self.n_backgrounds
-                    ).min(2)
-                if self.n_objects > 1:
-                    assert class_prob is None
-                    distances = distances.view(
-                        B, *(self.n_prototypes,) * self.n_objects
-                    )
-                    other_idxs = []
-                    for k in range(self.n_objects, 1, -1):
-                        distances, idx = distances.min(k)
-                        other_idxs.insert(0, idx)
-                if self.learn_proba:
-                    class_oh = class_prob.permute(2, 0, 1).flatten(1)
-                    argmin_idx = class_oh.argmax(1)
-                else:
-                    argmin_idx = distances.argmin(1)
-
             self.val_metrics.update({"loss_val": loss_val[0].item()})
-            if self.seg_eval:  # we account for probabilities within model.transform
-                if self.n_objects == 1:
-                    masks = self.model.transform(images, with_composition=True)[1][1]
-                    masks = masks[torch.arange(B), argmin_idx]
-                    self.val_scores.update(
-                        labels.long().numpy(), (masks > 0.5).long().cpu().numpy()
-                    )
-                else:
-                    target = self.model.transform(
-                        images, pred_semantic_labels=True
-                    ).cpu()
-                    if not self.pred_class:
-                        target = target.view(
-                            B, *(self.n_prototypes,) * self.n_objects, H, W
-                        )
-                        real_idxs = []
-                        for idx in [argmin_idx] + other_idxs:
-                            for i in real_idxs:
-                                idx = idx[torch.arange(B), i]
-                            real_idxs.insert(0, idx)
-                            target = target[torch.arange(B), idx]
-                    self.val_scores.update(
-                        labels.long().numpy(), target.long().cpu().numpy()
-                    )
 
-            elif (
-                    self.instance_eval
-            ):  # we account for probabilities within model.transform
-                if self.n_objects == 1:
-                    masks = self.model.transform(images, with_composition=True)[1][1]
-                    self.val_scores.update(
-                        labels.long().numpy(), (masks > 0.5).long().cpu().numpy()
-                    )
-                else:
-                    target = self.model.transform(
-                        images, pred_instance_labels=True, with_bkg=self.eval_with_bkg
-                    ).cpu()
-                    if not self.pred_class:
-                        target = target.view(
-                            B,
-                            *(self.n_prototypes,) * self.n_objects,
-                            images.size(2),
-                            images.size(3),
-                        )
-                        real_idxs = []
-                        for idx in [argmin_idx] + other_idxs:
-                            for i in real_idxs:
-                                idx = idx[torch.arange(B), i]
-                            real_idxs.insert(0, idx)
-                            target = target[torch.arange(B), idx]
-                        if not self.eval_with_bkg:
-                            bkg_idx = target == 0
-                            tsf_layers = self.model.predict(images)[0]
-                            new_target = ((tsf_layers - images) ** 2).sum(3).min(1)[
-                                             0
-                                         ].argmin(0).long() + 1
-                            target[bkg_idx] = new_target[bkg_idx]
+            # Clustering
+            if self.n_backgrounds > 1 and not self.pred_class:
+                assert class_prob is None
+                distances, _ = distances.view(B, self.n_prototypes, self.n_backgrounds).min(2)
 
-                    self.val_scores.update(labels.long().numpy(), target.long().numpy())
+            # Multi-object
+            other_idxs = []
+            if self.n_objects > 1 and not self.pred_class:
+                assert class_prob is None
+                distances = distances.view(B, *(self.n_prototypes,) * self.n_objects)
+                for k in range(self.n_objects, 1, -1):
+                    distances, idx = distances.min(k)
+                    other_idxs.insert(0, idx)
 
+            if self.learn_proba and class_prob is not None:
+                class_oh = class_prob.permute(2, 0, 1).flatten(1)
+                argmin_idx = class_oh.argmax(1)
+            else:
+                argmin_idx = distances.argmin(1)
+
+            if self.seg_eval:
+                self.evaluate_segmentation(images, labels, argmin_idx, other_idxs, B, H, W)
+            elif self.instance_eval:
+                self.evaluate_instance(images, labels, argmin_idx, other_idxs, B)
             else:
                 assert self.n_objects == 1
                 self.val_scores.update(labels.long().numpy(), argmin_idx.cpu().numpy())
@@ -694,7 +637,7 @@ class Trainer(AbstractTrainer):
     ######################
 
     def evaluate(self):
-        print("TAU:", self.model.tau)
+        print(f"TAU: {self.model.tau}")
         self.model.eval()
         label = self.train_loader.dataset[0][1]
         empty_label = isinstance(label, (int, np.integer)) and label == -1
@@ -710,9 +653,7 @@ class Trainer(AbstractTrainer):
                 self.print_and_log_info("Semantic segmentation evaluation")
                 self.segmentation_quantitative_eval()
                 self.segmentation_qualitative_eval()
-            elif (
-                    self.instance_eval and self.learn_masks
-            ):  # NOTE: evaluate either semantic or instance
+            elif self.instance_eval and self.learn_masks:  # NOTE: evaluate either semantic or instance
                 self.print_and_log_info("Instance segmentation evaluation")
                 self.instance_seg_quantitative_eval()
                 self.instance_seg_qualitative_eval()
@@ -722,6 +663,54 @@ class Trainer(AbstractTrainer):
                 self.qualitative_eval()
 
         self.print_and_log_info("Evaluation is over")
+
+    def evaluate_segmentation(self, images, labels, argmin_idx, other_idxs, B, H, W):
+        """Handle semantic segmentation evaluation."""
+        if self.n_objects == 1:
+            masks = self.model.transform(images, with_composition=True)[1][1]
+            masks = masks[torch.arange(B), argmin_idx]
+            self.val_scores.update(labels.long().numpy(), (masks > 0.5).long().cpu().numpy())
+            return
+
+        target = self.model.transform(images, pred_semantic_labels=True).cpu()
+
+        if not self.pred_class:
+            target = target.view(B, *(self.n_prototypes,) * self.n_objects, H, W)
+            real_idxs = []
+            for idx in [argmin_idx] + other_idxs:
+                for i in real_idxs:
+                    idx = idx[torch.arange(B), i]
+                real_idxs.insert(0, idx)
+                target = target[torch.arange(B), idx]
+
+        self.val_scores.update(labels.long().numpy(), target.long().cpu().numpy())
+
+    def evaluate_instance(self, images, labels, argmin_idx, other_idxs, B):
+        """Handle instance segmentation evaluation."""
+        if self.n_objects == 1:
+            # Single object case
+            masks = self.model.transform(images, with_composition=True)[1][1]
+            self.val_scores.update(labels.long().numpy(), (masks > 0.5).long().cpu().numpy())
+            return
+
+        target = self.model.transform(images, pred_instance_labels=True, with_bkg=self.eval_with_bkg).cpu()
+
+        if not self.pred_class:
+            target = target.view(B, *(self.n_prototypes,) * self.n_objects, images.size(2), images.size(3))
+            real_idxs = []
+            for idx in [argmin_idx] + other_idxs:
+                for i in real_idxs:
+                    idx = idx[torch.arange(B), i]
+                real_idxs.insert(0, idx)
+                target = target[torch.arange(B), idx]
+
+            if not self.eval_with_bkg:
+                bkg_idx = target == 0
+                tsf_layers = self.model.predict(images)[0]
+                new_target = ((tsf_layers - images) ** 2).sum(3).min(1)[0].argmin(0).long() + 1
+                target[bkg_idx] = new_target[bkg_idx]
+
+        self.val_scores.update(labels.long().numpy(), target.long().numpy())
 
     @torch.no_grad()
     def distance_eval(self):
