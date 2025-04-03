@@ -14,7 +14,7 @@ function show_usage {
     echo ""
     echo "Example:"
     echo "  $0 -t sprites -d dsprites_gray -m dsprites_gray_mlp_proba ++model.softmax=gumbel_softmax"
-    # bash run_trainer.sh -t sprites -d mnist -m mnist -c mnist
+    # bash run_trainer.sh -t sprites -d mnist -m mnist -c mnist ++training.n_epochs=2
     exit 1
 }
 

@@ -51,7 +51,7 @@ from fvcore.nn import FlopCountAnalysis
 
 
 class Trainer(AbstractTrainer):
-    """Pipeline to train a NN model using a certain dataset, both specified by an YML config."""
+    """Pipeline to train a NN model using a certain dataset, both specified by an YML config"""
 
     model_name = "dti_sprites"
     interpolate_settings = {
@@ -84,13 +84,13 @@ class Trainer(AbstractTrainer):
     ######################
 
     def setup_dataset(self):
-        """Set up dataset parameters and load dataset."""
+        """Set up dataset parameters and load dataset"""
         super().setup_dataset()
         self.seg_eval = getattr(self.train_dataset, "seg_eval", False)
         self.instance_eval = getattr(self.train_dataset, "instance_eval", False)
 
     def get_model(self):
-        """Return model instance."""
+        """Return model instance"""
         return get_model(self.model_name)(
             n_epochs=self.n_epochs,
             dataset=self.train_loader.dataset,
@@ -98,7 +98,7 @@ class Trainer(AbstractTrainer):
         )
 
     def setup_model(self):
-        """Initialize model architecture."""
+        """Initialize model architecture"""
         super().setup_model()
         self.n_backgrounds = getattr(self.model, "n_backgrounds", 0)
         self.n_objects = max(self.model.n_objects, 1)
@@ -147,7 +147,7 @@ class Trainer(AbstractTrainer):
                     coerce_to_path_and_create_dir(img_path / f"bkg_tsf{k}")
 
     def setup_optimizer(self):
-        """Configure optimizer for Sprites model."""
+        """Configure optimizer for Sprites model"""
         # Extract optimizer parameters
         opt_params = self.cfg["training"]["optimizer"] or {}
         optimizer_name = self.cfg["training"]["optimizer_name"]
@@ -201,11 +201,11 @@ class Trainer(AbstractTrainer):
             convert_to_img(self.images_to_tsf[k]).save(self.transformation_path / f"img{k}" / "input.png")
 
     def setup_visualizer(self, *args, **kwargs):
-        """Set up real-time visualization (e.g., Visdom)."""
+        """Set up real-time visualization (e.g., Visdom)"""
         pass
 
     def setup_additional_components(self, *args, **kwargs):
-        """Set up any additional trainer-specific components."""
+        """Set up any additional trainer-specific components"""
         pass
 
     ######################
@@ -406,7 +406,7 @@ class Trainer(AbstractTrainer):
         return transformed_imgs, compositions
 
     def _save_additional_image_gifs(self, size):
-        """Save additional image GIFs specific to Sprites trainer."""
+        """Save additional image GIFs specific to Sprites trainer"""
         if hasattr(self, 'learn_masks') and self.learn_masks:
             if hasattr(self, 'masked_prototypes_path') and os.path.exists(self.masked_prototypes_path):
                 for k in range(self.n_prototypes):
@@ -437,7 +437,7 @@ class Trainer(AbstractTrainer):
     ######################
 
     def _log_model_specific_images(self, cur_iter):
-        """Visualize masks, masked prototypes, and backgrounds if applicable."""
+        """Visualize masks, masked prototypes, and backgrounds if applicable"""
         if self.learn_masks:
             self.save_masked_prototypes(cur_iter)
             self.update_visualizer_images(
@@ -482,7 +482,7 @@ class Trainer(AbstractTrainer):
                     k += 1
 
     def get_transformation_nrow(self, tsf_imgs):
-        """Custom row count for transformation visualization."""
+        """Custom row count for transformation visualization"""
         return tsf_imgs.size(1)
 
     ######################
@@ -559,7 +559,7 @@ class Trainer(AbstractTrainer):
 
     @torch.no_grad()
     def run_val(self):
-        """Run validation step for current model."""
+        """Run validation step for current model"""
         self.model.eval()
 
         for images, labels, _, _ in self.val_loader:
@@ -631,7 +631,7 @@ class Trainer(AbstractTrainer):
         self.print_and_log_info("Evaluation is over")
 
     def evaluate_segmentation(self, images, labels, argmin_idx, other_idxs, B, H, W):
-        """Handle semantic segmentation evaluation."""
+        """Handle semantic segmentation evaluation"""
         if self.n_objects == 1:
             masks = self.model.transform(images, with_composition=True)[1][1]
             masks = masks[torch.arange(B), argmin_idx]
@@ -652,7 +652,7 @@ class Trainer(AbstractTrainer):
         self.val_scores.update(labels.long().numpy(), target.long().cpu().numpy())
 
     def evaluate_instance(self, images, labels, argmin_idx, other_idxs, B):
-        """Handle instance segmentation evaluation."""
+        """Handle instance segmentation evaluation"""
         if self.n_objects == 1:
             # Single object case
             masks = self.model.transform(images, with_composition=True)[1][1]
@@ -1225,17 +1225,17 @@ class Trainer(AbstractTrainer):
         return f"{split}_losses"
 
     def get_n_clusters(self):
-        """Return number of clusters for visualization."""
+        """Return number of clusters for visualization"""
         if hasattr(self, 'n_clusters'):
             return self.n_clusters if self.n_clusters <= 40 else 2 * self.n_prototypes
         return super().get_n_clusters()
 
     def should_visualize_cls_scores(self):
-        """Determine if class scores should be visualized."""
+        """Determine if class scores should be visualized"""
         return not hasattr(self, 'instance_eval') or not self.instance_eval
 
     def cls_score_name(self):
-        """Return score name based on evaluation type."""
+        """Return score name based on evaluation type"""
         if hasattr(self, 'seg_eval') and self.seg_eval:
             return "iou"
         return "acc"

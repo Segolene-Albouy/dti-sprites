@@ -33,7 +33,7 @@ from .abstract_trainer import AbstractTrainer, PRINT_CHECK_CLUSTERS_FMT
 
 
 class Trainer(AbstractTrainer):
-    """Pipeline to train a NN model using a certain dataset, both specified by an YML config."""
+    """Pipeline to train a NN model using a certain dataset, both specified by an YML config"""
 
     model_name = "dtikmeans"
 
@@ -50,7 +50,7 @@ class Trainer(AbstractTrainer):
     ######################
 
     def get_model(self):
-        """Return model instance."""
+        """Return model instance"""
         # model_name = dtikmeans
         return get_model(self.model_name)(
             self.train_loader.dataset,
@@ -73,7 +73,7 @@ class Trainer(AbstractTrainer):
                 coerce_to_path_and_create_dir(self.variances_path / f"var{k}")
 
     def setup_optimizer(self, *args, **kwargs):
-        """Configure optimizer for training."""
+        """Configure optimizer for training"""
         opt_params = self.cfg["training"]["optimizer"] or {}
         sprite_opt_params = self.cfg["training"].get("sprite_optimizer", {})
         optimizer_name = opt_params.pop("name")
@@ -120,11 +120,11 @@ class Trainer(AbstractTrainer):
         self.val_scores = Scores(self.n_classes, self.n_prototypes)
 
     def setup_visualizer(self, *args, **kwargs):
-        """Set up real-time visualization (e.g., Visdom)."""
+        """Set up real-time visualization (e.g., Visdom)"""
         pass
 
     def setup_additional_components(self, *args, **kwargs):
-        """Set up any additional trainer-specific components."""
+        """Set up any additional trainer-specific components"""
         pass
 
     ######################
@@ -287,7 +287,7 @@ class Trainer(AbstractTrainer):
         return transformed_imgs
 
     def _save_additional_image_gifs(self, size):
-        """Save additional image GIFs specific to KMeans trainer."""
+        """Save additional image GIFs specific to KMeans trainer"""
         if self.is_gmm:
             self.save_variances()
             for k in range(self.n_prototypes):
@@ -298,7 +298,7 @@ class Trainer(AbstractTrainer):
     ######################
 
     def _log_model_specific_images(self, cur_iter):
-        """Visualize GMM variances if applicable."""
+        """Visualize GMM variances if applicable"""
         if self.is_gmm:
             self.save_variances(cur_iter)
             variances = self.model.variances

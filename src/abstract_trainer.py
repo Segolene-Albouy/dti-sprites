@@ -36,7 +36,7 @@ PRINT_LR_UPD_FMT = "Epoch [{}/{}], Iter [{}/{}], LR update: lr = {}".format
 from abc import ABC, abstractmethod
 
 class AbstractTrainer(ABC):
-    """Abstract base class for all Trainer implementations."""
+    """Abstract base class for all Trainer implementations"""
 
     run_dir = None
     logger = None
@@ -143,13 +143,13 @@ class AbstractTrainer(ABC):
         )
 
     def setup_config(self, cfg):
-        """Load and process configuration."""
+        """Load and process configuration"""
         OmegaConf.save(cfg, self.run_dir / "config.yaml")
         self.cfg = cfg
         self.print_and_log_info(f"Current config saved to {self.run_dir}")
 
     def setup_dataset(self):
-        """Set up dataset parameters and load dataset."""
+        """Set up dataset parameters and load dataset"""
         self.dataset_kwargs = self.cfg["dataset"].copy()
         self.dataset_name = self.dataset_kwargs["name"]
 
@@ -171,7 +171,7 @@ class AbstractTrainer(ABC):
         self.val_dataset = val_dataset
 
     def setup_dataloaders(self):
-        """Create data loaders from datasets."""
+        """Create data loaders from datasets"""
         if not hasattr(self, 'train_dataset') or not hasattr(self, 'val_dataset'):
             raise AttributeError("train_dataset and val_dataset must be set before calling setup_dataloaders")
 
@@ -199,7 +199,7 @@ class AbstractTrainer(ABC):
         self._setup_iteration_counts()
 
     def _setup_iteration_counts(self):
-        """Setup iteration and epoch counts."""
+        """Setup iteration and epoch counts"""
         self.n_iterations = self.cfg["training"].get("n_iterations")
         self.n_epochs = self.cfg["training"].get("n_epochs")
 
@@ -216,7 +216,7 @@ class AbstractTrainer(ABC):
         raise NotImplementedError
 
     def setup_model(self):
-        """Initialize model architecture."""
+        """Initialize model architecture"""
         self.model_kwargs = self.cfg["model"].copy()
         self.model_name = self.model_kwargs["name"]
 
@@ -250,7 +250,7 @@ class AbstractTrainer(ABC):
 
     @abstractmethod
     def setup_optimizer(self):
-        """Configure optimizer for training."""
+        """Configure optimizer for training"""
         raise NotImplementedError
 
     def setup_scheduler(self):
@@ -282,14 +282,14 @@ class AbstractTrainer(ABC):
 
     def get_scheduler_name(self, scheduler_params):
         """Extract scheduler name from config.
-        Subclasses can override this to customize name extraction."""
+        Subclasses can override this to customize name extraction"""
         name = self.cfg["training"].get("scheduler_name")
         if name is None and "name" in scheduler_params:
             name = scheduler_params.pop("name", None)
         return name
 
     def setup_checkpoint_loading(self):
-        """Handle loading from pretrained models or resuming training."""
+        """Handle loading from pretrained models or resuming training"""
         checkpoint_path = self.cfg["training"].get("pretrained")
         checkpoint_path_resume = self.cfg["training"].get("resume")
         assert not (checkpoint_path is not None and checkpoint_path_resume is not None)
@@ -302,7 +302,7 @@ class AbstractTrainer(ABC):
 
 
     def setup_metrics(self):
-        """Initialize metrics for training and evaluation."""
+        """Initialize metrics for training and evaluation"""
         self.setup_train_metrics()
         self.setup_val_metrics()
         self.check_cluster_interval = self.cfg["training"]["check_cluster_interval"]
@@ -367,7 +367,7 @@ class AbstractTrainer(ABC):
 
     @abstractmethod
     def run(self):
-        # """Main training loop with defined sequence of operations."""
+        # """Main training loop with defined sequence of operations"""
         # self._setup()
         #
         # for epoch in range(self.start_epoch, self.n_epochs + 1):
@@ -378,7 +378,7 @@ class AbstractTrainer(ABC):
         pass
 
     def _run_epoch(self, epoch):
-        """Run a single epoch."""
+        """Run a single epoch"""
         # self._before_epoch(epoch)
         #
         # for batch_idx, batch_data in enumerate(self.train_loader):
@@ -391,7 +391,7 @@ class AbstractTrainer(ABC):
         pass
 
     def _before_epoch(self, epoch):
-        """Hook called before each epoch."""
+        """Hook called before each epoch"""
         # self.model.train()
         # self._log_info(f"Starting epoch {epoch}/{self.n_epochs}")
         pass
@@ -401,7 +401,7 @@ class AbstractTrainer(ABC):
         pass
 
     def _after_epoch(self, epoch):
-        # """Hook called after each epoch."""
+        # """Hook called after each epoch"""
         # if self.scheduler and self.scheduler_update_range == "epoch":
         #     self.scheduler.step()
         #
@@ -410,18 +410,18 @@ class AbstractTrainer(ABC):
         pass
 
     def _finalize(self):
-        # """Finalize training and save model."""
+        # """Finalize training and save model"""
         # self._save_checkpoint(self.n_epochs)
         # self.logger.info("Training finished.")
         pass
 
     @abstractmethod
     def load_from_tag(self, tag, resume=False):
-        """Load model from a previous run tag."""
+        """Load model from a previous run tag"""
         raise NotImplementedError
 
     def update_scheduler(self, epoch, batch):
-        """Update the learning rate scheduler."""
+        """Update the learning rate scheduler"""
         self.scheduler.step()
         lr = self.scheduler.get_last_lr()[0]
         if lr != self.cur_lr:
@@ -432,12 +432,12 @@ class AbstractTrainer(ABC):
 
     @abstractmethod
     def single_train_batch_run(self, *args, **kwargs):
-        """Process a single training batch."""
+        """Process a single training batch"""
         raise NotImplementedError
 
     @abstractmethod
     def run_val(self):
-        """Run validation process."""
+        """Run validation process"""
         raise NotImplementedError
 
     ######################
@@ -492,7 +492,7 @@ class AbstractTrainer(ABC):
 
     @abstractmethod
     def save_transformed_images(self, cur_iter=None):
-        """Save transformed images."""
+        """Save transformed images"""
         raise NotImplementedError
 
     def save_metric_plots(self):
@@ -521,7 +521,7 @@ class AbstractTrainer(ABC):
         self.print_and_log_info("Training metrics and visualizations saved")
 
     def _save_loss_plots(self, df_train, df_val):
-        """Save plots for loss metrics."""
+        """Save plots for loss metrics"""
         losses = self.get_metrics_names(prefix="loss")
 
         # Handle validation loss if available
@@ -535,7 +535,7 @@ class AbstractTrainer(ABC):
         fig.savefig(self.run_dir / "loss.pdf")
 
     def _save_cluster_plots(self, df_train):
-        """Save plots for cluster proportions."""
+        """Save plots for cluster proportions"""
         # Get cluster proportion metrics
         n_clusters = self.get_n_clusters()
         names = self.get_metrics_names(prefix="prop_")
@@ -565,7 +565,7 @@ class AbstractTrainer(ABC):
             fig.savefig(self.run_dir / "cluster_probabilities.pdf")
 
     def _save_validation_plots(self, df_scores):
-        """Save plots for validation scores."""
+        """Save plots for validation scores"""
         # Save global scores
         names = list(filter(lambda name: "cls" not in name, self.val_scores.names))
         fig = plot_lines(df_scores, names, title="Global scores", unit_yaxis=True)
@@ -584,7 +584,7 @@ class AbstractTrainer(ABC):
             fig.savefig(self.run_dir / "scores_by_cls.pdf")
 
     def _save_image_gifs(self):
-        """Save image artifacts as GIFs."""
+        """Save image artifacts as GIFs"""
         size = MAX_GIF_SIZE if MAX_GIF_SIZE < max(self.img_size) else self.img_size
 
         with torch.no_grad():
@@ -595,8 +595,7 @@ class AbstractTrainer(ABC):
 
         save_tsf = True
         if hasattr(self.model, 'transformer'): # DTIKmeans has a single transformer
-            if hasattr(self.model.transformer, 'is_identity') and self.model.transformer.is_identity:
-                save_tsf = False
+            save_tsf = not hasattr(self.model.transformer, 'is_identity') and self.model.transformer.is_identity
         elif hasattr(self.model, 'transformer_is_identity'):
             save_tsf = not self.model.transformer_is_identity
         elif hasattr(self.model, 'is_layer_tsf_id'):
@@ -616,27 +615,18 @@ class AbstractTrainer(ABC):
 
     @abstractmethod
     def _save_additional_image_gifs(self, size):
-        """Save additional model-specific image GIFs.
-
-        This is a hook for subclasses to override for model-specific visualizations.
-        Default implementation does nothing.
-        """
-        pass
+        """Save additional model-specific image GIFs, overriden by model-specific methods"""
+        raise NotImplementedError
 
     @staticmethod
     def save_metrics_file(path, column_names):
-        """Create or check a metrics output file.
-
-        Args:
-            path: Path to the metrics file
-            column_names: List of column names for the metrics
-        """
+        """Create or check a metrics output file"""
         if not path.exists():
             with open(path, mode="w") as f:
-                f.write("iteration\tepoch\tbatch\t" + "\t".join(column_names) + "\n")
+                f.write("\t".join(["iteration", "epoch", "batch"] + column_names) + "\n")
 
     def save_img_to_path(self, img, path: Path, filename):
-        """Save an image to the specified path."""
+        """Save an image to the specified path"""
         if not self.save_img:
             return
         if not os.path.exists(path):
@@ -647,7 +637,7 @@ class AbstractTrainer(ABC):
             self.print_and_log_info(f"Could not save image {filename}: {e}")
 
     def save_gif_to_path(self, path: Path, filename, size):
-        """Save a GIF to the specified path."""
+        """Save a GIF to the specified path"""
         if not self.save_img:
             return
         if not os.path.exists(path):
@@ -677,7 +667,7 @@ class AbstractTrainer(ABC):
         return self.n_prototypes + 1
 
     def print_device_info(self):
-        """Print information about the device configuration."""
+        """Print information about the device configuration"""
         nb_device = torch.cuda.device_count() if self.device.type == "cuda" else None
         self.print_and_log_info(
             f"Using {self.device.type} device, nb_device is {nb_device}"
@@ -708,7 +698,7 @@ class AbstractTrainer(ABC):
         self._log_transformation_compositions(compositions, c, h, w)
 
     def print_memory_usage(self, prefix):
-        """Print GPU memory usage information with the given prefix."""
+        """Print GPU memory usage information with the given prefix"""
         stats = [
             "memory_allocated",
             "max_memory_allocated",
@@ -774,7 +764,7 @@ class AbstractTrainer(ABC):
 
     @abstractmethod
     def check_cluster(self, cur_iter, epoch, batch):
-        """Check cluster assignments and reassign empty clusters."""
+        """Check cluster assignments and reassign empty clusters"""
         raise NotImplementedError
 
     ######################
@@ -783,17 +773,17 @@ class AbstractTrainer(ABC):
 
     @abstractmethod
     def evaluate(self):
-        """Run evaluation process."""
+        """Run evaluation process"""
         raise NotImplementedError
 
     @abstractmethod
     def qualitative_eval(self):
-        """Run qualitative evaluation."""
+        """Run qualitative evaluation"""
         raise NotImplementedError
 
     @abstractmethod
     def quantitative_eval(self):
-        """Run quantitative evaluation."""
+        """Run quantitative evaluation"""
         raise NotImplementedError
 
     ######################
@@ -835,7 +825,7 @@ class AbstractTrainer(ABC):
         return list(filter(lambda s: s.startswith(prefix), metrics.names))
 
     def _visualize_losses(self, cur_iter, split, metrics):
-        """Visualize loss metrics."""
+        """Visualize loss metrics"""
         losses = self.get_metrics_names(metrics)
         y, x = [[metrics[n].avg for n in losses]], [[cur_iter] * len(losses)]
 
@@ -852,7 +842,7 @@ class AbstractTrainer(ABC):
         )
 
     def update_visualizer_metrics(self, cur_iter, train):
-        """Update visualizer with metrics."""
+        """Update visualizer with metrics"""
         if self.visualizer is None:
             return None
 
@@ -867,11 +857,11 @@ class AbstractTrainer(ABC):
             self._visualize_class_scores(cur_iter)
 
     def get_n_clusters(self):
-        """Return number of clusters to display in visualizations."""
+        """Return number of clusters to display in visualizations"""
         return self.n_prototypes
 
     def _visualize_cluster_proportions(self, metrics):
-        """Visualize cluster proportions."""
+        """Visualize cluster proportions"""
         n_clusters = self.get_n_clusters()
         proportions = [metrics[f"prop_clus{i}"].avg for i in range(n_clusters)]
 
@@ -886,7 +876,7 @@ class AbstractTrainer(ABC):
         )
 
     def _visualize_global_scores(self, cur_iter):
-        """Visualize global validation scores."""
+        """Visualize global validation scores"""
         names = list(filter(lambda name: "cls" not in name, self.val_scores.names))
         y, x = [[self.val_scores[n] for n in names]], [[cur_iter] * len(names)]
 
@@ -903,14 +893,14 @@ class AbstractTrainer(ABC):
         )
 
     def should_visualize_cls_scores(self):
-        """Determine if class scores should be visualized."""
+        """Determine if class scores should be visualized"""
         return True
 
     def cls_score_name(self):
         return "acc"
 
     def _visualize_class_scores(self, cur_iter):
-        """Visualize class-specific scores."""
+        """Visualize class-specific scores"""
         if not self.should_visualize_cls_scores():
             return
 
