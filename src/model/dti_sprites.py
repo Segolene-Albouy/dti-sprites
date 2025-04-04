@@ -529,11 +529,7 @@ class DTISprites(nn.Module):
 
     @property
     def are_frg_frozen(self):
-        return (
-            True
-            if self.freeze_frg_milestone > 0 and self.cur_epoch < self.freeze_frg_milestone
-            else False
-        )
+        return self.freeze_frg_milestone > 0 and self.cur_epoch < self.freeze_frg_milestone
     
     def cluster_parameters(self):
         if self.proto_source == "data":

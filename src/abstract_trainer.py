@@ -67,8 +67,8 @@ class AbstractTrainer(ABC):
     start_batch = None
 
     # Model configuration
-    model_kwargs = None
     model_name = None
+    model_kwargs = None
     is_gmm = None
     model = None
     n_prototypes = None
@@ -131,6 +131,10 @@ class AbstractTrainer(ABC):
 
         self.setup_prototypes()
         self.setup_visualizer()
+
+    @property
+    def has_sprite_optimizer(self):
+        return False
 
     ######################
     #   SETUP METHODS    #
@@ -218,11 +222,8 @@ class AbstractTrainer(ABC):
     def setup_model(self):
         """Initialize model architecture"""
         self.model_kwargs = self.cfg["model"].copy()
-        self.model_name = self.model_kwargs["name"]
 
-        model = self.get_model()
-
-        self.model = model.to(self.device)
+        self.model = self.get_model().to(self.device)
         self.n_prototypes = self.model.n_prototypes
         self.is_gmm = "gmm" in self.model_name
 
@@ -456,7 +457,7 @@ class AbstractTrainer(ABC):
             "scheduler_state": self.scheduler.state_dict(),
         }
 
-        if hasattr(self, "sprite_optimizer"): # NOTE condition only present in kmeans_trainer
+        if self.has_sprite_optimizer: # NOTE condition only present in kmeans_trainer
             state["sprite_optimizer_state"] = self.sprite_optimizer.state_dict()
 
         save_path = self.run_dir / MODEL_FILE

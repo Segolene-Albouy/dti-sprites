@@ -14,12 +14,5 @@ transformation_sequence: identity_affine_morpho_tps
 transformation_sequence_bkg: identity
 curriculum_learning: [5, 15, 20]
 curriculum_learning_bkg: False
-#init_latent_linear: gaussian
-#sprite_size: [24, 24]
-#pred_occlusion: False
-#reassign_cluster: True
-#proba: False
-#estimate_minimum: True
-#greedy_algo_iter: 1
 grid_size: 4
 kernel_size: 7

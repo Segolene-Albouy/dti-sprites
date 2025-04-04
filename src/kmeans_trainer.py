@@ -34,7 +34,6 @@ from .abstract_trainer import AbstractTrainer, PRINT_CHECK_CLUSTERS_FMT
 
 class Trainer(AbstractTrainer):
     """Pipeline to train a NN model using a certain dataset, both specified by an YML config"""
-
     model_name = "dtikmeans"
 
     # optimizer
@@ -51,7 +50,6 @@ class Trainer(AbstractTrainer):
 
     def get_model(self):
         """Return model instance"""
-        # model_name = dtikmeans
         return get_model(self.model_name)(
             self.train_loader.dataset,
             **self.model_kwargs
@@ -74,12 +72,13 @@ class Trainer(AbstractTrainer):
 
     def setup_optimizer(self, *args, **kwargs):
         """Configure optimizer for training"""
-        opt_params = self.cfg["training"]["optimizer"] or {}
-        sprite_opt_params = self.cfg["training"].get("sprite_optimizer", {})
-        optimizer_name = opt_params.pop("name")
-        cluster_kwargs = opt_params.pop("cluster", {})
-        tsf_kwargs = opt_params.pop("transformer", {})
-        sprite_optimizer_name = sprite_opt_params.pop("name", None)
+        train_params = self.cfg.get("training", {})
+        opt_params = train_params.get("optimizer", {})
+        sprite_opt_params = train_params.get("sprite_optimizer", {})
+        optimizer_name = train_params.get("optimizer_name", "adam")
+        cluster_kwargs = opt_params.get("cluster", {})
+        tsf_kwargs = opt_params.get("transformer", {})
+        sprite_optimizer_name = sprite_opt_params.get("name", None)
 
         # Create optimizers with appropriate parameter groups
         if sprite_optimizer_name in ["SGD", "sgd"]:
@@ -116,6 +115,10 @@ class Trainer(AbstractTrainer):
         metric_names += [f"proba_clus{i}" for i in range(self.n_prototypes)]
         return metric_names
 
+    @property
+    def has_sprite_optimizer(self):
+        return hasattr(self, "sprite_optimizer") and self.sprite_optimizer is not None
+
     def setup_val_scores(self):
         self.val_scores = Scores(self.n_classes, self.n_prototypes)
 
@@ -149,7 +152,7 @@ class Trainer(AbstractTrainer):
                 checkpoint.get("batch", 0) + 1,
             )
             self.optimizer.load_state_dict(checkpoint["optimizer_state"])
-            if hasattr(self, "sprite_optimizer"):
+            if self.has_sprite_optimizer:
                 self.sprite_optimizer.load_state_dict(
                     checkpoint["sprite_optimizer_state"]
                 )
@@ -223,7 +226,7 @@ class Trainer(AbstractTrainer):
         loss.backward()
         self.optimizer.step()
 
-        if hasattr(self, "sprite_optimizer"):
+        if self.has_sprite_optimizer:
             self.sprite_optimizer.step()
 
         with torch.no_grad():

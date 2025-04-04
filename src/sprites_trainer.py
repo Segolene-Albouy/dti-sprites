@@ -148,9 +148,9 @@ class Trainer(AbstractTrainer):
 
     def setup_optimizer(self):
         """Configure optimizer for Sprites model"""
-        # Extract optimizer parameters
-        opt_params = self.cfg["training"]["optimizer"] or {}
-        optimizer_name = self.cfg["training"]["optimizer_name"]
+        train_params = self.cfg.get("training", {})
+        opt_params = train_params.get("optimizer", {})
+        optimizer_name = train_params.get("optimizer_name", "adam")
         cluster_kwargs = self.cfg["training"].get("cluster_optimizer", {})
         tsf_kwargs = self.cfg["training"]["transformer_optimizer"] or {}
 
