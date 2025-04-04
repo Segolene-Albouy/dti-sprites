@@ -1,12 +1,6 @@
 # DTI-Sprites
 
-> Fork of the original repository by [Tom Monnier](https://github.com/monniert/dti-sprites)
-> including modifications for implementation inside [Discover-demo platform](https://github.com/Aikon-platform/discover-demo).
-> 
-> Contributors to this version: [Sonat Baltaci](https://github.com/sonatbaltaci) & [Robin Champenois](https://github.com/Evarin)
-
-Pytorch implementation of [**"Unsupervised Layered Image Decomposition into Object 
-Prototypes"**](https://arxiv.org/abs/2104.14575) paper (accepted to ICCV 2021)
+Pytorch implementation of [**"Unsupervised Layered Image Decomposition into Object Prototypes"**](https://arxiv.org/abs/2104.14575) paper (accepted to ICCV 2021)
 
 Check out our [**paper**](https://openaccess.thecvf.com/content/ICCV2021/papers/Monnier_Unsupervised_Layered_Image_Decomposition_Into_Object_Prototypes_ICCV_2021_paper.pdf) and [**webpage**](https://www.tmonnier.com/DTI-Sprites/) for details!
 
@@ -48,8 +42,7 @@ cd visdom && pip install -e .
 
 This command will download following datasets:
 
-- `Tetrominoes`, `Multi-dSprites` and `CLEVR6` ([link](https://github.com/deepmind/multi_object_datasets/) to the 
-  original repo multi-object datasets with raw tfrecords)
+- `Tetrominoes`, `Multi-dSprites` and `CLEVR6` ([link](https://github.com/deepmind/multi_object_datasets/) to the original repo multi-object datasets with raw tfrecords)
 - `GTSRB` ([link](https://benchmark.ini.rub.de/gtsrb_dataset.html) to the original dataset page)
 - `Weizmann Horse database` ([link](https://avaminzhang.wordpress.com/2012/12/07/%E3%80%90dataset%E3%80%91weizmann-horses/) to the original dataset page)
 - `Instagram collections` associated to [#santaphoto](https://www.instagram.com/explore/tags/santaphoto/) and [#weddingkiss](https://www.instagram.com/explore/tags/weddingkiss/) ([link](https://github.com/monniert/dti-clustering) to the original repo 
@@ -94,8 +87,7 @@ will be saved. Here is an example from Tetrominoes dataset:
 
 ![tetro_sprites_final.png](./media/tetro_sprites_final.png)
 
-More visual results are available at 
-https://imagine.enpc.fr/~monniert/DTI-Sprites/extra_results/.
+More visual results are available at https://imagine.enpc.fr/~monniert/DTI-Sprites/extra_results/.
 
 ### 2. Reproduce our quantitative results 
 
@@ -108,7 +100,7 @@ Available configs are:
 
 - Multi-object benchmarks: `tetro.yml`, `dsprites.yml`, `clevr6.yml`
 - Clustering benchmarks: `gtsrb8.yml`, `svhn.yml`
-- Cosegmentation dataset: `horse.yml`
+- Co-segmentation dataset: `horse.yml`
 
 ### 3. Reproduce our qualitative results on Instagram collections
 
@@ -124,8 +116,7 @@ That's it! Overall you should end up with the following qualitative results:
 
 ## Further information
 
-If you like this project, please check out related works on deep transformations from our 
-group:
+If you like this project, please check out related works on deep transformations from our group:
 
 - [Monnier et al. - Deep Transformation Invariant Clustering (NeurIPS 2020)](https://arxiv.org/abs/2006.11132)
 - [Deprelle et al. - Learning elementary structures for 3D shape generation and matching (NeurIPS 2019)](https://arxiv.org/abs/1908.04725)

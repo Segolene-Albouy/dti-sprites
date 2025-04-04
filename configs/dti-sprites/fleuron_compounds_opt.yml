@@ -44,7 +44,7 @@ training:
     name: multi_step
     gamma: [1, 0.1]
     milestones: [4500, 4750]
-  n_epoches: 5000
+  n_epochs: 5000
   train_stat_interval: 500
   val_stat_interval: 100 # plotting for gifs
   check_cluster_interval: 1000 # give time to learn before reassignment

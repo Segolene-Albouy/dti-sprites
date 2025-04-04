@@ -29,7 +29,7 @@ training:
     name: multi_step
     gamma: 0.1
     milestones: [1200]
-  n_epoches: 1320
+  n_epochs: 1320
   train_stat_interval: 100
   val_stat_interval: 200
   check_cluster_interval: 25

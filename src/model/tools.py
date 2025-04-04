@@ -1,4 +1,5 @@
 from collections import OrderedDict
+from typing import Literal
 
 import numpy as np
 from scipy import signal
@@ -56,16 +57,17 @@ def create_gaussian_weights(img_size, n_channels, std):
     g2d = np.outer(g1d_h, g1d_w)
     return torch.from_numpy(g2d).unsqueeze(0).expand(n_channels, -1, -1).float()
 
+initialization_type = Literal["sample", "random", "constant", "random_color", "gaussian", "mean", "kmeans"]
 
 def generate_data(
-    dataset, K, init_type="sample", value=None, noise_scale=None, std=None, size=None
+    dataset, K, init_type: initialization_type="sample", value=None, noise_scale=None, std=None, size=None
 ):
     samples = []
+    init_type = "sample" if not isinstance(init_type, str) else init_type
+
     if init_type == "kmeans":
         N = min(100 * K, len(dataset))
-        images = next(
-            iter(DataLoader(dataset, batch_size=N, shuffle=True, num_workers=4))
-        )[0]
+        images = next(iter(DataLoader(dataset, batch_size=N, shuffle=True, num_workers=4)))[0]
         img_size = images.shape[1:]
         X = images.flatten(1).numpy()
         cluster = KMeans(K)
@@ -75,9 +77,7 @@ def generate_data(
         )
         if size is not None:
             samples = [
-                F.interpolate(
-                    s.unsqueeze(0), size, mode="bilinear", align_corners=False
-                )[0]
+                F.interpolate(s.unsqueeze(0), size, mode="bilinear", align_corners=False)[0]
                 for s in samples
             ]
     else:
@@ -101,13 +101,9 @@ def generate_data(
                         dtype=torch.float,
                     )
                 else:
-                    raise ValueError(
-                        "value arg is mandatory with init_type=='constant'"
-                    )
+                    raise ValueError("value arg is mandatory with init_type=='constant'")
             elif init_type == "random_color":
-                sample = torch.ones(3, *(size or dataset.img_size)) * torch.rand(
-                    3, 1, 1
-                )
+                sample = torch.ones(3, *(size or dataset.img_size)) * torch.rand(3, 1, 1)
             elif init_type == "gaussian":
                 sample = create_gaussian_weights(
                     size or dataset.img_size, dataset.n_channels, std

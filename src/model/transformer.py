@@ -831,20 +831,24 @@ class MorphologicalModule(_AbstractTransformationModule):
 
     def _transform(self, x, beta, inverse=False):
         if inverse:
-            print_warning(
-                "Inverse transform for MorphologicalModule is not implemented."
-            )
+            print_warning("Inverse transform for MorphologicalModule is not implemented.")
             return x
         beta = beta + self.identity
-        alpha, weights = torch.split(beta, [1, self.kernel_size**2], dim=1)
+        alpha, weights = torch.split(beta, [1, self.kernel_size ** 2], dim=1)
+
         if self.freeze_frg:
-            out = self.smoothmax_kernel(
-                x[:, -1, ...].unsqueeze(1), alpha, torch.sigmoid(weights)
-            )
+            out = self.smoothmax_kernel(x[:, -1, ...].unsqueeze(1), alpha, torch.sigmoid(weights))
             return torch.cat([x[:, : x.size(1) - 1, ...], out], dim=1)
         else:
-            assert x.shape[1] == 1
-            return self.smoothmax_kernel(x, alpha, torch.sigmoid(weights))
+            print(f"MorphologicalModule input shape: {x.shape} / channels: {x.shape[1]}")
+
+            if x.shape[1] > 1:
+                # Multi-channel input
+                morph_channel = x[:, 0:1, ...]  # Use first channel
+                transformed = self.smoothmax_kernel(morph_channel, alpha, torch.sigmoid(weights))
+                return torch.cat([transformed, x[:, 1:, ...]], dim=1)
+            else:
+                return self.smoothmax_kernel(x, alpha, torch.sigmoid(weights))
 
     def smoothmax_kernel(self, x, alpha, kernel):
         if isinstance(alpha, torch.Tensor):

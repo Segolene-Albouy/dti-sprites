@@ -44,7 +44,7 @@ training:
     name: multi_step
     gamma: [1, 0.1]
     milestones: [500, 600] 
-  n_epoches: 610
+  n_epochs: 610
   train_stat_interval: 1000
   val_stat_interval: 2000
   check_cluster_interval: 500
