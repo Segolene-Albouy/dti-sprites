@@ -17,7 +17,7 @@ import hydra
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, OmegaConf
 
-from .abstract_trainer import AbstractTrainer, PRINT_CHECK_CLUSTERS_FMT
+from .abstract_trainer import AbstractTrainer, PRINT_CHECK_CLUSTERS_FMT, run_trainer
 
 try:
     import visdom
@@ -1243,33 +1243,10 @@ class Trainer(AbstractTrainer):
 
 @hydra.main(version_base=None, config_path="../conf", config_name="config")
 def main(cfg: DictConfig) -> None:
-    parser = argparse.ArgumentParser(
-        description="Pipeline to train a NN model specified by a YML config"
+    run_trainer(
+        cfg=cfg,
+        trainer_class=Trainer,
     )
-
-    torch.backends.cudnn.enabled = False
-    print(OmegaConf.to_yaml(cfg))
-
-    dataset = cfg["dataset"]["name"]
-    seed = cfg["training"]["seed"]
-    save = cfg["training"]["save"]
-    now = datetime.datetime.now().isoformat()
-    job_name = HydraConfig.get().job.name
-
-    tag = f"{dataset}_{job_name}_{now}"
-
-    if cfg["training"]["cont"] == True:
-        cfg["training"]["resume"] = tag
-
-    run_dir = RUNS_PATH / dataset / tag
-    run_dir = str(run_dir)
-    trainer = Trainer(cfg, run_dir, seed=seed, save=save)
-    try:
-        trainer.run(seed=seed)
-    except Exception:
-        traceback.print_exc(file=sys.stderr)
-        raise
-
 
 if __name__ == "__main__":
     main()

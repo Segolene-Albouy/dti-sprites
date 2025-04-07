@@ -29,7 +29,7 @@ from .utils.logger import print_warning
 from .utils.metrics import AverageTensorMeter, AverageMeter, Scores
 from .utils.path import RUNS_PATH
 
-from .abstract_trainer import AbstractTrainer, PRINT_CHECK_CLUSTERS_FMT
+from .abstract_trainer import AbstractTrainer, PRINT_CHECK_CLUSTERS_FMT, run_trainer
 
 
 class Trainer(AbstractTrainer):
@@ -493,24 +493,10 @@ class Trainer(AbstractTrainer):
 
 @hydra.main(version_base=None, config_path="../conf", config_name="config")
 def main(cfg: DictConfig) -> None:
-    dataset = cfg["dataset"]["name"]
-    seed = cfg["training"]["seed"]
-    save = cfg["training"]["save"]
-
-    job_name = HydraConfig.get().job.name
-    # job_id = HydraConfig.get().job.num
-    now = datetime.datetime.now().isoformat()
-    tag = f"{dataset}_{job_name}_{now}"
-
-    if cfg["training"].get("cont", False):
-        cfg["training"]["resume"] = tag
-
-    run_dir = RUNS_PATH / dataset / tag
-    run_dir = str(run_dir)
-
-    trainer = Trainer(cfg, run_dir, seed=seed, save=save)
-    trainer.run(seed=seed)
-
+    run_trainer(
+        cfg=cfg,
+        trainer_class=Trainer,
+    )
 
 if __name__ == "__main__":
     main()

@@ -1,11 +1,15 @@
+import datetime
 import os
 import shutil
+import sys
+import traceback
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import torch
-from omegaconf import OmegaConf
+from hydra.core.hydra_config import HydraConfig
+from omegaconf import OmegaConf, DictConfig
 from torch.utils.data import DataLoader
 
 from .dataset import get_dataset
@@ -14,6 +18,7 @@ from .model.tools import count_parameters
 from .scheduler import get_scheduler
 from .utils import coerce_to_path_and_create_dir
 from .utils.metrics import Metrics
+from .utils.path import RUNS_PATH
 from .utils.plot import plot_lines, plot_bar
 
 try:
@@ -921,3 +926,40 @@ class AbstractTrainer(ABC):
                 height=VIZ_HEIGHT,
             ),
         )
+
+
+def run_trainer(cfg: DictConfig, trainer_class, enable_cuda_deterministic=False):
+    """
+    Common function to run a trainer with appropriate configuration.
+
+    Args:
+        cfg (DictConfig): Hydra configuration
+        trainer_class (class): The trainer class to instantiate
+        enable_cuda_deterministic (bool): Whether to enable CUDA deterministic behavior
+    """
+    if not enable_cuda_deterministic:
+        torch.backends.cudnn.enabled = False
+
+    print(OmegaConf.to_yaml(cfg))
+
+    training_config = cfg.get("training", {})
+    dataset = cfg.get("dataset", {}).get("name", "default")
+    seed = training_config.get("seed", 777)
+    save = training_config.get("save", True)
+
+    job_name = HydraConfig.get().job.name
+    now = datetime.datetime.now().isoformat()
+    tag = f"{dataset}_{job_name}_{now}"
+
+    if training_config.get("cont", False):
+        training_config["resume"] = tag
+
+    run_dir = RUNS_PATH / dataset / tag
+    trainer = trainer_class(cfg, str(run_dir), seed=seed, save=save)
+
+    try:
+        trainer.run(seed=seed)
+        return trainer
+    except Exception:
+        traceback.print_exc(file=sys.stderr)
+        raise
