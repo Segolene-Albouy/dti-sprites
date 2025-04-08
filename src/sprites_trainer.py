@@ -1,21 +1,14 @@
-import sys
 import os
-import shutil
-import datetime
 import time
-import argparse
-import traceback
-
-import seaborn as sns
-import numpy as np
-import pandas as pd
+import hydra
 
 import torch
 from torch.utils.data import DataLoader
-
-import hydra
-from hydra.core.hydra_config import HydraConfig
-from omegaconf import DictConfig, OmegaConf
+import seaborn as sns
+import numpy as np
+import pandas as pd
+from omegaconf import DictConfig
+from PIL import ImageDraw
 
 from .abstract_trainer import AbstractTrainer, PRINT_CHECK_CLUSTERS_FMT, run_trainer
 
@@ -44,8 +37,6 @@ from .utils.metrics import (
 )
 from .utils.path import RUNS_PATH
 from .utils.consts import *
-
-from PIL import ImageDraw
 
 from fvcore.nn import FlopCountAnalysis
 

@@ -95,7 +95,7 @@ class use_seed:
     def __call__(self, f):
         @wraps(f)
         def wrapper(*args, **kw):
-            seed = self.seed if self.seed is not None else kw.pop('seed', None)
+            seed = self.seed or kw.pop('seed', None)
             with use_seed(seed):
                 return f(*args, **kw)
 
