@@ -290,7 +290,7 @@ class TransformationSequence(nn.Module):
             tsf_modules.append(self.get_module(name)(in_channels, **kwargs))
         self.tsf_modules = nn.ModuleList(tsf_modules)
 
-        curriculum_learning = kwargs.get("curriculum_learning", False)
+        curriculum_learning = kwargs.get("curriculum_learning", [])
         if curriculum_learning:
             assert (
                 isinstance(curriculum_learning, (list, tuple, omegaconf.listconfig.ListConfig))

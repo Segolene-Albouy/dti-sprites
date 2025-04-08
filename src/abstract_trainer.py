@@ -262,7 +262,7 @@ class AbstractTrainer(ABC):
     def setup_scheduler(self):
         scheduler_params = self.cfg["training"].get("scheduler", {}) or {}
         scheduler_name = self.get_scheduler_name(scheduler_params)
-        self.scheduler_update_range = scheduler_params.get("update_range", "epoch")
+        self.scheduler_update_range = self.cfg["training"].get("scheduler_update_range", "epoch")
 
         assert self.scheduler_update_range in ["epoch", "batch"]
 
