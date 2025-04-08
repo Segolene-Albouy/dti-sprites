@@ -928,7 +928,7 @@ class AbstractTrainer(ABC):
         )
 
 
-def run_trainer(cfg: DictConfig, trainer_class, run_dir=None, enable_cuda_deterministic=False):
+def run_trainer(cfg: DictConfig, trainer_class, run_dir=None, enable_cuda_deterministic=False, *args, **kwargs):
     """
     Common function to run a trainer with appropriate configuration.
 
@@ -960,7 +960,7 @@ def run_trainer(cfg: DictConfig, trainer_class, run_dir=None, enable_cuda_determ
 
     if not run_dir:
         run_dir = RUNS_PATH / dataset / tag
-    trainer = trainer_class(cfg=cfg, run_dir=str(run_dir), seed=seed, save=save)
+    trainer = trainer_class(cfg=cfg, run_dir=str(run_dir), seed=seed, save=save, *args, **kwargs)
 
     try:
         trainer.run(seed=seed)

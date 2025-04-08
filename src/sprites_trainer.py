@@ -67,8 +67,8 @@ class Trainer(AbstractTrainer):
     eval_with_bkg = None
 
     @use_seed()
-    def __init__(self, cfg, run_dir, save=False):
-        super().__init__(cfg, run_dir, save)
+    def __init__(self, cfg, run_dir, save=False, *args, **kwargs):
+        super().__init__(cfg, run_dir, save, *args, **kwargs)
 
     ######################
     #   SETUP METHODS    #
