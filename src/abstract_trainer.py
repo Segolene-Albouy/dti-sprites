@@ -928,13 +928,14 @@ class AbstractTrainer(ABC):
         )
 
 
-def run_trainer(cfg: DictConfig, trainer_class, enable_cuda_deterministic=False):
+def run_trainer(cfg: DictConfig, trainer_class, run_dir=None, enable_cuda_deterministic=False):
     """
     Common function to run a trainer with appropriate configuration.
 
     Args:
         cfg (DictConfig): Hydra configuration
         trainer_class (class): The trainer class to instantiate
+        run_dir (Path): Directory to save the results
         enable_cuda_deterministic (bool): Whether to enable CUDA deterministic behavior
     """
     if not enable_cuda_deterministic:
@@ -947,15 +948,19 @@ def run_trainer(cfg: DictConfig, trainer_class, enable_cuda_deterministic=False)
     seed = training_config.get("seed", 777)
     save = training_config.get("save", True)
 
-    job_name = HydraConfig.get().job.name
+    try:
+        job_name = HydraConfig.get().job.name
+    except Exception:
+        job_name = "default"
     now = datetime.datetime.now().isoformat()
     tag = f"{dataset}_{job_name}_{now}"
 
     if training_config.get("cont", False):
         training_config["resume"] = tag
 
-    run_dir = RUNS_PATH / dataset / tag
-    trainer = trainer_class(cfg, str(run_dir), seed=seed, save=save)
+    if not run_dir:
+        run_dir = RUNS_PATH / dataset / tag
+    trainer = trainer_class(cfg=cfg, run_dir=str(run_dir), seed=seed, save=save)
 
     try:
         trainer.run(seed=seed)

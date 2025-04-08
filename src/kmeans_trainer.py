@@ -1,30 +1,24 @@
-import argparse
 import os
-import shutil
 import time
-import datetime
-
 import hydra
-import yaml
 
+import torch
+from torch.utils.data import DataLoader
 import numpy as np
 import pandas as pd
-import torch
-from hydra.core.hydra_config import HydraConfig
-from omegaconf import DictConfig, OmegaConf
-from torch.utils.data import DataLoader
+from omegaconf import DictConfig
 
 from .utils.consts import *
 from .dataset import get_dataset
 from .model import get_model
-from .model.tools import count_parameters, safe_model_state_dict
+from .model.tools import safe_model_state_dict
 from .optimizer import get_optimizer
 from .utils import (
     use_seed,
     coerce_to_path_and_check_exist,
     coerce_to_path_and_create_dir,
 )
-from .utils.image import convert_to_img, save_gif
+from .utils.image import convert_to_img
 from .utils.logger import print_warning
 from .utils.metrics import AverageTensorMeter, AverageMeter, Scores
 from .utils.path import RUNS_PATH
