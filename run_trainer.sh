@@ -66,7 +66,7 @@ fi
 
 # Build command
 # CMD="python -m src.${TRAINER}_trainer --multirun"
-CMD="python -m src.${TRAINER}_trainer"
+CMD="python -m src.A${TRAINER}_trainer"
 
 # Add dataset configuration
 CMD="$CMD +dataset=$DATASET"

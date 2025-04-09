@@ -1,16 +1,23 @@
+import argparse
+import traceback
+import sys
+
 import os
+import shutil
+import seaborn as sns
 import time
-import hydra
+import yaml
+
+import numpy as np
+import pandas as pd
 
 import torch
 from torch.utils.data import DataLoader
-import seaborn as sns
-import numpy as np
-import pandas as pd
-from omegaconf import DictConfig
-from PIL import ImageDraw
+from torch.nn import functional as F
 
-from .abstract_trainer import AbstractTrainer, PRINT_CHECK_CLUSTERS_FMT, run_trainer
+import hydra
+from hydra.core.hydra_config import HydraConfig
+from omegaconf import DictConfig, OmegaConf
 
 try:
     import visdom
@@ -19,133 +26,169 @@ except ModuleNotFoundError:
 
 from .dataset import get_dataset
 from .model import get_model
-from .model.tools import safe_model_state_dict
+from .model.tools import count_parameters, safe_model_state_dict
 from .optimizer import get_optimizer
+from .scheduler import get_scheduler
 from .utils import (
     use_seed,
     coerce_to_path_and_check_exist,
     coerce_to_path_and_create_dir,
 )
 from .utils.image import convert_to_img, save_gif
-from .utils.logger import print_warning
+from .utils.logger import get_logger, print_info, print_warning
 from .utils.metrics import (
     AverageTensorMeter,
     AverageMeter,
+    Metrics,
     Scores,
     SegmentationScores,
     InstanceSegScores,
 )
-from .utils.path import RUNS_PATH
-from .utils.consts import *
+from .utils.path import CONFIGS_PATH, RUNS_PATH
+from .utils.plot import plot_bar, plot_lines
 
+from PIL import Image, ImageFont, ImageDraw
+
+from torch.profiler import profile, record_function, ProfilerActivity
 from fvcore.nn import FlopCountAnalysis
 
+PRINT_TRAIN_STAT_FMT = "Epoch [{}/{}], Iter [{}/{}], train_metrics: {}".format
+PRINT_VAL_STAT_FMT = "Epoch [{}/{}], Iter [{}/{}], val_metrics: {}".format
+PRINT_CHECK_CLUSTERS_FMT = (
+    "Epoch [{}/{}], Iter [{}/{}]: Reassigned clusters {} from cluster {}".format
+)
+PRINT_LR_UPD_FMT = "Epoch [{}/{}], Iter [{}/{}], LR update: lr = {}".format
 
-class Trainer(AbstractTrainer):
-    """Pipeline to train a NN model using a certain dataset, both specified by an YML config"""
+TRAIN_METRICS_FILE = "train_metrics.tsv"
+VAL_METRICS_FILE = "val_metrics.tsv"
+VAL_SCORES_FILE = "val_scores.tsv"
+FINAL_SCORES_FILE = "final_scores.tsv"
+FINAL_SEG_SCORES_FILE = "final_seg_scores.tsv"
+FINAL_SEMANTIC_SCORES_FILE = "final_semantic_scores.tsv"
+MODEL_FILE = "model.pkl"
 
-    model_name = "dti_sprites"
-    interpolate_settings = {
-        'mode': 'bilinear',
-        'align_corners': False
-    }
+N_TRANSFORMATION_PREDICTIONS = 4
+N_CLUSTER_SAMPLES = 5
+MAX_GIF_SIZE = 64
+VIZ_HEIGHT = 300
+VIZ_WIDTH = 500
+VIZ_MAX_IMG_SIZE = 64
 
-    n_backgrounds = None
-    n_objects = None
-    pred_class = None
-    n_clusters = None
-    learn_masks = None
-    learn_backgrounds = None
-    learn_proba = None
 
-    masked_prototypes_path = None
-    masks_path = None
-    backgrounds_path = None
-
-    eval_semantic = None
-    eval_qualitative = None
-    eval_with_bkg = None
+class Trainer:
+    """Pipeline to train a NN model using a certain dataset, both specified by an YML config."""
 
     @use_seed()
-    def __init__(self, cfg, run_dir, save=False, *args, **kwargs):
-        super().__init__(cfg, run_dir, save, *args, **kwargs)
+    def __init__(self, cfg, run_dir, save):
+        self.run_dir = coerce_to_path_and_create_dir(run_dir)
+        self.logger = get_logger(self.run_dir, name="trainer")
+        self.print_and_log_info(
+            "Trainer initialisation: run directory is {}".format(run_dir)
+        )
+        self.save_img = save
 
-    ######################
-    #   SETUP METHODS    #
-    ######################
+        OmegaConf.save(cfg, self.run_dir / "config.yaml")
+        self.print_and_log_info("Current config copied to run directory")
 
-    def setup_dataset(self):
-        """Set up dataset parameters and load dataset"""
-        super().setup_dataset()
-        self.seg_eval = getattr(self.train_dataset, "seg_eval", False)
-        self.instance_eval = getattr(self.train_dataset, "instance_eval", False)
-
-    def get_model(self):
-        """Return model instance"""
-        return get_model(self.model_name)(
-            n_epochs=self.n_epochs,
-            dataset=self.train_loader.dataset,
-            **self.model_kwargs
+        if torch.cuda.is_available():
+            type_device = "cuda"
+            nb_device = torch.cuda.device_count()
+        else:
+            type_device = "cpu"
+            nb_device = None
+        self.device = torch.device(type_device)
+        self.print_and_log_info(
+            "Using {} device, nb_device is {}".format(type_device, nb_device)
         )
 
-    def setup_model(self):
-        """Initialize model architecture"""
-        super().setup_model()
+        # Datasets and dataloaders
+        self.dataset_kwargs = cfg["dataset"]
+        self.dataset_name = self.dataset_kwargs["name"]
+        train_dataset = get_dataset(self.dataset_name)("train", **self.dataset_kwargs)
+        val_dataset = get_dataset(self.dataset_name)("val", **self.dataset_kwargs)
+
+        self.n_classes = train_dataset.n_classes
+        self.is_val_empty = len(val_dataset) == 0
+        self.print_and_log_info(
+            "Dataset {} instantiated with {}".format(
+                self.dataset_name, self.dataset_kwargs
+            )
+        )
+        self.print_and_log_info(
+            "Found {} classes, {} train samples, {} val samples".format(
+                self.n_classes, len(train_dataset), len(val_dataset)
+            )
+        )
+
+        self.img_size = train_dataset.img_size
+        self.batch_size = (
+            cfg["training"]["batch_size"]
+            if cfg["training"]["batch_size"] < len(train_dataset)
+            else len(train_dataset)
+        )
+        self.n_workers = cfg["training"].get("n_workers", 4)
+        self.train_loader = DataLoader(
+            train_dataset,
+            batch_size=self.batch_size,
+            num_workers=self.n_workers,
+            shuffle=True,
+        )
+        self.val_loader = DataLoader(
+            val_dataset, batch_size=self.batch_size, num_workers=self.n_workers
+        )
+        self.print_and_log_info(
+            "Dataloaders instantiated with batch_size={} and n_workers={}".format(
+                self.batch_size, self.n_workers
+            )
+        )
+        self.seg_eval = getattr(train_dataset, "seg_eval", False)
+        self.instance_eval = getattr(train_dataset, "instance_eval", False)
+
+        self.n_batches = len(self.train_loader)
+        self.n_iterations, self.n_epochs = cfg["training"].get("n_iterations"), cfg[
+            "training"
+        ].get("n_epochs")
+        assert not (self.n_iterations is not None and self.n_epochs is not None)
+        if self.n_iterations is not None:
+            self.n_epochs = max(self.n_iterations // self.n_batches, 1)
+        else:
+            self.n_iterations = self.n_epochs * len(self.train_loader)
+
+        # Model
+        self.model_kwargs = cfg["model"]
+        self.model_name = self.model_kwargs["name"]
+        self.is_gmm = "gmm" in self.model_name
+        self.model = get_model(self.model_name)(self.n_epochs,
+                                                self.train_loader.dataset, **self.model_kwargs
+                                                ).to(self.device)
+        self.print_and_log_info(
+            "Using model {} with kwargs {}".format(self.model_name, self.model_kwargs)
+        )
+        self.print_and_log_info(
+            "Number of trainable parameters: {}".format(
+                f"{count_parameters(self.model):,}"
+            )
+        )
+        self.n_prototypes = self.model.n_prototypes
         self.n_backgrounds = getattr(self.model, "n_backgrounds", 0)
         self.n_objects = max(self.model.n_objects, 1)
         self.pred_class = getattr(self.model, "pred_class", False) or getattr(
             self.model, "estimate_minimum", False
         )
-
-        # Calculate number of clusters
         if self.pred_class:
             self.n_clusters = self.n_prototypes * self.n_objects
         else:
             self.n_clusters = self.n_prototypes ** self.n_objects * max(
                 self.n_backgrounds, 1
             )
-
-        # Additional sprite model properties
         self.learn_masks = getattr(self.model, "learn_masks", False)
         self.learn_backgrounds = getattr(self.model, "learn_backgrounds", False)
         self.learn_proba = getattr(self.model, "proba", False)
-
-    def setup_directories(self):
-        super().setup_directories()
-
-        if not self.save_img:
-            return
-
-        if self.learn_masks:
-            self.masked_prototypes_path = coerce_to_path_and_create_dir(self.run_dir / "masked_prototypes")
-            self.masks_path = coerce_to_path_and_create_dir(self.run_dir / "masks")
-            for k in range(self.n_prototypes):
-                coerce_to_path_and_create_dir(self.masked_prototypes_path / f"proto{k}")
-                coerce_to_path_and_create_dir(self.masks_path / f"mask{k}")
-
-                for j in range(self.images_to_tsf.size(0)):
-                    img_path = self.transformation_path / f"img{j}"
-                    coerce_to_path_and_create_dir(img_path / f"frg_tsf{k}")
-                    coerce_to_path_and_create_dir(img_path / f"mask_tsf{k}")
-
-        if self.learn_backgrounds:
-            self.backgrounds_path = coerce_to_path_and_create_dir(self.run_dir / "backgrounds")
-            for k in range(self.n_backgrounds):
-                coerce_to_path_and_create_dir(self.backgrounds_path / f"bkg{k}")
-
-                for j in range(self.images_to_tsf.size(0)):
-                    img_path = self.transformation_path / f"img{j}"
-                    coerce_to_path_and_create_dir(img_path / f"bkg_tsf{k}")
-
-    def setup_optimizer(self):
-        """Configure optimizer for Sprites model"""
-        train_params = self.cfg.get("training", {})
-        opt_params = train_params.get("optimizer", {})
-        optimizer_name = train_params.get("optimizer_name", "adam")
-        cluster_kwargs = self.cfg["training"].get("cluster_optimizer", {})
-        tsf_kwargs = self.cfg["training"]["transformer_optimizer"] or {}
-
-        # Create optimizer with multiple parameter groups
+        # Optimizer
+        opt_params = cfg["training"]["optimizer"] or {}
+        optimizer_name = cfg["training"]["optimizer_name"]
+        cluster_kwargs = cfg["training"].get("cluster_optimizer", {})
+        tsf_kwargs = cfg["training"]["transformer_optimizer"] or {}
         self.optimizer = get_optimizer(optimizer_name)(
             [
                 dict(params=self.model.cluster_parameters(), **cluster_kwargs),
@@ -154,54 +197,183 @@ class Trainer(AbstractTrainer):
             **opt_params,
         )
         self.model.set_optimizer(self.optimizer)
-
-        # Log optimizer configuration
         self.print_and_log_info(
-            f"Using optimizer {optimizer_name} with kwargs {opt_params}"
+            "Using optimizer {} with kwargs {}".format(optimizer_name, opt_params)
         )
-        self.print_and_log_info(f"cluster kwargs {cluster_kwargs}")
-        self.print_and_log_info(f"transformer kwargs {tsf_kwargs}")
+        self.print_and_log_info("cluster kwargs {}".format(cluster_kwargs))
+        self.print_and_log_info("transformer kwargs {}".format(tsf_kwargs))
 
-    @property
-    def train_metric_names(self):
+        # Scheduler
+        scheduler_params = cfg["training"].get("scheduler", {})
+        scheduler_name = cfg["training"].get("scheduler_name", None)
+
+        # self.scheduler_update_range = scheduler_params.get("update_range", "epoch")
+        self.scheduler_update_range = cfg["training"].get("scheduler_update_range", "epoch")
+
+        assert self.scheduler_update_range in ["epoch", "batch"]
+        if scheduler_name == "multi_step" and isinstance(
+                scheduler_params["milestones"][0], float
+        ):
+            n_tot = (
+                self.n_epochs
+                if self.scheduler_update_range == "epoch"
+                else self.n_iterations
+            )
+            scheduler_params["milestones"] = [
+                round(m * n_tot) for m in scheduler_params["milestones"]
+            ]
+        self.scheduler = get_scheduler(scheduler_name)(
+            self.optimizer, **scheduler_params
+        )
+        self.cur_lr = self.scheduler.get_last_lr()[0]
+        self.print_and_log_info(
+            "Using scheduler {} with parameters {}".format(
+                scheduler_name, scheduler_params
+            )
+        )
+
+        # Pretrained / Resume
+        checkpoint_path = cfg["training"].get("pretrained")
+        checkpoint_path_resume = cfg["training"].get("resume")
+        assert not (checkpoint_path is not None and checkpoint_path_resume is not None)
+        if checkpoint_path is not None:
+            self.load_from_tag(checkpoint_path)
+        elif checkpoint_path_resume is not None:
+            self.load_from_tag(checkpoint_path_resume, resume=True)
+        else:
+            self.start_epoch, self.start_batch = 1, 1
+
+        # Train metrics
         metric_names = ["time/img", "loss_rec", "loss_em", "loss_bin", "loss_freq"]
         metric_names += [f"prop_clus{i}" for i in range(self.n_clusters)]
-        return metric_names
+        self.bin_edges = np.arange(0, 1.1, 0.1)
+        self.bin_counts = np.zeros(len(self.bin_edges) - 1)
 
-    def setup_val_scores(self):
-        self.eval_semantic = self.cfg["training"].get("eval_semantic", False)
-        self.eval_qualitative = self.cfg["training"].get("eval_qualitative", False)
-        self.eval_with_bkg = self.cfg["training"].get("eval_with_bkg", False)
+        train_iter_interval = cfg["training"]["train_stat_interval"]
+        self.train_stat_interval = train_iter_interval
+        self.train_metrics = Metrics(*metric_names)
+        self.train_metrics_path = self.run_dir / TRAIN_METRICS_FILE
+        if not self.train_metrics_path.exists():
+            with open(self.train_metrics_path, mode="w") as f:
+                f.write(
+                    "iteration\tepoch\tbatch\t"
+                    + "\t".join(self.train_metrics.names)
+                    + "\n"
+                )
 
-        # Create appropriate score tracker based on evaluation mode
-        if hasattr(self, 'seg_eval') and self.seg_eval:
+        # Val metrics & scores
+        val_iter_interval = cfg["training"]["val_stat_interval"]
+        self.val_stat_interval = val_iter_interval
+        self.val_metrics = Metrics("loss_val")
+        self.val_metrics_path = self.run_dir / VAL_METRICS_FILE
+        if not self.val_metrics_path.exists():
+            with open(self.val_metrics_path, mode="w") as f:
+                f.write(
+                    "iteration\tepoch\tbatch\t"
+                    + "\t".join(self.val_metrics.names)
+                    + "\n"
+                )
+
+        self.eval_semantic = cfg["training"].get("eval_semantic", False)
+        self.eval_qualitative = cfg["training"].get("eval_qualitative", False)
+        self.eval_with_bkg = cfg["training"].get("eval_with_bkg", False)
+        if self.seg_eval:
             self.val_scores = SegmentationScores(self.n_classes)
-        elif hasattr(self, 'instance_eval') and self.instance_eval:
+        elif self.instance_eval:
             self.val_scores = InstanceSegScores(
                 self.n_objects + 1, with_bkg=self.eval_with_bkg
             )
         else:
             self.val_scores = Scores(self.n_classes, self.n_prototypes)
+        self.val_scores_path = self.run_dir / VAL_SCORES_FILE
+        if not self.val_scores_path.exists():
+            with open(self.val_scores_path, mode="w") as f:
+                f.write(
+                    "iteration\tepoch\tbatch\t"
+                    + "\t".join(self.val_scores.names)
+                    + "\n"
+                )
 
-    def setup_prototypes(self):
-        super().save_prototypes()
-        self.check_cluster_interval = self.cfg["training"]["check_cluster_interval"]
-        if not self.save_img:
-            return
-        for k in range(self.images_to_tsf.size(0)):
-            convert_to_img(self.images_to_tsf[k]).save(self.transformation_path / f"img{k}" / "input.png")
+        # Prototypes
+        self.check_cluster_interval = cfg["training"]["check_cluster_interval"]
+        if self.save_img:
+            self.prototypes_path = coerce_to_path_and_create_dir(
+                self.run_dir / "prototypes"
+            )
+            [
+                coerce_to_path_and_create_dir(self.prototypes_path / f"proto{k}")
+                for k in range(self.n_prototypes)
+            ]
 
-    def setup_visualizer(self, *args, **kwargs):
-        """Set up real-time visualization (e.g., Visdom)"""
-        pass
+            if self.learn_masks:
+                self.masked_prototypes_path = coerce_to_path_and_create_dir(
+                    self.run_dir / "masked_prototypes"
+                )
+                [
+                    coerce_to_path_and_create_dir(
+                        self.masked_prototypes_path / f"proto{k}"
+                    )
+                    for k in range(self.n_prototypes)
+                ]
+                self.masks_path = coerce_to_path_and_create_dir(self.run_dir / "masks")
+                [
+                    coerce_to_path_and_create_dir(self.masks_path / f"mask{k}")
+                    for k in range(self.n_prototypes)
+                ]
+            if self.learn_backgrounds:
+                self.backgrounds_path = coerce_to_path_and_create_dir(
+                    self.run_dir / "backgrounds"
+                )
+                [
+                    coerce_to_path_and_create_dir(self.backgrounds_path / f"bkg{k}")
+                    for k in range(self.n_backgrounds)
+                ]
 
-    def setup_additional_components(self, *args, **kwargs):
-        """Set up any additional trainer-specific components"""
-        pass
+            # Transformation predictions
+            self.transformation_path = coerce_to_path_and_create_dir(
+                self.run_dir / "transformations"
+            )
+            self.images_to_tsf = next(iter(self.train_loader))[0][
+                                 :N_TRANSFORMATION_PREDICTIONS
+                                 ].to(self.device)
+            for k in range(self.images_to_tsf.size(0)):
+                out = coerce_to_path_and_create_dir(
+                    self.transformation_path / f"img{k}"
+                )
+                convert_to_img(self.images_to_tsf[k]).save(out / "input.png")
+                N = self.n_clusters if self.n_clusters <= 40 else 2 * self.n_prototypes
+                [coerce_to_path_and_create_dir(out / f"tsf{k}") for k in range(N)]
+                if self.learn_masks:
+                    [
+                        coerce_to_path_and_create_dir(out / f"frg_tsf{k}")
+                        for k in range(self.n_prototypes)
+                    ]
+                    [
+                        coerce_to_path_and_create_dir(out / f"mask_tsf{k}")
+                        for k in range(self.n_prototypes)
+                    ]
+                if self.learn_backgrounds:
+                    [
+                        coerce_to_path_and_create_dir(out / f"bkg_tsf{k}")
+                        for k in range(self.n_backgrounds)
+                    ]
 
-    ######################
-    #    MAIN METHODS    #
-    ######################
+        # Visdom
+        viz_port = cfg["training"].get("visualizer_port")
+        if viz_port is not None:
+            os.environ["http_proxy"] = ""
+            self.visualizer = visdom.Visdom(
+                port=viz_port, env=f"{self.run_dir.parent.name}_{self.run_dir.name}"
+            )
+            self.visualizer.delete_env(self.visualizer.env)  # Clean env before plotting
+            self.print_and_log_info(f"Visualizer initialised at {viz_port}")
+        else:
+            self.visualizer = None
+            self.print_and_log_info("No visualizer initialized")
+
+    def print_and_log_info(self, string):
+        print_info(string)
+        self.logger.info(string)
 
     def load_from_tag(self, tag, resume=False):
         self.print_and_log_info("Loading model from run {}".format(tag))
@@ -231,6 +403,26 @@ class Trainer(AbstractTrainer):
             )
         )
         self.print_and_log_info("LR = {}".format(self.cur_lr))
+
+    @property
+    def score_name(self):
+        return self.val_scores.score_name
+
+    def print_memory_usage(self, prefix):
+        usage = {}
+        for attr in [
+            "memory_allocated",
+            "max_memory_allocated",
+            "memory_cached",
+            "max_memory_cached",
+        ]:
+            usage[attr] = getattr(torch.cuda, attr)() * 0.000001
+        self.print_and_log_info(
+            "{}:\t{}".format(
+                prefix,
+                " / ".join(["{}: {:.0f}MiB".format(k, v) for k, v in usage.items()]),
+            )
+        )
 
     @use_seed()
     def run(self):
@@ -284,6 +476,15 @@ class Trainer(AbstractTrainer):
         self.evaluate()
         self.print_and_log_info("Training run is over")
 
+    def update_scheduler(self, epoch, batch):
+        self.scheduler.step()
+        lr = self.scheduler.get_last_lr()[0]
+        if lr != self.cur_lr:
+            self.cur_lr = lr
+            self.print_and_log_info(
+                PRINT_LR_UPD_FMT(epoch, self.n_epochs, batch, self.n_batches, lr)
+            )
+
     def single_train_batch_run(self, images, masks):
         start_time = time.time()
         B = images.size(0)
@@ -329,30 +530,95 @@ class Trainer(AbstractTrainer):
             {f"prop_clus{i}": p.item() for i, p in enumerate(proportions)}
         )
 
-    ######################
-    #   SAVING METHODS   #
-    ######################
+    @torch.no_grad()
+    def log_images(self, cur_iter):
+        self.model.eval()
+        self.save_prototypes(cur_iter)
+        self.update_visualizer_images(self.model.prototypes, "prototypes", nrow=5)
+        if self.learn_masks:
+            self.save_masked_prototypes(cur_iter)
+            self.update_visualizer_images(
+                self.model.prototypes * self.model.masks, "masked_prototypes", nrow=5
+            )
+            self.save_masks(cur_iter)
+            self.update_visualizer_images(self.model.masks, "masks", nrow=5)
+        if self.learn_backgrounds:
+            self.save_backgrounds(cur_iter)
+            self.update_visualizer_images(self.model.backgrounds, "backgrounds", nrow=5)
+
+        # Transformations
+        tsf_imgs, compositions = self.save_transformed_images(cur_iter)
+        C, H, W = tsf_imgs.shape[2:]
+        self.update_visualizer_images(
+            tsf_imgs.reshape(-1, C, H, W), "transformations", nrow=tsf_imgs.size(1)
+        )
+
+        # Compositions
+        if len(compositions) > 0:
+            k = 0
+            for imgs, name in zip(compositions[:2], ["frg_tsf", "mask_tsf"]):
+                self.update_visualizer_images(
+                    imgs.view(-1, imgs.size(2), H, W), name, nrow=self.n_prototypes + 1
+                )
+                k += 1
+            if self.learn_backgrounds:
+                imgs = compositions[k]
+                self.update_visualizer_images(
+                    imgs.view(-1, imgs.size(2), H, W),
+                    "bkg_tsf",
+                    nrow=self.n_backgrounds + 1,
+                )
+                k += 1
+            if self.n_objects > 1:
+                for name in ["frg_tsf_aux", "mask_tsf_aux"]:
+                    imgs = compositions[k]
+                    self.update_visualizer_images(
+                        imgs.view(-1, imgs.size(2), H, W),
+                        name,
+                        nrow=self.n_prototypes + 1,
+                    )
+                    k += 1
+
+    @torch.no_grad()
+    def save_prototypes(self, cur_iter=None):
+        prototypes = self.model.prototypes
+        for k in range(self.n_prototypes):
+            img = convert_to_img(prototypes[k])
+            if cur_iter is not None:
+                img.save(self.prototypes_path / f"proto{k}" / f"{cur_iter}.jpg")
+            else:
+                img.save(self.prototypes_path / f"prototype{k}.png")
 
     @torch.no_grad()
     def save_masked_prototypes(self, cur_iter=None):
-        self.save_pred(
-            cur_iter,
-            pred_name="prototype",
-            transform_fn=lambda proto, k: proto * self.model.masks[k],
-            prefix="proto"
-        )
+        prototypes = self.model.prototypes
+        masks = self.model.masks
+        for k in range(self.n_prototypes):
+            img = convert_to_img(prototypes[k] * masks[k])
+            if cur_iter is not None:
+                img.save(self.masked_prototypes_path / f"proto{k}" / f"{cur_iter}.jpg")
+            else:
+                img.save(self.masked_prototypes_path / f"prototype{k}.png")
 
     @torch.no_grad()
     def save_masks(self, cur_iter=None):
-        self.save_pred(
-            cur_iter=cur_iter,
-            pred_name="mask",
-            n_preds=self.n_prototypes
-        )
+        masks = self.model.masks
+        for k in range(self.n_prototypes):
+            img = convert_to_img(masks[k])
+            if cur_iter is not None:
+                img.save(self.masks_path / f"mask{k}" / f"{cur_iter}.jpg")
+            else:
+                img.save(self.masks_path / f"mask{k}.png")
 
     @torch.no_grad()
     def save_backgrounds(self, cur_iter=None):
-        self.save_pred(cur_iter, pred_name="background", prefix="bkg")
+        backgrounds = self.model.backgrounds
+        for k in range(self.n_backgrounds):
+            img = convert_to_img(backgrounds[k])
+            if cur_iter is not None:
+                img.save(self.backgrounds_path / f"bkg{k}" / f"{cur_iter}.jpg")
+            else:
+                img.save(self.backgrounds_path / f"background{k}.png")
 
     @torch.no_grad()
     def save_transformed_images(self, cur_iter=None):
@@ -365,15 +631,21 @@ class Trainer(AbstractTrainer):
             output, compositions = self.model.transform(self.images_to_tsf), []
 
         transformed_imgs = torch.cat([self.images_to_tsf.unsqueeze(1), output], 1)
-        N = self.get_n_clusters()
+        N = self.n_clusters if self.n_clusters <= 40 else 2 * self.n_prototypes
         transformed_imgs = transformed_imgs[:, : N + 1]
         for k in range(transformed_imgs.size(0)):
             for j, img in enumerate(transformed_imgs[k][1:]):
-                tsf_path = self.transformation_path / f"img{k}"
                 if cur_iter is not None:
-                    self.save_img_to_path(img, tsf_path / f"tsf{j}", f"{cur_iter}.jpg")
+                    convert_to_img(img).save(
+                        self.transformation_path
+                        / f"img{k}"
+                        / f"tsf{j}"
+                        / f"{cur_iter}.jpg"
+                    )
                 else:
-                    self.save_img_to_path(img, tsf_path, f"tsf{j}.png")
+                    convert_to_img(img).save(
+                        self.transformation_path / f"img{k}" / f"tsf{j}.png"
+                    )
 
         i = 0
         for name in ["frg", "mask", "bkg", "frg_aux", "mask_aux"]:
@@ -389,96 +661,32 @@ class Trainer(AbstractTrainer):
                     tmp_path = self.transformation_path / f"img{k}"
                     for j, img in enumerate(compositions[i][k][1:]):
                         if cur_iter is not None:
-                            self.save_img_to_path(img, tmp_path / f"{name}_tsf{j}", f"{cur_iter}.jpg")
+                            convert_to_img(img).save(
+                                tmp_path / f"{name}_tsf{j}" / f"{cur_iter}.jpg"
+                            )
                         else:
-                            self.save_img_to_path(img, tmp_path, f"{name}_tsf{j}.png")
+                            convert_to_img(img).save(tmp_path / f"{name}_tsf{j}.png")
             i += 1
 
         return transformed_imgs, compositions
 
-    def _save_additional_image_gifs(self, size):
-        """Save additional image GIFs specific to Sprites trainer"""
-        if hasattr(self, 'learn_masks') and self.learn_masks:
-            if hasattr(self, 'masked_prototypes_path') and os.path.exists(self.masked_prototypes_path):
-                for k in range(self.n_prototypes):
-                    self.save_gif_to_path(self.masked_prototypes_path / f"proto{k}", f"prototype{k}.gif", size=size)
+    @torch.no_grad()
+    def update_visualizer_images(self, images, title, nrow):
+        if self.visualizer is None:
+            return None
 
-            if hasattr(self, 'masks_path') and os.path.exists(self.masks_path):
-                for k in range(self.n_prototypes):
-                    self.save_gif_to_path(self.masks_path / f"mask{k}", f"mask{k}.gif", size=size)
-
-            for i in range(self.images_to_tsf.size(0)):
-                for k in range(self.n_prototypes):
-                    for component in ["frg", "mask"]:
-                        component_path = self.transformation_path / f"img{i}" / f"{component}_tsf{k}"
-                        self.save_gif_to_path(component_path, f"{component}_tsf{k}.gif", size=size)
-
-        if hasattr(self, 'learn_backgrounds') and self.learn_backgrounds:
-            if hasattr(self, 'backgrounds_path') and os.path.exists(self.backgrounds_path):
-                for k in range(self.n_backgrounds):
-                    self.save_gif_to_path(self.backgrounds_path / f"bkg{k}", f"background{k}.gif", size=size)
-
-            for i in range(self.images_to_tsf.size(0)):
-                for k in range(self.n_backgrounds):
-                    bkg_tsf_path = self.transformation_path / f"img{i}" / f"bkg_tsf{k}"
-                    self.save_gif_to_path(bkg_tsf_path, f"bkg_tsf{k}.gif", size=size)
-
-    ######################
-    #   LOGGING METHODS  #
-    ######################
-
-    def _log_model_specific_images(self, cur_iter):
-        """Visualize masks, masked prototypes, and backgrounds if applicable"""
-        if self.learn_masks:
-            self.save_masked_prototypes(cur_iter)
-            self.update_visualizer_images(
-                self.model.prototypes * self.model.masks, "masked_prototypes", nrow=5
+        if max(images.shape[1:]) > VIZ_MAX_IMG_SIZE:
+            images = F.interpolate(
+                images, size=VIZ_MAX_IMG_SIZE, mode="bilinear", align_corners=False
             )
-            self.save_masks(cur_iter)
-            self.update_visualizer_images(self.model.masks, "masks", nrow=5)
-
-        if self.learn_backgrounds:
-            self.save_backgrounds(cur_iter)
-            self.update_visualizer_images(self.model.backgrounds, "backgrounds", nrow=5)
-
-    def _log_transformation_compositions(self, compositions, C, H, W):
-        if len(compositions) > 0:
-            k = 0
-            # Visualize foreground and mask transformations
-            for imgs, name in zip(compositions[:2], ["frg_tsf", "mask_tsf"]):
-                self.update_visualizer_images(
-                    imgs.view(-1, imgs.size(2), H, W), name, nrow=self.n_prototypes + 1
-                )
-                k += 1
-
-            # Visualize background transformations
-            if self.learn_backgrounds:
-                imgs = compositions[k]
-                self.update_visualizer_images(
-                    imgs.view(-1, imgs.size(2), H, W),
-                    "bkg_tsf",
-                    nrow=self.n_backgrounds + 1,
-                )
-                k += 1
-
-            # Visualize auxiliary transformations for multi-object models
-            if self.n_objects > 1:
-                for name in ["frg_tsf_aux", "mask_tsf_aux"]:
-                    imgs = compositions[k]
-                    self.update_visualizer_images(
-                        imgs.view(-1, imgs.size(2), H, W),
-                        name,
-                        nrow=self.n_prototypes + 1,
-                    )
-                    k += 1
-
-    def get_transformation_nrow(self, tsf_imgs):
-        """Custom row count for transformation visualization"""
-        return tsf_imgs.size(1)
-
-    ######################
-    # VALIDATION METHODS #
-    ######################
+        self.visualizer.images(
+            images.clamp(0, 1),
+            win=title,
+            nrow=nrow,
+            opts=dict(
+                title=title, store_history=True, width=VIZ_WIDTH, height=VIZ_HEIGHT
+            ),
+        )
 
     def check_cluster(self, cur_iter, epoch, batch):
         if hasattr(self.model, "_diff_selections") and self.visualizer is not None:
@@ -548,53 +756,348 @@ class Trainer(AbstractTrainer):
             self.print_and_log_info(msg)
         self.train_metrics.reset(*[f"prop_clus{i}" for i in range(self.n_clusters)])
 
+    def log_train_metrics(self, cur_iter, epoch, batch):
+        # Print & write metrics to file
+        stat = PRINT_TRAIN_STAT_FMT(
+            epoch, self.n_epochs, batch, self.n_batches, self.train_metrics
+        )
+        self.print_and_log_info(stat[:1000])
+        with open(self.train_metrics_path, mode="a") as f:
+            f.write(
+                "{}\t{}\t{}\t".format(cur_iter, epoch, batch)
+                + "\t".join(map("{:.6f}".format, self.train_metrics.avg_values))
+                + "\n"
+            )
+
+        self.update_visualizer_metrics(cur_iter, train=True)
+
+    def update_visualizer_metrics(self, cur_iter, train):
+        if self.visualizer is None:
+            return None
+
+        split, metrics = (
+            ("train", self.train_metrics) if train else ("val", self.val_metrics)
+        )
+        losses = list(filter(lambda s: s.startswith("loss"), metrics.names))
+        y, x = [[metrics[n].avg for n in losses]], [[cur_iter] * len(losses)]
+        self.visualizer.line(
+            y,
+            x,
+            win=f"{split}_losses",
+            update="append",
+            opts=dict(
+                title=f"{split}_losses",
+                legend=losses,
+                width=VIZ_WIDTH,
+                height=VIZ_HEIGHT,
+            ),
+        )
+
+        if train:
+            if self.n_prototypes > 1:
+                # Cluster proportions
+                N = self.n_clusters if self.n_clusters <= 40 else 2 * self.n_prototypes
+                proportions = [metrics[f"prop_clus{i}"].avg for i in range(N)]
+                self.visualizer.bar(
+                    proportions,
+                    win="train_cluster_prop",
+                    opts=dict(
+                        title="train_cluster_proportions",
+                        width=VIZ_HEIGHT,
+                        height=VIZ_HEIGHT,
+                    ),
+                )
+        else:
+            names = list(filter(lambda name: "cls" not in name, self.val_scores.names))
+            y, x = [[self.val_scores[n] for n in names]], [[cur_iter] * len(names)]
+            self.visualizer.line(
+                y,
+                x,
+                win="global_scores",
+                update="append",
+                opts=dict(
+                    title="global_scores",
+                    legend=names,
+                    width=VIZ_WIDTH,
+                    height=VIZ_HEIGHT,
+                ),
+            )
+
+            if not self.instance_eval:
+                name = "acc" if not self.seg_eval else "iou"
+                N = self.n_classes
+                y = [[self.val_scores[f"{name}_cls{i}"] for i in range(N)]]
+                x = [[cur_iter] * N]
+                self.visualizer.line(
+                    y,
+                    x,
+                    win=f"{name}_by_cls",
+                    update="append",
+                    opts=dict(
+                        title=f"{name}_by_cls",
+                        legend=[f"cls{i}" for i in range(N)],
+                        width=VIZ_WIDTH,
+                        heigh=VIZ_HEIGHT,
+                    ),
+                )
+
     @torch.no_grad()
     def run_val(self):
-        """Run validation step for current model"""
         self.model.eval()
-
         for images, labels, _, _ in self.val_loader:
             B, C, H, W = images.shape
             images = images.to(self.device)
-
-            # Get model outputs
             loss_val, distances, class_prob = self.model(images)
+
+            if not self.pred_class:  # clustering
+                if self.n_backgrounds > 1:
+                    assert class_prob is None
+                    distances, bkg_idx = distances.view(
+                        B, self.n_prototypes, self.n_backgrounds
+                    ).min(2)
+                if self.n_objects > 1:
+                    assert class_prob is None
+                    distances = distances.view(
+                        B, *(self.n_prototypes,) * self.n_objects
+                    )
+                    other_idxs = []
+                    for k in range(self.n_objects, 1, -1):
+                        distances, idx = distances.min(k)
+                        other_idxs.insert(0, idx)
+                if self.learn_proba:
+                    class_oh = class_prob.permute(2, 0, 1).flatten(1)
+                    argmin_idx = class_oh.argmax(1)
+                else:
+                    argmin_idx = distances.argmin(1)
+
             self.val_metrics.update({"loss_val": loss_val[0].item()})
+            if self.seg_eval:  # we account for probabilities within model.transform
+                if self.n_objects == 1:
+                    masks = self.model.transform(images, with_composition=True)[1][1]
+                    masks = masks[torch.arange(B), argmin_idx]
+                    self.val_scores.update(
+                        labels.long().numpy(), (masks > 0.5).long().cpu().numpy()
+                    )
+                else:
+                    target = self.model.transform(
+                        images, pred_semantic_labels=True
+                    ).cpu()
+                    if not self.pred_class:
+                        target = target.view(
+                            B, *(self.n_prototypes,) * self.n_objects, H, W
+                        )
+                        real_idxs = []
+                        for idx in [argmin_idx] + other_idxs:
+                            for i in real_idxs:
+                                idx = idx[torch.arange(B), i]
+                            real_idxs.insert(0, idx)
+                            target = target[torch.arange(B), idx]
+                    self.val_scores.update(
+                        labels.long().numpy(), target.long().cpu().numpy()
+                    )
 
-            # Clustering
-            if self.n_backgrounds > 1 and not self.pred_class:
-                assert class_prob is None
-                distances, _ = distances.view(B, self.n_prototypes, self.n_backgrounds).min(2)
+            elif (
+                    self.instance_eval
+            ):  # we account for probabilities within model.transform
+                if self.n_objects == 1:
+                    masks = self.model.transform(images, with_composition=True)[1][1]
+                    self.val_scores.update(
+                        labels.long().numpy(), (masks > 0.5).long().cpu().numpy()
+                    )
+                else:
+                    target = self.model.transform(
+                        images, pred_instance_labels=True, with_bkg=self.eval_with_bkg
+                    ).cpu()
+                    if not self.pred_class:
+                        target = target.view(
+                            B,
+                            *(self.n_prototypes,) * self.n_objects,
+                            images.size(2),
+                            images.size(3),
+                        )
+                        real_idxs = []
+                        for idx in [argmin_idx] + other_idxs:
+                            for i in real_idxs:
+                                idx = idx[torch.arange(B), i]
+                            real_idxs.insert(0, idx)
+                            target = target[torch.arange(B), idx]
+                        if not self.eval_with_bkg:
+                            bkg_idx = target == 0
+                            tsf_layers = self.model.predict(images)[0]
+                            new_target = ((tsf_layers - images) ** 2).sum(3).min(1)[
+                                             0
+                                         ].argmin(0).long() + 1
+                            target[bkg_idx] = new_target[bkg_idx]
 
-            # Multi-object
-            other_idxs = []
-            if self.n_objects > 1 and not self.pred_class:
-                assert class_prob is None
-                distances = distances.view(B, *(self.n_prototypes,) * self.n_objects)
-                for k in range(self.n_objects, 1, -1):
-                    distances, idx = distances.min(k)
-                    other_idxs.insert(0, idx)
+                    self.val_scores.update(labels.long().numpy(), target.long().numpy())
 
-            if self.learn_proba and class_prob is not None:
-                class_oh = class_prob.permute(2, 0, 1).flatten(1)
-                argmin_idx = class_oh.argmax(1)
-            else:
-                argmin_idx = distances.argmin(1)
-
-            if self.seg_eval:
-                self.evaluate_segmentation(images, labels, argmin_idx, other_idxs, B, H, W)
-            elif self.instance_eval:
-                self.evaluate_instance(images, labels, argmin_idx, other_idxs, B)
             else:
                 assert self.n_objects == 1
                 self.val_scores.update(labels.long().numpy(), argmin_idx.cpu().numpy())
 
-    ######################
-    # EVALUATION METHODS #
-    ######################
+    def log_val_metrics(self, cur_iter, epoch, batch):
+        stat = PRINT_VAL_STAT_FMT(
+            epoch, self.n_epochs, batch, self.n_batches, self.val_metrics
+        )
+        self.print_and_log_info(stat)
+        with open(self.val_metrics_path, mode="a") as f:
+            f.write(
+                "{}\t{}\t{}\t".format(cur_iter, epoch, batch)
+                + "\t".join(map("{:.6f}".format, self.val_metrics.avg_values))
+                + "\n"
+            )
+
+        scores = self.val_scores.compute()
+        self.print_and_log_info(
+            "val_scores: "
+            + ", ".join(["{}={:.4f}".format(k, v) for k, v in scores.items()])
+        )
+        with open(self.val_scores_path, mode="a") as f:
+            f.write(
+                "{}\t{}\t{}\t".format(cur_iter, epoch, batch)
+                + "\t".join(map("{:.6f}".format, scores.values()))
+                + "\n"
+            )
+
+        self.update_visualizer_metrics(cur_iter, train=False)
+        self.val_scores.reset()
+        self.val_metrics.reset()
+
+    def save(self, epoch, batch):
+        state = {
+            "epoch": epoch,
+            "batch": batch,
+            "model_name": self.model_name,
+            "model_kwargs": self.model_kwargs,
+            "model_state": self.model.state_dict(),
+            "n_prototypes": self.n_prototypes,
+            "optimizer_state": self.optimizer.state_dict(),
+            "scheduler_state": self.scheduler.state_dict(),
+        }
+        save_path = self.run_dir / MODEL_FILE
+        torch.save(state, save_path)
+        self.print_and_log_info("Model saved at {}".format(save_path))
+
+    def save_metric_plots(self):
+        self.model.eval()
+        # Prototypes & transformation predictions
+        size = MAX_GIF_SIZE if MAX_GIF_SIZE < max(self.img_size) else self.img_size
+        if self.save_img:
+            self.save_prototypes()
+            if self.learn_masks:
+                self.save_masked_prototypes()
+                self.save_masks()
+            if self.learn_backgrounds:
+                self.save_backgrounds()
+            self.save_transformed_images()
+        # Train metrics
+        df_train = pd.read_csv(self.train_metrics_path, sep="\t", index_col=0)
+        df_val = pd.read_csv(self.val_metrics_path, sep="\t", index_col=0)
+        df_scores = pd.read_csv(self.val_scores_path, sep="\t", index_col=0)
+        if len(df_train) == 0:
+            self.print_and_log_info("No metrics or plots to save")
+            return
+
+        # Losses
+        losses = list(filter(lambda s: s.startswith("loss"), self.train_metrics.names))
+        df = df_train.join(df_val[["loss_val"]], how="outer")
+        fig = plot_lines(df, losses + ["loss_val"], title="Loss")
+        fig.savefig(self.run_dir / "loss.pdf")
+
+        # Cluster proportions
+        N = self.n_clusters if self.n_clusters <= 40 else 2 * self.n_prototypes
+        names = list(filter(lambda s: s.startswith("prop_"), self.train_metrics.names))[
+                :N
+                ]
+        fig = plot_lines(df, names, title="Cluster proportions")
+        fig.savefig(self.run_dir / "cluster_proportions.pdf")
+        s = df[names].iloc[-1]
+        s.index = list(map(lambda n: n.replace("prop_clus", ""), names))
+        fig = plot_bar(s, title="Final cluster proportions")
+        fig.savefig(self.run_dir / "cluster_proportions_final.pdf")
+
+        # Validation
+        if not self.is_val_empty:
+            names = list(filter(lambda name: "cls" not in name, self.val_scores.names))
+            fig = plot_lines(df_scores, names, title="Global scores", unit_yaxis=True)
+            fig.savefig(self.run_dir / "global_scores.pdf")
+
+            if not self.instance_eval:
+                name = "acc" if not self.seg_eval else "iou"
+                N = self.n_classes
+                fig = plot_lines(
+                    df_scores,
+                    [f"{name}_cls{i}" for i in range(N)],
+                    title="Scores by cls",
+                    unit_yaxis=True,
+                )
+                fig.savefig(self.run_dir / "scores_by_cls.pdf")
+        if self.save_img:
+            # Save gifs for prototypes
+            for k in range(self.n_prototypes):
+                save_gif(
+                    self.prototypes_path / f"proto{k}", f"prototype{k}.gif", size=size
+                )
+                shutil.rmtree(str(self.prototypes_path / f"proto{k}"))
+                if self.learn_masks:
+                    save_gif(
+                        self.masked_prototypes_path / f"proto{k}",
+                        f"prototype{k}.gif",
+                        size=size,
+                    )
+                    shutil.rmtree(str(self.masked_prototypes_path / f"proto{k}"))
+                    save_gif(self.masks_path / f"mask{k}", f"mask{k}.gif", size=size)
+                    shutil.rmtree(str(self.masks_path / f"mask{k}"))
+
+            for k in range(self.n_backgrounds):
+                save_gif(
+                    self.backgrounds_path / f"bkg{k}", f"background{k}.gif", size=size
+                )
+                shutil.rmtree(str(self.backgrounds_path / f"bkg{k}"))
+
+            # Save gifs for transformation predictions
+            for i in range(self.images_to_tsf.size(0)):
+                N = self.n_clusters if self.n_clusters <= 40 else 2 * self.n_prototypes
+                for k in range(N):
+                    save_gif(
+                        self.transformation_path / f"img{i}" / f"tsf{k}",
+                        f"tsf{k}.gif",
+                        size=size,
+                    )
+                    shutil.rmtree(str(self.transformation_path / f"img{i}" / f"tsf{k}"))
+
+                if self.learn_masks:
+                    for k in range(self.n_prototypes):
+                        save_gif(
+                            self.transformation_path / f"img{i}" / f"frg_tsf{k}",
+                            f"frg_tsf{k}.gif",
+                            size=size,
+                        )
+                        save_gif(
+                            self.transformation_path / f"img{i}" / f"mask_tsf{k}",
+                            f"mask_tsf{k}.gif",
+                            size=size,
+                        )
+                        shutil.rmtree(
+                            str(self.transformation_path / f"img{i}" / f"frg_tsf{k}")
+                        )
+                        shutil.rmtree(
+                            str(self.transformation_path / f"img{i}" / f"mask_tsf{k}")
+                        )
+                if self.learn_backgrounds:
+                    for k in range(self.n_backgrounds):
+                        save_gif(
+                            self.transformation_path / f"img{i}" / f"bkg_tsf{k}",
+                            f"bkg_tsf{k}.gif",
+                            size=size,
+                        )
+                        shutil.rmtree(
+                            str(self.transformation_path / f"img{i}" / f"bkg_tsf{k}")
+                        )
+        self.print_and_log_info("Metrics and plots saved")
 
     def evaluate(self):
-        print(f"TAU: {self.model.tau}")
+        print("TAU:", self.model.tau)
         self.model.eval()
         label = self.train_loader.dataset[0][1]
         empty_label = isinstance(label, (int, np.integer)) and label == -1
@@ -610,7 +1113,9 @@ class Trainer(AbstractTrainer):
                 self.print_and_log_info("Semantic segmentation evaluation")
                 self.segmentation_quantitative_eval()
                 self.segmentation_qualitative_eval()
-            elif self.instance_eval and self.learn_masks:  # NOTE: evaluate either semantic or instance
+            elif (
+                    self.instance_eval and self.learn_masks
+            ):  # NOTE: evaluate either semantic or instance
                 self.print_and_log_info("Instance segmentation evaluation")
                 self.instance_seg_quantitative_eval()
                 self.instance_seg_qualitative_eval()
@@ -620,54 +1125,6 @@ class Trainer(AbstractTrainer):
                 self.qualitative_eval()
 
         self.print_and_log_info("Evaluation is over")
-
-    def evaluate_segmentation(self, images, labels, argmin_idx, other_idxs, B, H, W):
-        """Handle semantic segmentation evaluation"""
-        if self.n_objects == 1:
-            masks = self.model.transform(images, with_composition=True)[1][1]
-            masks = masks[torch.arange(B), argmin_idx]
-            self.val_scores.update(labels.long().numpy(), (masks > 0.5).long().cpu().numpy())
-            return
-
-        target = self.model.transform(images, pred_semantic_labels=True).cpu()
-
-        if not self.pred_class:
-            target = target.view(B, *(self.n_prototypes,) * self.n_objects, H, W)
-            real_idxs = []
-            for idx in [argmin_idx] + other_idxs:
-                for i in real_idxs:
-                    idx = idx[torch.arange(B), i]
-                real_idxs.insert(0, idx)
-                target = target[torch.arange(B), idx]
-
-        self.val_scores.update(labels.long().numpy(), target.long().cpu().numpy())
-
-    def evaluate_instance(self, images, labels, argmin_idx, other_idxs, B):
-        """Handle instance segmentation evaluation"""
-        if self.n_objects == 1:
-            # Single object case
-            masks = self.model.transform(images, with_composition=True)[1][1]
-            self.val_scores.update(labels.long().numpy(), (masks > 0.5).long().cpu().numpy())
-            return
-
-        target = self.model.transform(images, pred_instance_labels=True, with_bkg=self.eval_with_bkg).cpu()
-
-        if not self.pred_class:
-            target = target.view(B, *(self.n_prototypes,) * self.n_objects, images.size(2), images.size(3))
-            real_idxs = []
-            for idx in [argmin_idx] + other_idxs:
-                for i in real_idxs:
-                    idx = idx[torch.arange(B), i]
-                real_idxs.insert(0, idx)
-                target = target[torch.arange(B), idx]
-
-            if not self.eval_with_bkg:
-                bkg_idx = target == 0
-                tsf_layers = self.model.predict(images)[0]
-                new_target = ((tsf_layers - images) ** 2).sum(3).min(1)[0].argmin(0).long() + 1
-                target[bkg_idx] = new_target[bkg_idx]
-
-        self.val_scores.update(labels.long().numpy(), target.long().numpy())
 
     @torch.no_grad()
     def distance_eval(self):
@@ -1208,36 +1665,41 @@ class Trainer(AbstractTrainer):
                 + "\n"
             )
 
-    ######################
-    #  VISUALIZE METHODS #
-    ######################
 
-    def win_loss(self, split):
-        return f"{split}_losses"
-
-    def get_n_clusters(self):
-        """Return number of clusters for visualization"""
-        if hasattr(self, 'n_clusters'):
-            return self.n_clusters if self.n_clusters <= 40 else 2 * self.n_prototypes
-        return super().get_n_clusters()
-
-    def should_visualize_cls_scores(self):
-        """Determine if class scores should be visualized"""
-        return not hasattr(self, 'instance_eval') or not self.instance_eval
-
-    def cls_score_name(self):
-        """Return score name based on evaluation type"""
-        if hasattr(self, 'seg_eval') and self.seg_eval:
-            return "iou"
-        return "acc"
+import datetime
 
 
 @hydra.main(version_base=None, config_path="../conf", config_name="config")
 def main(cfg: DictConfig) -> None:
-    run_trainer(
-        cfg=cfg,
-        trainer_class=Trainer,
+    parser = argparse.ArgumentParser(
+        description="Pipeline to train a NN model specified by a YML config"
     )
+
+    torch.backends.cudnn.enabled = False
+    print(OmegaConf.to_yaml(cfg))
+
+    dataset = cfg["dataset"]["name"]
+    seed = cfg["training"]["seed"]
+    save = cfg["training"]["save"]
+    day = datetime.datetime.now().day
+    month = datetime.datetime.now().month
+    job_name = HydraConfig.get().job.name
+    job_id = HydraConfig.get().job.num
+
+    tag = f"{dataset}_{job_name}_{job_id}"
+
+    if cfg["training"]["cont"] == True:
+        cfg["training"]["resume"] = tag
+
+    run_dir = RUNS_PATH / dataset / tag
+    run_dir = str(run_dir)
+    trainer = Trainer(cfg, run_dir, seed=seed, save=save)
+    try:
+        trainer.run(seed=seed)
+    except Exception:
+        traceback.print_exc(file=sys.stderr)
+        raise
+
 
 if __name__ == "__main__":
     main()
