@@ -8,6 +8,7 @@ import copy
 import numpy as np
 import pandas as pd
 import torch
+from omegaconf import OmegaConf
 from torch.utils.data import DataLoader
 
 from .dataset import get_dataset
@@ -53,23 +54,24 @@ class Trainer:
 
     @use_seed()
     def __init__(
-        self, config_path, run_dir, parent_model=None, recluster=False, save=False
+        self, cfg, run_dir, parent_model=None, recluster=False, save=False
     ):
-        self.config_path = coerce_to_path_and_check_exist(config_path)
         self.run_dir = coerce_to_path_and_create_dir(run_dir)
         self.logger = get_logger(self.run_dir, name="trainer")
-        self.save_img = save
         self.print_and_log_info(
             "Trainer initialisation: run directory is {}".format(run_dir)
         )
+        self.save_img = save
 
-        shutil.copy(self.config_path, self.run_dir)
-        self.print_and_log_info(
-            "Config {} copied to run directory".format(self.config_path)
-        )
-
-        with open(self.config_path) as fp:
-            cfg = yaml.load(fp, Loader=yaml.FullLoader)
+        # self.config_path = coerce_to_path_and_check_exist(config_path)
+        # shutil.copy(self.config_path, self.run_dir)
+        # self.print_and_log_info(
+        #     "Config {} copied to run directory".format(self.config_path)
+        # )
+        # with open(self.config_path) as fp:
+        #     cfg = yaml.load(fp, Loader=yaml.FullLoader)
+        OmegaConf.save(cfg, self.run_dir / "config.yaml")
+        self.print_and_log_info("Current config copied to run directory")
 
         if torch.cuda.is_available():
             type_device = "cuda"
@@ -84,7 +86,10 @@ class Trainer:
 
         # Datasets and dataloaders
         self.dataset_kwargs = cfg["dataset"]
-        self.dataset_name = self.dataset_kwargs.pop("name")
+
+        # self.dataset_name = self.dataset_kwargs.pop("name")
+        self.dataset_name = self.dataset_kwargs["name"]
+
         train_dataset = get_dataset(self.dataset_name)("train", **self.dataset_kwargs)
         val_dataset = get_dataset(self.dataset_name)("val", **self.dataset_kwargs)
 
@@ -135,7 +140,10 @@ class Trainer:
 
         # Model
         self.model_kwargs = cfg["model"]
-        self.model_name = self.model_kwargs.pop("name")
+
+        # self.model_name = self.model_kwargs.pop("name")
+        self.model_name = self.model_kwargs["name"]
+
         self.is_gmm = "gmm" in self.model_name
         self.model = get_model(self.model_name)(
             self.train_loader.dataset, **self.model_kwargs
@@ -153,10 +161,19 @@ class Trainer:
         # Optimizer
         self.opt_params = cfg["training"]["optimizer"] or {}
         self.sprite_opt_params = cfg["training"].get("sprite_optimizer", {})
-        self.optimizer_name = self.opt_params.pop("name")
-        self.cluster_kwargs = self.opt_params.pop("cluster", {})
-        self.tsf_kwargs = self.opt_params.pop("transformer", {})
-        self.sprite_optimizer_name = self.sprite_opt_params.pop("name", None)
+
+        # self.optimizer_name = self.opt_params.pop("name")
+        self.optimizer_name = cfg["training"]["optimizer_name"]
+
+        # self.cluster_kwargs = self.opt_params.pop("cluster", {})
+        self.cluster_kwargs = cfg["training"].get("cluster_optimizer", {})
+
+        # self.tsf_kwargs = self.opt_params.pop("transformer", {})
+        self.tsf_kwargs = cfg["training"].get("transformer_optimizer", {})
+
+        # self.sprite_optimizer_name = self.sprite_opt_params.pop("name", None)
+        self.sprite_optimizer_name = cfg["training"].get("sprite_optimizer_name", None)
+
         if self.sprite_optimizer_name in ["SGD", "sgd"]:
             self.sprite_optimizer = get_optimizer(self.sprite_optimizer_name)(
                 [dict(params=self.model.cluster_parameters(), **self.cluster_kwargs)],
@@ -184,8 +201,13 @@ class Trainer:
 
         # Scheduler
         self.scheduler_params = cfg["training"].get("scheduler", {}) or {}
-        self.scheduler_name = self.scheduler_params.pop("name", None)
-        self.scheduler_update_range = self.scheduler_params.pop("update_range", "epoch")
+
+        # self.scheduler_name = self.scheduler_params.pop("name", None)
+        self.scheduler_name = cfg["training"].get("scheduler_name", None)
+
+        # self.scheduler_update_range = self.scheduler_params.pop("update_range", "epoch")
+        self.scheduler_update_range = cfg["training"].get("scheduler_update_range", "epoch")
+
         assert self.scheduler_update_range in ["epoch", "batch"]
         if self.scheduler_name == "multi_step" and isinstance(
             self.scheduler_params["milestones"][0], float

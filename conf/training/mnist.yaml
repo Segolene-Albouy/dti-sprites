@@ -9,3 +9,4 @@ n_epochs: 40
 train_stat_interval: 25
 val_stat_interval: 50
 check_cluster_interval: 50
+sprite_optimizer_name: sgd

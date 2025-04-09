@@ -85,8 +85,8 @@ class Trainer:
         self.print_and_log_info(
             "Trainer initialisation: run directory is {}".format(run_dir)
         )
-
         self.save_img = save
+
         OmegaConf.save(cfg, self.run_dir / "config.yaml")
         self.print_and_log_info("Current config copied to run directory")
 
@@ -205,8 +205,11 @@ class Trainer:
 
         # Scheduler
         scheduler_params = cfg["training"].get("scheduler", {})
-        scheduler_name = cfg["training"].get("scheduler_name", {})
-        self.scheduler_update_range = scheduler_params.get("update_range", "epoch")
+        scheduler_name = cfg["training"].get("scheduler_name", None)
+
+        # self.scheduler_update_range = scheduler_params.get("update_range", "epoch")
+        self.scheduler_update_range = cfg["training"].get("scheduler_update_range", "epoch")
+
         assert self.scheduler_update_range in ["epoch", "batch"]
         if scheduler_name == "multi_step" and isinstance(
                 scheduler_params["milestones"][0], float
