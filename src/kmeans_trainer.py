@@ -183,7 +183,8 @@ class Trainer:
                 [dict(params=self.model.transformer_parameters(), **self.tsf_kwargs)],
                 **self.opt_params,
             )
-            self.model.set_optimizer(self.optimizer, self.sprite_optimizer)
+            # TODO check how it was working because DTIKmeans.set_optimizer(self, opt):
+            # self.model.set_optimizer(self.optimizer, self.sprite_optimizer)
         else:
             self.optimizer = get_optimizer(self.optimizer_name)(
                 [dict(params=self.model.cluster_parameters(), **self.cluster_kwargs)]
