@@ -93,8 +93,8 @@ class DTIKmeans(nn.Module):
                 self.proba = nn.Linear(self.out_ch, n_prototypes)
             else:  # marionette-like
                 self.proba = nn.Sequential(
-                    nn.Linear(LATENT_SIZE, self.out_ch),
-                    nn.LayerNorm(self.out_ch, elementwise_affine=False),
+                    nn.Linear(self.out_ch, LATENT_SIZE),
+                    nn.LayerNorm(LATENT_SIZE, elementwise_affine=False),
                 )
                 self.shared_l = kwargs.get("shared_l", True)
                 if not self.shared_l:
@@ -164,10 +164,14 @@ class DTIKmeans(nn.Module):
     def estimate_logits(self, features):
         if self.proba_type == "marionette":
             if not self.shared_l:
-                proba_theta = self.proba(self.proba_latent_params)
+                latent_params = self.proba_latent_params
             else:
-                proba_theta = self.proba(self.latent_params)
-            logits = (1.0 / np.sqrt(self.out_ch)) * (features @ proba_theta.T)
+                latent_params = self.latent_params
+            latent_params = torch.nn.functional.layer_norm(latent_params, (latent_params.shape[-1],))
+            proba_theta = self.proba(features).permute(1,0) # DB
+            D, B = proba_theta.shape
+            temp = torch.matmul(latent_params, proba_theta).permute(1,0)
+            logits = (1.0 / np.sqrt(self.out_ch)) * (temp) # BK
             return logits
         elif self.proba_type == "linear":
             logits = self.proba(features)
@@ -199,28 +203,12 @@ class DTIKmeans(nn.Module):
         prototypes = params.unsqueeze(1).expand(-1, x.size(0), x.size(1), -1, -1)
 
         if hasattr(self, "proba"):
-            # Weight sprites and transform
-            if self.weighting == "sprite":
-                with torch.no_grad():
-                    inp, target_inf, features = self.transformer(x, prototypes)
-                    dist_inf = (inp - target_inf) ** 2
-                    dist_inf = dist_inf.flatten(2).mean(2)
-                logits = self.estimate_logits(features)
-                probas = F.softmax(logits, dim=-1)
-                prototypes = (
-                    (prototypes.transpose(0, 1) * probas[..., None, None, None])
-                    .sum(1)
-                    .unsqueeze(1)
-                    .transpose(0, 1)
-                )
-                inp, target, features = self.transformer(x, prototypes)
-                distances = (inp[:, 0, ...] - target) ** 2
-                distances = distances.flatten(2).mean(2)
-                return distances.mean(), dist_inf, probas
-
             inp, target, features = self.transformer(x, prototypes)
             logits = self.estimate_logits(features)
-            probas = F.softmax(logits, dim=-1)
+            if self.training:
+                probas = F.gumbel_softmax(logits, dim=-1)
+            else:
+                probas = F.softmax(logits, dim=-1)
             freq_loss = self.reg_func(probas, type="freq")
 
             # Weight transformed sprites and sum

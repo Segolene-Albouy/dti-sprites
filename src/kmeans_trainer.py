@@ -8,6 +8,7 @@ import copy
 import numpy as np
 import pandas as pd
 import torch
+from omegaconf import OmegaConf
 from torch.utils.data import DataLoader
 
 from .dataset import get_dataset
@@ -53,23 +54,24 @@ class Trainer:
 
     @use_seed()
     def __init__(
-        self, config_path, run_dir, parent_model=None, recluster=False, save=False
+        self, cfg, run_dir, parent_model=None, recluster=False, save=False
     ):
-        self.config_path = coerce_to_path_and_check_exist(config_path)
         self.run_dir = coerce_to_path_and_create_dir(run_dir)
         self.logger = get_logger(self.run_dir, name="trainer")
-        self.save_img = save
         self.print_and_log_info(
             "Trainer initialisation: run directory is {}".format(run_dir)
         )
+        self.save_img = save
 
-        shutil.copy(self.config_path, self.run_dir)
-        self.print_and_log_info(
-            "Config {} copied to run directory".format(self.config_path)
-        )
-
-        with open(self.config_path) as fp:
-            cfg = yaml.load(fp, Loader=yaml.FullLoader)
+        # self.config_path = coerce_to_path_and_check_exist(config_path)
+        # shutil.copy(self.config_path, self.run_dir)
+        # self.print_and_log_info(
+        #     "Config {} copied to run directory".format(self.config_path)
+        # )
+        # with open(self.config_path) as fp:
+        #     cfg = yaml.load(fp, Loader=yaml.FullLoader)
+        OmegaConf.save(cfg, self.run_dir / "config.yaml")
+        self.print_and_log_info("Current config copied to run directory")
 
         if torch.cuda.is_available():
             type_device = "cuda"
@@ -84,7 +86,10 @@ class Trainer:
 
         # Datasets and dataloaders
         self.dataset_kwargs = cfg["dataset"]
-        self.dataset_name = self.dataset_kwargs.pop("name")
+
+        # self.dataset_name = self.dataset_kwargs.pop("name")
+        self.dataset_name = self.dataset_kwargs["name"]
+
         train_dataset = get_dataset(self.dataset_name)("train", **self.dataset_kwargs)
         val_dataset = get_dataset(self.dataset_name)("val", **self.dataset_kwargs)
 
@@ -124,18 +129,21 @@ class Trainer:
         )
 
         self.n_batches = len(self.train_loader)
-        self.n_iterations, self.n_epoches = cfg["training"].get("n_iterations"), cfg[
+        self.n_iterations, self.n_epochs = cfg["training"].get("n_iterations"), cfg[
             "training"
-        ].get("n_epoches")
-        assert not (self.n_iterations is not None and self.n_epoches is not None)
+        ].get("n_epochs")
+        assert not (self.n_iterations is not None and self.n_epochs is not None)
         if self.n_iterations is not None:
-            self.n_epoches = max(self.n_iterations // self.n_batches, 1)
+            self.n_epochs = max(self.n_iterations // self.n_batches, 1)
         else:
-            self.n_iterations = self.n_epoches * len(self.train_loader)
+            self.n_iterations = self.n_epochs * len(self.train_loader)
 
         # Model
         self.model_kwargs = cfg["model"]
-        self.model_name = self.model_kwargs.pop("name")
+
+        # self.model_name = self.model_kwargs.pop("name")
+        self.model_name = self.model_kwargs["name"]
+
         self.is_gmm = "gmm" in self.model_name
         self.model = get_model(self.model_name)(
             self.train_loader.dataset, **self.model_kwargs
@@ -153,10 +161,19 @@ class Trainer:
         # Optimizer
         self.opt_params = cfg["training"]["optimizer"] or {}
         self.sprite_opt_params = cfg["training"].get("sprite_optimizer", {})
-        self.optimizer_name = self.opt_params.pop("name")
-        self.cluster_kwargs = self.opt_params.pop("cluster", {})
-        self.tsf_kwargs = self.opt_params.pop("transformer", {})
-        self.sprite_optimizer_name = self.sprite_opt_params.pop("name", None)
+
+        # self.optimizer_name = self.opt_params.pop("name")
+        self.optimizer_name = cfg["training"]["optimizer_name"]
+
+        # self.cluster_kwargs = self.opt_params.pop("cluster", {})
+        self.cluster_kwargs = cfg["training"].get("cluster_optimizer", {})
+
+        # self.tsf_kwargs = self.opt_params.pop("transformer", {})
+        self.tsf_kwargs = cfg["training"].get("transformer_optimizer", {})
+
+        # self.sprite_optimizer_name = self.sprite_opt_params.pop("name", None)
+        self.sprite_optimizer_name = cfg["training"].get("sprite_optimizer_name", None)
+
         if self.sprite_optimizer_name in ["SGD", "sgd"]:
             self.sprite_optimizer = get_optimizer(self.sprite_optimizer_name)(
                 [dict(params=self.model.cluster_parameters(), **self.cluster_kwargs)],
@@ -166,7 +183,8 @@ class Trainer:
                 [dict(params=self.model.transformer_parameters(), **self.tsf_kwargs)],
                 **self.opt_params,
             )
-            self.model.set_optimizer(self.optimizer, self.sprite_optimizer)
+            # TODO check how it was working because DTIKmeans.set_optimizer(self, opt):
+            # self.model.set_optimizer(self.optimizer, self.sprite_optimizer)
         else:
             self.optimizer = get_optimizer(self.optimizer_name)(
                 [dict(params=self.model.cluster_parameters(), **self.cluster_kwargs)]
@@ -184,14 +202,19 @@ class Trainer:
 
         # Scheduler
         self.scheduler_params = cfg["training"].get("scheduler", {}) or {}
-        self.scheduler_name = self.scheduler_params.pop("name", None)
-        self.scheduler_update_range = self.scheduler_params.pop("update_range", "epoch")
+
+        # self.scheduler_name = self.scheduler_params.pop("name", None)
+        self.scheduler_name = cfg["training"].get("scheduler_name", None)
+
+        # self.scheduler_update_range = self.scheduler_params.pop("update_range", "epoch")
+        self.scheduler_update_range = cfg["training"].get("scheduler_update_range", "epoch")
+
         assert self.scheduler_update_range in ["epoch", "batch"]
         if self.scheduler_name == "multi_step" and isinstance(
             self.scheduler_params["milestones"][0], float
         ):
             n_tot = (
-                self.n_epoches
+                self.n_epochs
                 if self.scheduler_update_range == "epoch"
                 else self.n_iterations
             )
@@ -363,14 +386,14 @@ class Trainer:
         cur_iter = (self.start_epoch - 1) * self.n_batches + self.start_batch - 1
         prev_train_stat_iter, prev_val_stat_iter = cur_iter, cur_iter
         prev_check_cluster_iter = cur_iter
-        if self.start_epoch == self.n_epoches + 1:
+        if self.start_epoch == self.n_epochs + 1:
             self.print_and_log_info("No training, only evaluating")
 
             self.evaluate()
             self.print_and_log_info("Training run is over")
             return
 
-        for epoch in range(self.start_epoch, self.n_epoches + 1):
+        for epoch in range(self.start_epoch, self.n_epochs + 1):
             batch_start = self.start_batch if epoch == self.start_epoch else 1
             for batch, (images, labels, _, _) in enumerate(self.train_loader, start=1):
                 if batch < batch_start:
@@ -415,7 +438,7 @@ class Trainer:
         if lr != self.cur_lr:
             self.cur_lr = lr
             self.print_and_log_info(
-                PRINT_LR_UPD_FMT(epoch, self.n_epoches, batch, self.n_batches, lr)
+                PRINT_LR_UPD_FMT(epoch, self.n_epochs, batch, self.n_batches, lr)
             )
 
     def single_train_batch_run(self, images, labels):
@@ -545,7 +568,7 @@ class Trainer:
         ]
         reassigned, idx = self.model.reassign_empty_clusters(proportions)
         msg = PRINT_CHECK_CLUSTERS_FMT(
-            epoch, self.n_epoches, batch, self.n_batches, reassigned, idx
+            epoch, self.n_epochs, batch, self.n_batches, reassigned, idx
         )
         self.print_and_log_info(msg)
         self.train_metrics.reset(*[f"prop_clus{i}" for i in range(self.n_prototypes)])
@@ -554,7 +577,7 @@ class Trainer:
     def log_train_metrics(self, cur_iter, epoch, batch):
         # Print & write metrics to file
         stat = PRINT_TRAIN_STAT_FMT(
-            epoch, self.n_epoches, batch, self.n_batches, self.train_metrics
+            epoch, self.n_epochs, batch, self.n_batches, self.train_metrics
         )
         self.print_and_log_info(stat)
         with open(self.train_metrics_path, mode="a") as f:
@@ -656,7 +679,7 @@ class Trainer:
 
     def log_val_metrics(self, cur_iter, epoch, batch):
         stat = PRINT_VAL_STAT_FMT(
-            epoch, self.n_epoches, batch, self.n_batches, self.val_metrics
+            epoch, self.n_epochs, batch, self.n_batches, self.val_metrics
         )
         self.print_and_log_info(stat)
         with open(self.val_metrics_path, mode="a") as f:

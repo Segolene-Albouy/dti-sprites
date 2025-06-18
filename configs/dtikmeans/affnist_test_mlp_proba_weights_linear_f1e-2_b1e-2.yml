@@ -31,9 +31,9 @@ training:
     gamma: 0.1
     milestones: [74]
     update_range: epoch
-  n_epoches: 90
+  n_epochs: 90
   train_stat_interval: 200
   val_stat_interval: 400
   check_cluster_interval: 400
-  seed: 68431
+  seed: 35795
   visualizer_port: 

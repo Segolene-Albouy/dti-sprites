@@ -43,12 +43,12 @@ training:
     name: multi_step
     gamma: [1, 0.1]
     milestones: [100, 200]
-  n_epoches: 210
+  n_epochs: 210
   train_stat_interval: 500
   val_stat_interval: 1000
   check_cluster_interval: 50
   eval_with_bkg: True
   eval_semantic: True
-  seed: 7889
+  seed: 28890
   visualizer_port:
   pretrained: 

@@ -11,7 +11,7 @@ from .logger import print_info, print_warning
 IMG_EXTENSIONS = ['jpeg', 'jpg', 'JPG', 'png', 'ppm']
 
 
-def resize(img, size, keep_aspect_ratio=True, resample=Image.ANTIALIAS, fit_inside=True):
+def resize(img, size, keep_aspect_ratio=True, resample=Image.LANCZOS, fit_inside=True):
     if isinstance(size, int):
         return resize(img, (size, size), keep_aspect_ratio=keep_aspect_ratio, resample=resample, fit_inside=fit_inside)
     elif keep_aspect_ratio:
@@ -73,7 +73,7 @@ def draw_border(img, color, width):
 class ImageResizer:
     """Resize images from a given input directory, keeping aspect ratio or not."""
     def __init__(self, input_dir, output_dir, size, in_ext=IMG_EXTENSIONS, out_ext='jpg', keep_aspect_ratio=True,
-                 resample=Image.ANTIALIAS, fit_inside=True, rename=False, verbose=True):
+                 resample=Image.LANCZOS, fit_inside=True, rename=False, verbose=True):
         self.input_dir = coerce_to_path_and_check_exist(input_dir)
         self.files = get_files_from_dir(input_dir, valid_extensions=in_ext, recursive=True, sort=True)
         self.output_dir = coerce_to_path_and_create_dir(output_dir)

@@ -1,4 +1,7 @@
 import argparse
+import traceback
+import sys
+
 import os
 import shutil
 import seaborn as sns
@@ -11,6 +14,10 @@ import pandas as pd
 import torch
 from torch.utils.data import DataLoader
 from torch.nn import functional as F
+
+import hydra
+from hydra.core.hydra_config import HydraConfig
+from omegaconf import DictConfig, OmegaConf
 
 try:
     import visdom
@@ -40,9 +47,10 @@ from .utils.metrics import (
 from .utils.path import CONFIGS_PATH, RUNS_PATH
 from .utils.plot import plot_bar, plot_lines
 
-from omegaconf import OmegaConf, DictConfig
-import hydra
+from PIL import Image, ImageFont, ImageDraw
+
 from torch.profiler import profile, record_function, ProfilerActivity
+from fvcore.nn import FlopCountAnalysis
 
 PRINT_TRAIN_STAT_FMT = "Epoch [{}/{}], Iter [{}/{}], train_metrics: {}".format
 PRINT_VAL_STAT_FMT = "Epoch [{}/{}], Iter [{}/{}], val_metrics: {}".format
@@ -71,15 +79,16 @@ class Trainer:
     """Pipeline to train a NN model using a certain dataset, both specified by an YML config."""
 
     @use_seed()
-    def __init__(self, cfg):
-        run_dir = RUNS_PATH / cfg.dataset.name / cfg.training.tag
+    def __init__(self, cfg, run_dir, save):
         self.run_dir = coerce_to_path_and_create_dir(run_dir)
         self.logger = get_logger(self.run_dir, name="trainer")
         self.print_and_log_info(
             "Trainer initialisation: run directory is {}".format(run_dir)
         )
+        self.save_img = save
 
-        self.save_img = cfg.training.save
+        OmegaConf.save(cfg, self.run_dir / "config.yaml")
+        self.print_and_log_info("Current config copied to run directory")
 
         if torch.cuda.is_available():
             type_device = "cuda"
@@ -117,7 +126,7 @@ class Trainer:
             if cfg["training"]["batch_size"] < len(train_dataset)
             else len(train_dataset)
         )
-        self.n_workers = cfg["training"]["n_workers"]
+        self.n_workers = cfg["training"].get("n_workers", 4)
         self.train_loader = DataLoader(
             train_dataset,
             batch_size=self.batch_size,
@@ -136,21 +145,22 @@ class Trainer:
         self.instance_eval = getattr(train_dataset, "instance_eval", False)
 
         self.n_batches = len(self.train_loader)
-        self.n_iterations, self.n_epoches = cfg["training"].get("n_iterations"), cfg[
+        self.n_iterations, self.n_epochs = cfg["training"].get("n_iterations"), cfg[
             "training"
-        ].get("n_epoches")
-        assert not (self.n_iterations is not None and self.n_epoches is not None)
+        ].get("n_epochs")
+        assert not (self.n_iterations is not None and self.n_epochs is not None)
         if self.n_iterations is not None:
-            self.n_epoches = max(self.n_iterations // self.n_batches, 1)
+            self.n_epochs = max(self.n_iterations // self.n_batches, 1)
         else:
-            self.n_iterations = self.n_epoches * len(self.train_loader)
+            self.n_iterations = self.n_epochs * len(self.train_loader)
 
         # Model
-        self.model_kwargs = cfg["model"]["sprites"]
+        self.model_kwargs = cfg["model"]
         self.model_name = self.model_kwargs["name"]
-        self.model = get_model(self.model_name)(
-            self.train_loader.dataset, **self.model_kwargs
-        ).to(self.device)
+        self.is_gmm = "gmm" in self.model_name
+        self.model = get_model(self.model_name)(self.n_epochs,
+                                                self.train_loader.dataset, **self.model_kwargs
+                                                ).to(self.device)
         self.print_and_log_info(
             "Using model {} with kwargs {}".format(self.model_name, self.model_kwargs)
         )
@@ -168,7 +178,7 @@ class Trainer:
         if self.pred_class:
             self.n_clusters = self.n_prototypes * self.n_objects
         else:
-            self.n_clusters = self.n_prototypes**self.n_objects * max(
+            self.n_clusters = self.n_prototypes ** self.n_objects * max(
                 self.n_backgrounds, 1
             )
         self.learn_masks = getattr(self.model, "learn_masks", False)
@@ -176,9 +186,9 @@ class Trainer:
         self.learn_proba = getattr(self.model, "proba", False)
         # Optimizer
         opt_params = cfg["training"]["optimizer"] or {}
-        optimizer_name = cfg["training"].get("opt_name", "adam")
-        cluster_kwargs = cfg["training"].get("cluster",{})
-        tsf_kwargs = cfg["training"].get("transformer",{})
+        optimizer_name = cfg["training"]["optimizer_name"]
+        cluster_kwargs = cfg["training"].get("cluster_optimizer", {})
+        tsf_kwargs = cfg["training"]["transformer_optimizer"] or {}
         self.optimizer = get_optimizer(optimizer_name)(
             [
                 dict(params=self.model.cluster_parameters(), **cluster_kwargs),
@@ -194,15 +204,18 @@ class Trainer:
         self.print_and_log_info("transformer kwargs {}".format(tsf_kwargs))
 
         # Scheduler
-        scheduler_params = cfg["training"].get("scheduler", {}) or {}
-        scheduler_name = cfg["training"].get("sch_name", "multi_step")
-        self.scheduler_update_range = cfg["training"].get("update_range", "epoch")
+        scheduler_params = cfg["training"].get("scheduler", {})
+        scheduler_name = cfg["training"].get("scheduler_name", None)
+
+        # self.scheduler_update_range = scheduler_params.get("update_range", "epoch")
+        self.scheduler_update_range = cfg["training"].get("scheduler_update_range", "epoch")
+
         assert self.scheduler_update_range in ["epoch", "batch"]
         if scheduler_name == "multi_step" and isinstance(
-            scheduler_params["milestones"][0], float
+                scheduler_params["milestones"][0], float
         ):
             n_tot = (
-                self.n_epoches
+                self.n_epochs
                 if self.scheduler_update_range == "epoch"
                 else self.n_iterations
             )
@@ -231,7 +244,7 @@ class Trainer:
             self.start_epoch, self.start_batch = 1, 1
 
         # Train metrics
-        metric_names = ["time/img", "loss_rec", "loss_bin", "loss_freq"]
+        metric_names = ["time/img", "loss_rec", "loss_em", "loss_bin", "loss_freq"]
         metric_names += [f"prop_clus{i}" for i in range(self.n_clusters)]
         self.bin_edges = np.arange(0, 1.1, 0.1)
         self.bin_counts = np.zeros(len(self.bin_edges) - 1)
@@ -321,8 +334,8 @@ class Trainer:
                 self.run_dir / "transformations"
             )
             self.images_to_tsf = next(iter(self.train_loader))[0][
-                :N_TRANSFORMATION_PREDICTIONS
-            ].to(self.device)
+                                 :N_TRANSFORMATION_PREDICTIONS
+                                 ].to(self.device)
             for k in range(self.images_to_tsf.size(0)):
                 out = coerce_to_path_and_create_dir(
                     self.transformation_path / f"img{k}"
@@ -416,16 +429,16 @@ class Trainer:
         cur_iter = (self.start_epoch - 1) * self.n_batches + self.start_batch - 1
         prev_train_stat_iter, prev_val_stat_iter = cur_iter, cur_iter
         prev_check_cluster_iter = cur_iter
-        if self.start_epoch == self.n_epoches:
+        if self.start_epoch == self.n_epochs:
             self.print_and_log_info("No training, only evaluating")
-            self.save_metric_plots()
             self.evaluate()
+            self.save_metric_plots()
             self.print_and_log_info("Training run is over")
             return
-        for epoch in range(self.start_epoch, self.n_epoches + 1):
+        for epoch in range(self.start_epoch, self.n_epochs + 1):
             batch_start = self.start_batch if epoch == self.start_epoch else 1
             for batch, (images, _, img_masks, _) in enumerate(
-                self.train_loader, start=1
+                    self.train_loader, start=1
             ):
                 if batch < batch_start:
                     continue
@@ -433,7 +446,7 @@ class Trainer:
                 if cur_iter > self.n_iterations:
                     break
 
-                self.single_train_batch_run(images, img_masks, epoch=epoch)
+                self.single_train_batch_run(images, img_masks)
                 if self.scheduler_update_range == "batch":
                     self.update_scheduler(epoch, batch=batch)
 
@@ -469,10 +482,10 @@ class Trainer:
         if lr != self.cur_lr:
             self.cur_lr = lr
             self.print_and_log_info(
-                PRINT_LR_UPD_FMT(epoch, self.n_epoches, batch, self.n_batches, lr)
+                PRINT_LR_UPD_FMT(epoch, self.n_epochs, batch, self.n_batches, lr)
             )
 
-    def single_train_batch_run(self, images, masks, epoch=None):
+    def single_train_batch_run(self, images, masks):
         start_time = time.time()
         B = images.size(0)
         self.model.train()
@@ -483,17 +496,17 @@ class Trainer:
             masks = None
         self.optimizer.zero_grad()
 
-        loss, distances, class_prob = self.model(images, masks, epoch=epoch)
+        loss, distances, class_prob = self.model(images, masks)
         loss[0].backward()
         self.optimizer.step()
 
         with torch.no_grad():
             if self.learn_proba:
-                class_oh = class_prob.permute(2, 0, 1).flatten(1)  # B(L*K)
-                one_hot = torch.zeros(class_oh.shape, device=self.device).scatter(
-                    1, class_oh.argmax(1, keepdim=True), 1
+                class_oh = torch.zeros(class_prob.shape, device=class_prob.device).scatter_(
+                    1, class_prob.argmax(1, keepdim=True), 1
                 )
-                proportions = one_hot.sum(0) / B
+                one_hot = class_oh.permute(2, 0, 1).flatten(1)  # B(L*K)
+                proportions = one_hot.mean(0)
             else:
                 if self.pred_class:  # distances B(L*K), discovery
                     proportions = (1 - distances).mean(0)
@@ -508,6 +521,7 @@ class Trainer:
             {
                 "time/img": (time.time() - start_time) / B,
                 "loss_rec": loss[1].item(),
+                "loss_em": loss[4].item(),
                 "loss_bin": loss[2].item(),
                 "loss_freq": loss[3].item(),
             }
@@ -610,7 +624,7 @@ class Trainer:
     def save_transformed_images(self, cur_iter=None):
         self.model.eval()
         if self.learn_masks:
-            output, compositions = self.model.transform(
+            output, compositions, _ = self.model.transform(
                 self.images_to_tsf, with_composition=True
             )
         else:
@@ -702,7 +716,7 @@ class Trainer:
                     prop, is_background=is_bkg
                 )
                 msg = PRINT_CHECK_CLUSTERS_FMT(
-                    epoch, self.n_epoches, batch, self.n_batches, reassigned, idx
+                    epoch, self.n_epochs, batch, self.n_batches, reassigned, idx
                 )
                 if is_bkg:
                     msg += " for backgrounds"
@@ -714,7 +728,7 @@ class Trainer:
                 )
         elif self.n_objects > 1:
             k = np.random.randint(0, self.n_objects)
-            if self.n_clusters == self.n_prototypes**self.n_objects:
+            if self.n_clusters == self.n_prototypes ** self.n_objects:
                 prop = (
                     proportions.view((self.n_prototypes,) * self.n_objects)
                     .transpose(0, k)
@@ -725,7 +739,7 @@ class Trainer:
                 prop = proportions.view(self.n_objects, self.n_prototypes)[k]
             reassigned, idx = self.model.reassign_empty_clusters(prop)
             msg = PRINT_CHECK_CLUSTERS_FMT(
-                epoch, self.n_epoches, batch, self.n_batches, reassigned, idx
+                epoch, self.n_epochs, batch, self.n_batches, reassigned, idx
             )
             msg += f" for object layer {k}"
             self.print_and_log_info(msg)
@@ -737,7 +751,7 @@ class Trainer:
         else:
             reassigned, idx = self.model.reassign_empty_clusters(proportions)
             msg = PRINT_CHECK_CLUSTERS_FMT(
-                epoch, self.n_epoches, batch, self.n_batches, reassigned, idx
+                epoch, self.n_epochs, batch, self.n_batches, reassigned, idx
             )
             self.print_and_log_info(msg)
         self.train_metrics.reset(*[f"prop_clus{i}" for i in range(self.n_clusters)])
@@ -745,7 +759,7 @@ class Trainer:
     def log_train_metrics(self, cur_iter, epoch, batch):
         # Print & write metrics to file
         stat = PRINT_TRAIN_STAT_FMT(
-            epoch, self.n_epoches, batch, self.n_batches, self.train_metrics
+            epoch, self.n_epochs, batch, self.n_batches, self.train_metrics
         )
         self.print_and_log_info(stat[:1000])
         with open(self.train_metrics_path, mode="a") as f:
@@ -756,7 +770,6 @@ class Trainer:
             )
 
         self.update_visualizer_metrics(cur_iter, train=True)
-        self.train_metrics.reset(*(["time/img", "rec_loss", "bin_loss", "freq_loss"]))
 
     def update_visualizer_metrics(self, cur_iter, train):
         if self.visualizer is None:
@@ -884,7 +897,7 @@ class Trainer:
                     )
 
             elif (
-                self.instance_eval
+                    self.instance_eval
             ):  # we account for probabilities within model.transform
                 if self.n_objects == 1:
                     masks = self.model.transform(images, with_composition=True)[1][1]
@@ -912,8 +925,8 @@ class Trainer:
                             bkg_idx = target == 0
                             tsf_layers = self.model.predict(images)[0]
                             new_target = ((tsf_layers - images) ** 2).sum(3).min(1)[
-                                0
-                            ].argmin(0).long() + 1
+                                             0
+                                         ].argmin(0).long() + 1
                             target[bkg_idx] = new_target[bkg_idx]
 
                     self.val_scores.update(labels.long().numpy(), target.long().numpy())
@@ -924,7 +937,7 @@ class Trainer:
 
     def log_val_metrics(self, cur_iter, epoch, batch):
         stat = PRINT_VAL_STAT_FMT(
-            epoch, self.n_epoches, batch, self.n_batches, self.val_metrics
+            epoch, self.n_epochs, batch, self.n_batches, self.val_metrics
         )
         self.print_and_log_info(stat)
         with open(self.val_metrics_path, mode="a") as f:
@@ -994,8 +1007,8 @@ class Trainer:
         # Cluster proportions
         N = self.n_clusters if self.n_clusters <= 40 else 2 * self.n_prototypes
         names = list(filter(lambda s: s.startswith("prop_"), self.train_metrics.names))[
-            :N
-        ]
+                :N
+                ]
         fig = plot_lines(df, names, title="Cluster proportions")
         fig.savefig(self.run_dir / "cluster_proportions.pdf")
         s = df[names].iloc[-1]
@@ -1084,6 +1097,7 @@ class Trainer:
         self.print_and_log_info("Metrics and plots saved")
 
     def evaluate(self):
+        print("TAU:", self.model.tau)
         self.model.eval()
         label = self.train_loader.dataset[0][1]
         empty_label = isinstance(label, (int, np.integer)) and label == -1
@@ -1100,7 +1114,7 @@ class Trainer:
                 self.segmentation_quantitative_eval()
                 self.segmentation_qualitative_eval()
             elif (
-                self.instance_eval and self.learn_masks
+                    self.instance_eval and self.learn_masks
             ):  # NOTE: evaluate either semantic or instance
                 self.print_and_log_info("Instance segmentation evaluation")
                 self.instance_seg_quantitative_eval()
@@ -1302,6 +1316,9 @@ class Trainer:
 
             loss.update(loss_val[0].item(), n=images.size(0))
 
+        flops = FlopCountAnalysis(self.model, images)
+        self.print_and_log_info("flops:" + str(flops.total()))
+
         scores = scores.compute()
         self.print_and_log_info("bin_counts: " + str(self.bin_counts))
         self.print_and_log_info("final_loss: {:.4f}".format(float(loss.avg)))
@@ -1335,10 +1352,33 @@ class Trainer:
 
         iterator = iter(train_loader)
         for j in range(N):
-            images, _, _, _ = iterator.next()
+            images, _, _, _ = next(iterator)
             images = images.to(self.device)
             if self.pred_class:
-                recons = self.model.transform(images, hard_occ_grid=True).cpu()
+                recons, composition, class_prob = self.model.transform(images, hard_occ_grid=False,
+                                                                       with_composition=True)
+                class_prob = class_prob.permute(2, 0, 1)
+                if len(composition) % 2 != 0:
+                    print("Omitting background from compositions")
+                    composition = composition[:2] + composition[3:]
+                n_layers = int(len(composition) / 2)
+                for b in range(B):
+                    for l in range(0, n_layers):
+                        tsf_layers, tsf_masks = composition[l * 2], composition[l * 2 + 1]
+                        _, K, _, _, _ = tsf_layers.shape
+                        for k in range(K):
+                            name = f"image_{b}_layer_{l}_sprite_{k}"
+                            convert_to_img(tsf_layers[b, k, ...]).save(out / f"frg_rec_{name}.png")
+                            weight = class_prob[b, l, k].item()
+                            img_temp = convert_to_img(tsf_masks[b, k, ...] * weight)
+                            draw = ImageDraw.Draw(img_temp)
+                            draw.text((0, 0), "%.3f" % weight, (255, 255, 255))
+                            img_temp.save(out / f"mask_rec_{name}.png")
+                        construction = torch.sum(
+                            tsf_layers[b] * tsf_masks[b] * class_prob[b, l, :][:, None, None, None], dim=0)
+                        convert_to_img(construction).save(out / f"rec_image_{b}_layer_{l}.png")
+
+                recons = recons.cpu()
                 if self.model.return_map_out:
                     (infer_seg, bboxes, class_ids) = self.model.transform(
                         images, pred_semantic_labels=True
@@ -1389,7 +1429,7 @@ class Trainer:
 
             images = images.cpu()
             for k in range(B):
-                name = f"{k+j*B}".zfill(2)
+                name = f"{k + j * B}".zfill(2)
                 convert_to_img(images[k]).save(out / f"{name}.png")
                 convert_to_img(recons[k]).save(out / f"{name}_recons.png")
                 convert_to_img(color_seg[k]).save(out / f"{name}_seg_full.png")
@@ -1415,7 +1455,7 @@ class Trainer:
 
         iterator = iter(train_loader)
         for k in range(N):
-            images, labels = iterator.next()
+            images, labels, _, _ = next(iterator)
             images = images.to(self.device)
             loss_val, distances, class_prob = self.model(images)
             if self.learn_proba:
@@ -1464,12 +1504,12 @@ class Trainer:
                         bkg_idx = target == 0
                         tsf_layers = self.model.predict(images)[0]
                         new_target = (
-                            ((tsf_layers - images) ** 2)
-                            .sum(3)
-                            .min(1)[0]
-                            .argmin(0)
-                            .long()
-                            + 1
+                                ((tsf_layers - images) ** 2)
+                                .sum(3)
+                                .min(1)[0]
+                                .argmin(0)
+                                .long()
+                                + 1
                         ).cpu()
                         target[bkg_idx] = new_target[bkg_idx]
                     scores.update(labels.long().numpy(), target.long().numpy())
@@ -1507,7 +1547,7 @@ class Trainer:
 
         iterator = iter(train_loader)
         for j in range(N):
-            images, labels = iterator.next()
+            images, labels, _, _ = next(iterator)
             images = images.to(self.device)
             if self.pred_class:
                 recons = self.model.transform(images, hard_occ_grid=True).cpu()
@@ -1545,8 +1585,8 @@ class Trainer:
                     bkg_idx = infer_seg == 0
                     tsf_layers = self.model.predict(images)[0]
                     new_target = (
-                        ((tsf_layers - images) ** 2).sum(3).min(1)[0].argmin(0).long()
-                        + 1
+                            ((tsf_layers - images) ** 2).sum(3).min(1)[0].argmin(0).long()
+                            + 1
                     ).cpu()
                     infer_seg[bkg_idx] = new_target[bkg_idx]
 
@@ -1563,7 +1603,7 @@ class Trainer:
 
             images = images.cpu()
             for k in range(B):
-                name = f"{k+j*B}".zfill(2)
+                name = f"{k + j * B}".zfill(2)
                 convert_to_img(images[k]).save(out / f"{name}.png")
                 convert_to_img(recons[k]).save(out / f"{name}_recons.png")
                 convert_to_img(color_seg[k]).save(out / f"{name}_seg_full.png")
@@ -1625,10 +1665,41 @@ class Trainer:
                 + "\n"
             )
 
-@hydra.main(config_path="../hydra_conf", config_name="config")
-def hydra_trainer(cfg: DictConfig) ->None:
-    trainer=Trainer(cfg, seed=cfg.training.seed)
-    trainer.run(seed=cfg.training.seed)
+
+import datetime
+
+
+@hydra.main(version_base=None, config_path="../conf", config_name="config")
+def main(cfg: DictConfig) -> None:
+    parser = argparse.ArgumentParser(
+        description="Pipeline to train a NN model specified by a YML config"
+    )
+
+    torch.backends.cudnn.enabled = False
+    print(OmegaConf.to_yaml(cfg))
+
+    dataset = cfg["dataset"]["name"]
+    seed = cfg["training"]["seed"]
+    save = cfg["training"]["save"]
+    day = datetime.datetime.now().day
+    month = datetime.datetime.now().month
+    job_name = HydraConfig.get().job.name
+    job_id = HydraConfig.get().job.num
+
+    tag = f"{dataset}_{job_name}_{job_id}"
+
+    if cfg["training"]["cont"] == True:
+        cfg["training"]["resume"] = tag
+
+    run_dir = RUNS_PATH / dataset / tag
+    run_dir = str(run_dir)
+    trainer = Trainer(cfg, run_dir, seed=seed, save=save)
+    try:
+        trainer.run(seed=seed)
+    except Exception:
+        traceback.print_exc(file=sys.stderr)
+        raise
+
 
 if __name__ == "__main__":
-    hydra_trainer()
+    main()

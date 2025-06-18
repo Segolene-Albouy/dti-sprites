@@ -25,7 +25,7 @@ training:
     gamma: 0.1
     milestones: [1200]
     update_range: epoch
-  n_epoches: 1500
+  n_epochs: 1500
   train_stat_interval: 100
   val_stat_interval: 100
   check_cluster_interval: 50

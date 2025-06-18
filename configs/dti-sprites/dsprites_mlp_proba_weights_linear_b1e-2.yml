@@ -30,12 +30,9 @@ model:
   add_empty_sprite: True
   lambda_empty_sprite: 1.0e-4
   proba: True
-  proba_weighting: tr_sprite
-  proba_type: linear
   reassign_cluster: False
   bin_weight: 0.01
   freq_weight: 0.0
-  empty_cluster_threshold: 0.1667
 training:
   batch_size: 32
   n_workers: 4
@@ -48,7 +45,7 @@ training:
     name: multi_step
     gamma: [1, 0.1]
     milestones: [250, 500]
-  n_epoches: 510
+  n_epochs: 510
   train_stat_interval: 2000
   val_stat_interval: 4000
   check_cluster_interval: 100
@@ -57,4 +54,3 @@ training:
   seed: 57819
   visualizer_port:
   pretrained: 
-  resume: 1001_proba-b1e-2
