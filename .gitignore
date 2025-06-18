@@ -1,0 +1,108 @@
+# OS generated files
+*.swp
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# python
+*.py.swp
+*.pyc
+*.pyo
+
+# heavy files
+*.pkl
+*.html
+*.zip
+*.json
+
+# data and others
+download_data_enpc.sh
+jz_*
+/datasets
+/results
+/runs
+/jeanzay
+/visdom
+/notebook
+report.sh
+evaluate.sh
+recluster.sh
+debug.sh
+/multirun
+/outputs
+
+# Environment variables
+.env
+
+# Virtual environments
+.env/
+.venv/
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Temporary outputs
+*/tmp/
+
+# Logs
+*.log
+*/stdout
+*/log
+*/error.log
+*/stdout.log
+
+# PyCharm
+.idea/
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+cover/
+
+# Translations
+*.mo
+*.pot
+
+# IPython
+profile_default/
+ipython_config.py
+
+__pypackages__/
+.webassets-cache
+
+node_modules/
+celerybeat-schedule.db
+
+datasets/*
