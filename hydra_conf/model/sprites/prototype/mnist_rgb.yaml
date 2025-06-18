@@ -1,6 +1,0 @@
-source: data
-data:
-  freeze: [41, 0, 0]
-  init: ["constant", "constant", "sample"]
-  value: [0.9, 0., 0.]
-  gaussian_weights_std: 14
