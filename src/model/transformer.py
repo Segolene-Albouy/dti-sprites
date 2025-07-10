@@ -840,7 +840,7 @@ class MorphologicalModule(_AbstractTransformationModule):
             out = self.smoothmax_kernel(x[:, -1, ...].unsqueeze(1), alpha, torch.sigmoid(weights))
             return torch.cat([x[:, : x.size(1) - 1, ...], out], dim=1)
         else:
-            print(f"MorphologicalModule input shape: {x.shape} / channels: {x.shape[1]}")
+            # print(f"MorphologicalModule input shape: {x.shape} / channels: {x.shape[1]}")
 
             if x.shape[1] > 1:
                 # Multi-channel input

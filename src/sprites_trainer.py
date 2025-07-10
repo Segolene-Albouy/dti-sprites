@@ -89,6 +89,7 @@ class Trainer:
 
         OmegaConf.save(cfg, self.run_dir / "config.yaml")
         self.print_and_log_info("Current config copied to run directory")
+        # self.print_and_log_info(cfg)
 
         if torch.cuda.is_available():
             type_device = "cuda"

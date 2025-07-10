@@ -36,6 +36,7 @@ LATENT_SIZE = 128
 def softmax(logits, tau=1., dim=-1):
     return F.softmax(logits/tau, dim=dim)
 
+
 def init_linear(hidden, out, init, n_channels=3, std=5, value=0.9, dataset=None, uniform=[None, None]):
     if init == "random":
         return nn.Linear(hidden, out)
@@ -140,36 +141,17 @@ class DTISprites(nn.Module):
         freeze_frg = False
 
         if proto_source == "data":
-            if freeze_frg:
-                self.prototype_params = nn.Parameter(
-                    torch.stack(
-                        generate_data(
-                            dataset, n_sprites, proto_init, value=value_frg, size=size
-                        )
-                    ),
-                    requires_grad=False,
-                )
-            else:
-                self.prototype_params = nn.Parameter(
-                    torch.stack(
-                        generate_data(
-                            dataset, n_sprites, proto_init, value=value_frg, size=size
-                        )
-                    )
-                )
+            self.prototype_params = self.set_param(
+                dataset, n_sprites, proto_init, value_frg, size, std, freeze=freeze_frg
+            )
 
             self.mask_params = nn.Parameter(
                 self.init_masks(n_sprites, mask_init, size, std, value_mask, dataset)
             )
         else:
             if freeze_frg:
-                self.prototype_params = nn.Parameter(
-                    torch.stack(
-                        generate_data(
-                            dataset, n_sprites, proto_init, value=value_frg, size=size
-                        )
-                    ),
-                    requires_grad=False,
+                self.prototype_params = self.set_param(
+                    dataset, n_sprites, proto_init, value_frg, size, std, freeze=freeze_frg
                 )
 
             gen_name = proto_args.get("generator", "mlp")
@@ -215,7 +197,7 @@ class DTISprites(nn.Module):
         self.freeze_frg = freeze_frg
         self.freeze_bkg = freeze_bkg
         
-        softmax_f = kwargs.get("softmax", "softmax")
+        # softmax_f = kwargs.get("softmax", "softmax")
         if kwargs.get("learn_tau", False):
             self.learn_tau=True
             t_ = kwargs.get("tau",1)
@@ -277,21 +259,13 @@ class DTISprites(nn.Module):
         self.learn_backgrounds = M > 0
         if self.learn_backgrounds:
             if proto_source == "data":
-                self.bkg_params = nn.Parameter(
-                    torch.stack(
-                        generate_data(dataset, M, init_type=bkg_init, value=value_bkg)
-                    )
+                self.bkg_params = self.set_param(
+                    dataset, M, bkg_init, value_bkg, std=std, freeze=freeze_frg
                 )
-                self.bkg_params.requires_grad = False if freeze_bkg else True
             else:
                 if freeze_bkg:
-                    self.bkg_params = nn.Parameter(
-                        torch.stack(
-                            generate_data(
-                                dataset, M, init_type=bkg_init, value=value_bkg
-                            )
-                        ),
-                        requires_grad=False,
+                    self.bkg_params = self.set_param(
+                        dataset, M, bkg_init, value_bkg, std=std, freeze=freeze_bkg
                     )
                 else:
                     gen_name = proto_args.get("generator", "mlp")
@@ -391,12 +365,23 @@ class DTISprites(nn.Module):
         elif mask_init == "sample":
             assert dataset
             masks = torch.stack(
-                generate_data(dataset, K, init_type=mask_init, value=value)
+                generate_data(dataset, K, init_type=mask_init, value=value, std=std)
             )
             assert masks.shape[1] == 1
         else:
             raise NotImplementedError(f"unknown mask_init: {mask_init}")
         return masks
+
+    @staticmethod
+    def set_param(dataset, n_sprites, init_type, value_param, size=None, std=25, freeze=False):
+        param = nn.Parameter(
+            torch.stack(
+                generate_data(dataset, n_sprites, init_type=init_type, value=value_param, size=size, std=std)
+            )
+        )
+        param.requires_grad = not freeze
+        return param
+
 
     @staticmethod
     def init_generator(

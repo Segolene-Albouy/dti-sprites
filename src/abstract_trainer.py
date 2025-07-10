@@ -217,7 +217,7 @@ class AbstractTrainer(ABC):
         if self.n_iterations is not None:
             self.n_epochs = max(self.n_iterations // self.n_batches, 1)
         else:
-            self.n_iterations = self.n_epochs * len(self.train_loader)
+            self.n_iterations = self.n_epochs * self.n_batches
 
 
     @abstractmethod
