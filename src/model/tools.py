@@ -277,7 +277,7 @@ class TPSGrid(nn.Module):
         forward_kernel[-2:, :N].copy_(target_control_points.transpose(0, 1))
         inverse_kernel = torch.inverse(forward_kernel)
 
-        # create target cordinate matrix
+        # create target coordinate matrix
         HW = img_height * img_width
         y, x = torch.meshgrid(
             torch.linspace(-1, 1, img_height),

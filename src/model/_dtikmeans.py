@@ -158,22 +158,24 @@ class DTIKmeans(nn.Module):
                         -1, self.color_channels, self.img_size[0], self.img_size[1]
                     )
                 return params
-        return self.prototype_params
+        else:
+            return self.prototype_params
 
     def estimate_logits(self, features):
         if self.proba_type == "marionette":
-            latent_params = self.proba_latent_params if not self.shared_l else self.latent_params
+            if not self.shared_l:
+                latent_params = self.proba_latent_params
+            else:
+                latent_params = self.latent_params
             latent_params = torch.nn.functional.layer_norm(latent_params, (latent_params.shape[-1],))
             proba_theta = self.proba(features).permute(1,0) # DB
-            # D, B = proba_theta.shape
+            D, B = proba_theta.shape
             temp = torch.matmul(latent_params, proba_theta).permute(1,0)
             logits = (1.0 / np.sqrt(self.out_ch)) * (temp) # BK
             return logits
         elif self.proba_type == "linear":
             logits = self.proba(features)
             return logits
-        else:
-            raise ValueError(f"Unknown proba type: {self.proba_type}")
 
     def reg_func(self, probas, type="freq"):
         if type == "freq":
@@ -185,11 +187,11 @@ class DTIKmeans(nn.Module):
             dist = self.beta_dist.log_prob(p)
             return torch.exp(dist)
         else:
-            raise ValueError(f"undefined regularizer: {type}")
+            raise ValueError("undefined regularizer")
 
     def forward(self, x):
-        # is_nan_t = torch.stack([torch.isnan(p).any() for p in self.transformer.parameters()]).any()
-        # is_nan_c = torch.stack([torch.isnan(p).any() for p in self.cluster_parameters()]).any()
+        is_nan_t = torch.stack([torch.isnan(p).any() for p in self.transformer.parameters()]).any()
+        is_nan_c = torch.stack([torch.isnan(p).any() for p in self.cluster_parameters()]).any()
         if self.proto_source == "generator":
             params = self.generator(self.latent_params)
             if len(params.size()) != 4:
@@ -225,7 +227,7 @@ class DTIKmeans(nn.Module):
                 b = self.freq_weight * (1 - freq_loss.sum())
                 c = self.bin_weight * (bin_loss.mean())
                 return (
-                    a + b + c, #distances.mean()
+                    a+b+c, #distances.mean()
                     #+ self.freq_weight * (1 - freq_loss.sum())
                     #+ self.bin_weight * (bin_loss.mean()),
                     samplewise_distances,
@@ -260,10 +262,11 @@ class DTIKmeans(nn.Module):
     def transform(self, x, inverse=False):
         if inverse:
             return self.transformer.inverse_transform(x)
-        prototypes = self.prototypes.unsqueeze(1).expand(
-            -1, x.size(0), x.size(1), -1, -1
-        )
-        return self.transformer(x, prototypes)[1]
+        else:
+            prototypes = self.prototypes.unsqueeze(1).expand(
+                -1, x.size(0), x.size(1), -1, -1
+            )
+            return self.transformer(x, prototypes)[1]
 
     def step(self):
         self.transformer.step()
