@@ -72,14 +72,24 @@ def draw_border(img, color, width):
 
 class ImageResizer:
     """Resize images from a given input directory, keeping aspect ratio or not."""
-    def __init__(self, input_dir, output_dir, size, in_ext=IMG_EXTENSIONS, out_ext='jpg', keep_aspect_ratio=True,
-                 resample=Image.LANCZOS, fit_inside=True, rename=False, verbose=True):
+    def __init__(
+        self,
+        input_dir,
+        output_dir,
+        size,
+        in_ext=IMG_EXTENSIONS,
+        out_ext='jpg',
+        keep_aspect_ratio=True,
+        resample=Image.LANCZOS,
+        fit_inside=True,
+        rename=False,
+        verbose=True
+    ):
         self.input_dir = coerce_to_path_and_check_exist(input_dir)
         self.files = get_files_from_dir(input_dir, valid_extensions=in_ext, recursive=True, sort=True)
         self.output_dir = coerce_to_path_and_create_dir(output_dir)
         self.out_extension = out_ext
-        self.resize_func = partial(resize, size=size, keep_aspect_ratio=keep_aspect_ratio, resample=resample,
-                                   fit_inside=fit_inside)
+        self.resize_func = partial(resize, size=size, keep_aspect_ratio=keep_aspect_ratio, resample=resample, fit_inside=fit_inside)
         self.rename = rename
         self.name_size = int(np.ceil(np.log10(len(self.files))))
         self.verbose = verbose

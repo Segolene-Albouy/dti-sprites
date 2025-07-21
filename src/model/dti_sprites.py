@@ -933,6 +933,7 @@ class DTISprites(nn.Module):
 
     def criterion(self, inp, target, weights=None, reduction="mean"):
         dist = self._criterion(inp, target)
+
         if weights is not None:
             dist = dist * weights
         if reduction == "mean":

@@ -427,7 +427,7 @@ class Trainer:
             if self.scheduler_update_range == "epoch" and batch_start == 1:
                 self.update_scheduler(epoch + 1, batch=1)
 
-        self.save_training_metrics()
+        self.save_metrics()
         self.evaluate()
 
         self.print_and_log_info("Training run is over")
@@ -722,7 +722,7 @@ class Trainer:
         torch.save(state, save_path)
         self.print_and_log_info("Model saved at {}".format(save_path))
 
-    def save_training_metrics(self):
+    def save_metrics(self):
         df_train = pd.read_csv(self.train_metrics_path, sep="\t", index_col=0)
         df_val = pd.read_csv(self.val_metrics_path, sep="\t", index_col=0)
         df_scores = pd.read_csv(self.val_scores_path, sep="\t", index_col=0)
