@@ -30,13 +30,6 @@ from .utils.image import convert_to_img, save_gif
 from .utils.logger import print_info, get_logger
 from .utils.consts import *
 
-PRINT_TRAIN_STAT_FMT = "Epoch [{}/{}], Iter [{}/{}], train_metrics: {}".format
-PRINT_VAL_STAT_FMT = "Epoch [{}/{}], Iter [{}/{}], val_metrics: {}".format
-PRINT_CHECK_CLUSTERS_FMT = (
-    "Epoch [{}/{}], Iter [{}/{}]: Reassigned clusters {} from cluster {}".format
-)
-PRINT_LR_UPD_FMT = "Epoch [{}/{}], Iter [{}/{}], LR update: lr = {}".format
-
 
 from abc import ABC, abstractmethod
 
@@ -433,7 +426,7 @@ class AbstractTrainer(ABC):
         if lr != self.cur_lr:
             self.cur_lr = lr
             self.print_and_log_info(
-                PRINT_LR_UPD_FMT(epoch, self.n_epochs, batch, self.n_batches, lr)
+                f"{self.progress_str(epoch, batch)} | LR update: lr = {lr}"
             )
 
     @abstractmethod
@@ -659,6 +652,9 @@ class AbstractTrainer(ABC):
     #   LOGGING METHODS  #
     ######################
 
+    def progress_str(self, epoch, batch):
+        return  f"Epoch [{epoch}/{self.n_epochs}], Iter [{batch}/{self.n_batches}]"
+
     def print_and_log_info(self, string):
         print_info(string)
         self.logger.info(string)
@@ -718,10 +714,7 @@ class AbstractTrainer(ABC):
         self.print_and_log_info(f"{prefix}:\t{stats_text}")
 
     def log_val_metrics(self, cur_iter, epoch, batch, precision=5):
-        stat = PRINT_VAL_STAT_FMT(
-            epoch, self.n_epochs, batch, self.n_batches, self.val_metrics
-        )
-
+        stat = f"{self.progress_str(epoch, batch)}: val_metrics: {self.val_metrics}"
         fmt = f"{{:.{precision}f}}".format
         self.print_and_log_info(stat)
         with open(self.val_metrics_path, mode="a") as f:
@@ -748,9 +741,7 @@ class AbstractTrainer(ABC):
         self.val_metrics.reset()
 
     def log_train_metrics(self, cur_iter, epoch, batch, precision=5):
-        stat = PRINT_TRAIN_STAT_FMT(
-            epoch, self.n_epochs, batch, self.n_batches, self.train_metrics
-        )
+        stat = f"{self.progress_str(epoch, batch)}: train_metrics: {self.train_metrics}"
         fmt = f"{{:.{precision}f}}".format
 
         self.print_and_log_info(stat[:1000])
