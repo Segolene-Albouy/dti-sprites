@@ -574,6 +574,7 @@ class DTISprites(nn.Module):
             raise ValueError("undefined regularizer")
 
     def estimate_logits(self, features):
+        logits = None
         if self.proba_type == "marionette":
             if self.add_empty_sprite:
                 latent_params = torch.cat([self.latent_params, self.empty_latent_params.unsqueeze(0)], dim=0)
@@ -585,62 +586,114 @@ class DTISprites(nn.Module):
             D, B, L = proba_theta.shape
             temp = torch.matmul(latent_params, proba_theta.reshape(D,-1)).reshape(-1, B, L).permute(1,2,0)
             logits = (1.0 / np.sqrt(self.encoder.out_ch)) * (temp) # BLK
-            return logits
         elif self.proba_type == "linear":
             logits = self.proba(features).reshape(features.shape[0], self.n_objects, self.n_sprites)
-            return logits
+        return logits
+
+    # def forward(self, x, img_masks=None):
+    #     loss_em = torch.Tensor([0.0])
+    #     B, C, H, W = x.size()
+    #     L, K, M = self.n_objects, self.n_sprites, self.n_backgrounds or 1
+    #     tsf_layers, tsf_masks, tsf_bkgs, occ_grid, class_prob = self.predict(
+    #         x
+    #     )
+    #     if class_prob is None:
+    #         target = self.compose(
+    #             tsf_layers, tsf_masks, occ_grid, tsf_bkgs, class_prob
+    #         )  # B(K**L*M)CHW
+    #         x = x.unsqueeze(1).expand(-1, K ** L * M, -1, -1, -1)
+    #         if img_masks != None:
+    #             img_masks = img_masks.unsqueeze(1).expand(-1, K ** L * M, -1, -1, -1)
+    #         distances = self.criterion(x, target, weights=img_masks)
+    #         loss_r = distances.min(1)[0].mean()
+    #         loss = (loss_r, loss_r, torch.Tensor([0.0]), torch.Tensor([0.0]))
+    #     else:
+    #         target = self.compose(
+    #             tsf_layers, tsf_masks, occ_grid, tsf_bkgs, class_prob
+    #         )  # BCHW
+    #         if img_masks != None:
+    #             img_masks = img_masks.unsqueeze(1)
+    #         if self.estimate_proba:
+    #             freq_loss = self.reg_func(class_prob, type="freq")
+    #             bin_loss = self.reg_func(class_prob, type="bin")
+    #
+    #             loss_r = self.criterion(
+    #                 x.unsqueeze(1), target.unsqueeze(1), weights=img_masks
+    #             ).mean()
+    #             if self.add_empty_sprite and not self.are_sprite_frozen:
+    #                 loss_em = self.reg_func(class_prob, type="empty_sprite")
+    #                 loss_r += loss_em
+    #             loss_freq = 1 - freq_loss.sum()
+    #             loss_bin = bin_loss.mean()
+    #             loss_all = (
+    #                     loss_r + self.freq_weight * loss_freq + self.curr_bin_weight * loss_bin
+    #             )
+    #             class_oh = torch.zeros(class_prob.shape, device=x.device).scatter_(
+    #                 1, class_prob.argmax(1, keepdim=True), 1
+    #             )
+    #             distances = 1 - class_oh.permute(2, 0, 1).flatten(1)  # B(L*K)
+    #             loss = (loss_all, loss_r, loss_bin, loss_freq, loss_em)
+    #         else:
+    #             loss_r = self.criterion(
+    #                 x.unsqueeze(1), target.unsqueeze(1), weights=img_masks
+    #             ).mean()
+    #             distances = 1 - class_prob.permute(2, 0, 1).flatten(1)  # B(L*K)
+    #             loss = (loss_r, loss_r, torch.Tensor([0.0]), torch.Tensor([0.0]), loss_em)
+    #
+    #     return loss, distances, class_prob
 
     def forward(self, x, img_masks=None):
+        """
+        loss_r: reconstruction loss
+        loss_bin: binarization loss
+        loss_freq: frequency loss
+        loss_em: empty sprite loss
+        """
         loss_em = torch.Tensor([0.0])
-        B, C, H, W = x.size()
-        L, K, M = self.n_objects, self.n_sprites, self.n_backgrounds or 1
-        tsf_layers, tsf_masks, tsf_bkgs, occ_grid, class_prob = self.predict(
-            x
-        )
+        # B, C, H, W = x.size()
+
+        tsf_layers, tsf_masks, tsf_bkg, occ_grid, class_prob = self.predict(x)
+        target = self.compose(tsf_layers, tsf_masks, occ_grid, tsf_bkg, class_prob)
+        img_masks = img_masks and img_masks.unsqueeze(1)
+        x = x.unsqueeze(1)
+
         if class_prob is None:
-            target = self.compose(
-                tsf_layers, tsf_masks, occ_grid, tsf_bkgs, class_prob
-            )  # B(K**L*M)CHW
-            x = x.unsqueeze(1).expand(-1, K**L * M, -1, -1, -1)
-            if img_masks != None:
-                img_masks = img_masks.unsqueeze(1).expand(-1, K**L * M, -1, -1, -1)
+            # target = B(K**L*M)CHW
+            L, K, M = self.n_objects, self.n_sprites, self.n_backgrounds or 1
+            x = x.expand(-1, K**L * M, -1, -1, -1)
+            img_masks = img_masks and img_masks.expand(-1, K ** L * M, -1, -1, -1)
             distances = self.criterion(x, target, weights=img_masks)
             loss_r = distances.min(1)[0].mean()
             loss = (loss_r, loss_r, torch.Tensor([0.0]), torch.Tensor([0.0]))
+
         else:
-            target = self.compose(
-                tsf_layers, tsf_masks, occ_grid, tsf_bkgs, class_prob
-            )  # BCHW
-            if img_masks != None:
-                img_masks = img_masks.unsqueeze(1)
+            # target = BCHW
+            loss_r = self.criterion(x, target.unsqueeze(1), weights=img_masks).mean()
+            loss_bin, loss_freq = torch.Tensor([0.0]), torch.Tensor([0.0])
+            loss_all = loss_r
+            class_oh = class_prob
+
             if self.estimate_proba:
                 freq_loss = self.reg_func(class_prob, type="freq")
                 bin_loss = self.reg_func(class_prob, type="bin")
 
-                loss_r = self.criterion(
-                    x.unsqueeze(1), target.unsqueeze(1), weights=img_masks
-                ).mean()
                 if self.add_empty_sprite and not self.are_sprite_frozen:
                     loss_em = self.reg_func(class_prob, type="empty_sprite")
                     loss_r += loss_em
+
                 loss_freq = 1 - freq_loss.sum()
                 loss_bin = bin_loss.mean()
-                loss_all = (
-                    loss_r + self.freq_weight * loss_freq + self.curr_bin_weight * loss_bin
-                )
+                reg_loss = self.freq_weight * loss_freq + self.curr_bin_weight * loss_bin
+                loss_all = loss_r + reg_loss
                 class_oh = torch.zeros(class_prob.shape, device=x.device).scatter_(
                     1, class_prob.argmax(1, keepdim=True), 1
                 )
-                distances = 1 - class_oh.permute(2, 0, 1).flatten(1)  # B(L*K)
-                loss = (loss_all, loss_r, loss_bin, loss_freq, loss_em)
-            else:
-                loss_r = self.criterion(
-                    x.unsqueeze(1), target.unsqueeze(1), weights=img_masks
-                ).mean()
-                distances = 1 - class_prob.permute(2, 0, 1).flatten(1)  # B(L*K)
-                loss = (loss_r, loss_r, torch.Tensor([0.0]), torch.Tensor([0.0]), loss_em)
+
+            distances = 1 - class_oh.permute(2, 0, 1).flatten(1)  # B(L*K)
+            loss = (loss_all, loss_r, loss_bin, loss_freq, loss_em)
 
         return loss, distances, class_prob
+
 
     def predict(self, x):
         B, C, H, W = x.size()
@@ -932,6 +985,11 @@ class DTISprites(nn.Module):
             return res.view(K**L * M, B, C, H, W).transpose(0, 1)
 
     def criterion(self, inp, target, weights=None, reduction="mean"):
+        # print()
+        # print()
+        # print(f"inp shape: {inp.shape}, range: [{inp.min():.3f}, {inp.max():.3f}]")
+        # print(f"target shape: {target.shape}, range: [{target.min():.3f}, {target.max():.3f}]")
+
         dist = self._criterion(inp, target)
         if weights is not None:
             dist = dist * weights

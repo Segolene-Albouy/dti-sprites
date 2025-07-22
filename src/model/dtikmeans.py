@@ -190,6 +190,7 @@ class DTIKmeans(nn.Module):
     def forward(self, x):
         # is_nan_t = torch.stack([torch.isnan(p).any() for p in self.transformer.parameters()]).any()
         # is_nan_c = torch.stack([torch.isnan(p).any() for p in self.cluster_parameters()]).any()
+
         if self.proto_source == "generator":
             params = self.generator(self.latent_params)
             if len(params.size()) != 4:
@@ -221,7 +222,7 @@ class DTIKmeans(nn.Module):
                 samplewise_distances = (inp - target) ** 2
                 samplewise_distances = samplewise_distances.flatten(2).mean(2)
                 bin_loss = self.reg_func(probas, type="bin")
-                a = distances.mean() 
+                a = distances.mean()
                 b = self.freq_weight * (1 - freq_loss.sum())
                 c = self.bin_weight * (bin_loss.mean())
                 return (
@@ -245,7 +246,7 @@ class DTIKmeans(nn.Module):
                     probas,
                 )
             else:
-                raise ValueError("Probability weighting is not implemented.")
+                raise ValueError(f"Probability weighting is not implemented: {self.weighting}")
 
         else:
             inp, target, features = self.transformer(x, prototypes)
