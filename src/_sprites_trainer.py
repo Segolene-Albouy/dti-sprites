@@ -433,7 +433,7 @@ class Trainer:
         if self.start_epoch == self.n_epochs:
             self.print_and_log_info("No training, only evaluating")
             self.evaluate()
-            self.save_metric_plots()
+            self.save_training_metrics()
             self.print_and_log_info("Training run is over")
             return
         for epoch in range(self.start_epoch, self.n_epochs + 1):
@@ -473,7 +473,7 @@ class Trainer:
                 self.update_scheduler(epoch + 1, batch=1)
 
         self.save(epoch=epoch, batch=batch)
-        self.save_metric_plots()
+        self.save_training_metrics()
         self.evaluate()
         self.print_and_log_info("Training run is over")
 
@@ -979,7 +979,7 @@ class Trainer:
         torch.save(state, save_path)
         self.print_and_log_info("Model saved at {}".format(save_path))
 
-    def save_metric_plots(self):
+    def save_training_metrics(self):
         self.model.eval()
         # Prototypes & transformation predictions
         size = MAX_GIF_SIZE if MAX_GIF_SIZE < max(self.img_size) else self.img_size

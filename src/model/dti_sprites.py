@@ -654,14 +654,16 @@ class DTISprites(nn.Module):
 
         tsf_layers, tsf_masks, tsf_bkg, occ_grid, class_prob = self.predict(x)
         target = self.compose(tsf_layers, tsf_masks, occ_grid, tsf_bkg, class_prob)
-        img_masks = img_masks and img_masks.unsqueeze(1)
+        if img_masks is not None:
+            img_masks = img_masks.unsqueeze(1)
         x = x.unsqueeze(1)
 
         if class_prob is None:
             # target = B(K**L*M)CHW
             L, K, M = self.n_objects, self.n_sprites, self.n_backgrounds or 1
             x = x.expand(-1, K**L * M, -1, -1, -1)
-            img_masks = img_masks and img_masks.expand(-1, K ** L * M, -1, -1, -1)
+            if img_masks is not None:
+                img_masks = img_masks.expand(-1, K ** L * M, -1, -1, -1)
             distances = self.criterion(x, target, weights=img_masks)
             loss_r = distances.min(1)[0].mean()
             loss = (loss_r, loss_r, torch.Tensor([0.0]), torch.Tensor([0.0]))

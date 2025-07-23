@@ -204,7 +204,7 @@ class Trainer(AbstractTrainer):
             if self.scheduler_update_range == "epoch" and batch_start == 1:
                 self.update_scheduler(epoch + 1, batch=1)
 
-        self.save_metric_plots()
+        self.save_training_metrics()
         self.evaluate()
 
         self.print_and_log_info("Training run is over")

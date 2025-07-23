@@ -238,7 +238,7 @@ class Trainer(AbstractTrainer):
         if self.start_epoch == self.n_epochs:
             self.print_and_log_info("No training, only evaluating")
             self.evaluate()
-            self.save_metric_plots()
+            self.save_training_metrics()
             self.print_and_log_info("Training run is over")
             return
         for epoch in range(self.start_epoch, self.n_epochs + 1):
@@ -278,7 +278,7 @@ class Trainer(AbstractTrainer):
                 self.update_scheduler(epoch + 1, batch=1)
 
         self.save(epoch=epoch, batch=batch)
-        self.save_metric_plots()
+        self.save_training_metrics()
         self.evaluate()
         self.print_and_log_info("Training run is over")
 

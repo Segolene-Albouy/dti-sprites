@@ -494,7 +494,7 @@ class AbstractTrainer(ABC):
         """Save transformed images"""
         raise NotImplementedError
 
-    def save_metric_plots(self):
+    def save_training_metrics(self):
         """Save training metrics, plots, and visualizations"""
         self.model.eval()
 
