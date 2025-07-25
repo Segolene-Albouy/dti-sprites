@@ -38,61 +38,46 @@ def softmax(logits, tau=1., dim=-1):
 
 
 def init_linear(hidden, out, init, n_channels=3, std=5, value=0.9, dataset=None, freeze=False):
+    linear = nn.Linear(hidden, out)
     if init == "random":
-        return nn.Linear(hidden, out)
+        pass
 
     elif init == "constant":
-        linear = nn.Linear(hidden, out)
         h = int(math.sqrt(out / n_channels))
         nn.init.constant_(linear.weight, 1e-10)
         sample = torch.full(size=(n_channels * h * h,), fill_value=0.5)
         sample = torch.log(sample / (1 - sample))
         linear.bias.data.copy_(sample)
-        return linear
 
     elif init == "gaussian":
         print_warning("Last layer initialized with gaussian weights.")
-        linear = nn.Linear(hidden, out)
-        if freeze:
-            h = int(math.sqrt(out))
-            size = [h, h]
-            mask = create_gaussian_weights(size, 1, std)
-            sample = mask.flatten()
+        h = int(math.sqrt(out / (n_channels + 1 if freeze else 1)))
+        size = [h, h]
+        mask = create_gaussian_weights(size, 1, std)
 
-        else:
-            h = int(math.sqrt(out / (n_channels + 1)))
-            size = [h, h]
-            mask = create_gaussian_weights(size, 1, std)
+        sample = mask.flatten()
+        if not freeze:
             sample = torch.cat(
                 (
-                    torch.full(
-                        size=(n_channels * h * h,),
-                        fill_value=value,
-                    ),
-                    mask.flatten(),
+                    torch.full(size=(n_channels * h * h,), fill_value=value),
+                    sample,
                 ),
             )
-        nn.init.constant_(
-            linear.weight, 1e-10
-        )  # a small value to avoid vanishing grads
+        nn.init.constant_(linear.weight, 1e-10)  # small value to avoid vanishing grads
         sample = torch.log(sample / (1 - sample))
         linear.bias.data.copy_(sample)
-        return linear
 
     elif init == "mean":
-        linear = nn.Linear(hidden, out)
         assert dataset is not None
-        images = next(
-            iter(DataLoader(dataset, batch_size=100, shuffle=True, num_workers=4))
-        )[0]
+        images = next(iter(DataLoader(dataset, batch_size=100, shuffle=True, num_workers=4)))[0]
         sample = images.mean(0)
         nn.init.constant_(linear.weight, 0.0001)
         sample = torch.log(sample / (1 - sample))
         linear.bias.data.copy_(sample.flatten())
-        return linear
 
     else:
         raise NotImplementedError("init is not implemented.")
+    return linear
 
 
 def layered_composition(layers, masks, occ_grid, proba=False):
