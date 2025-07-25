@@ -526,9 +526,8 @@ class Trainer(AbstractTrainer):
             else:
                 prop = proportions.view(self.n_objects, self.n_prototypes)[k]
             reassigned, idx = self.model.reassign_empty_clusters(prop)
-            msg = PRINT_CHECK_CLUSTERS_FMT(
-                epoch, self.n_epochs, batch, self.n_batches, reassigned, idx
-            )
+            msg = f"{self.progress_str(epoch, batch)}: Reassigned clusters {reassigned} from cluster {idx}"
+
             msg += f" for object layer {k}"
             self.print_and_log_info(msg)
             self.print_and_log_info(
@@ -538,9 +537,7 @@ class Trainer(AbstractTrainer):
             )
         else:
             reassigned, idx = self.model.reassign_empty_clusters(proportions)
-            msg = PRINT_CHECK_CLUSTERS_FMT(
-                epoch, self.n_epochs, batch, self.n_batches, reassigned, idx
-            )
+            msg = f"{self.progress_str(epoch, batch)}: Reassigned clusters {reassigned} from cluster {idx}"
             self.print_and_log_info(msg)
         self.train_metrics.reset(*[f"prop_clus{i}" for i in range(self.n_clusters)])
 

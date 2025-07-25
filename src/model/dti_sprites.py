@@ -37,30 +37,48 @@ def softmax(logits, tau=1., dim=-1):
     return F.softmax(logits/tau, dim=dim)
 
 
-def init_linear(hidden, out, init, n_channels=3, std=5, value=0.9, dataset=None, uniform=[None, None]):
+def init_linear(hidden, out, init, n_channels=3, std=5, value=0.9, dataset=None, freeze=False):
     if init == "random":
         return nn.Linear(hidden, out)
+
     elif init == "constant":
         linear = nn.Linear(hidden, out)
         h = int(math.sqrt(out / n_channels))
         nn.init.constant_(linear.weight, 1e-10)
-        sample = torch.full(size=(n_channels * h * h,), fill_value=value)
+        sample = torch.full(size=(n_channels * h * h,), fill_value=0.5)
         sample = torch.log(sample / (1 - sample))
         linear.bias.data.copy_(sample)
         return linear
+
     elif init == "gaussian":
-        assert n_channels == 1
         print_warning("Last layer initialized with gaussian weights.")
         linear = nn.Linear(hidden, out)
-        h = int(math.sqrt(out))
-        size = [h, h]
-        sample = create_gaussian_weights(size, 1, std).flatten()
+        if freeze:
+            h = int(math.sqrt(out))
+            size = [h, h]
+            mask = create_gaussian_weights(size, 1, std)
+            sample = mask.flatten()
+
+        else:
+            h = int(math.sqrt(out / (n_channels + 1)))
+            size = [h, h]
+            mask = create_gaussian_weights(size, 1, std)
+            sample = torch.cat(
+                (
+                    torch.full(
+                        size=(n_channels * h * h,),
+                        fill_value=value,
+                    ),
+                    mask.flatten(),
+                ),
+            )
         nn.init.constant_(
             linear.weight, 1e-10
         )  # a small value to avoid vanishing grads
         sample = torch.log(sample / (1 - sample))
         linear.bias.data.copy_(sample)
         return linear
+
     elif init == "mean":
         linear = nn.Linear(hidden, out)
         assert dataset is not None
@@ -72,6 +90,7 @@ def init_linear(hidden, out, init, n_channels=3, std=5, value=0.9, dataset=None,
         sample = torch.log(sample / (1 - sample))
         linear.bias.data.copy_(sample.flatten())
         return linear
+
     else:
         raise NotImplementedError("init is not implemented.")
 
@@ -131,7 +150,6 @@ class DTISprites(nn.Module):
             proto_init, bkg_init, mask_init = data_args.get(
                 "init", ["constant", "constant", "constant"]
             )
-            print(freeze_frg, freeze_bkg, freeze_sprite)
         else:
             freeze_frg, freeze_bkg, freeze_sprite = False, False, False
             value_frg, value_bkg, value_mask = 0.5, 0.5, 0.5
@@ -260,7 +278,7 @@ class DTISprites(nn.Module):
         if self.learn_backgrounds:
             if proto_source == "data":
                 self.bkg_params = self.set_param(
-                    dataset, M, bkg_init, value_bkg, std=std, freeze=freeze_frg
+                    dataset, M, bkg_init, value_bkg, std=std, freeze=freeze_bkg
                 )
             else:
                 if freeze_bkg:
@@ -374,9 +392,10 @@ class DTISprites(nn.Module):
 
     @staticmethod
     def set_param(dataset, n_sprites, init_type, value_param, size=None, std=25, freeze=False):
+        n_channels = 1 if freeze else None # nb of channels deduced from dataset inside generate_data
         param = nn.Parameter(
             torch.stack(
-                generate_data(dataset, n_sprites, init_type=init_type, value=value_param, size=size, std=std)
+                generate_data(dataset, n_sprites, init_type=init_type, value=value_param, size=size, std=std, n_channels=n_channels)
             )
         )
         param.requires_grad = not freeze
@@ -589,58 +608,6 @@ class DTISprites(nn.Module):
         elif self.proba_type == "linear":
             logits = self.proba(features).reshape(features.shape[0], self.n_objects, self.n_sprites)
         return logits
-
-    # def forward(self, x, img_masks=None):
-    #     loss_em = torch.Tensor([0.0])
-    #     B, C, H, W = x.size()
-    #     L, K, M = self.n_objects, self.n_sprites, self.n_backgrounds or 1
-    #     tsf_layers, tsf_masks, tsf_bkgs, occ_grid, class_prob = self.predict(
-    #         x
-    #     )
-    #     if class_prob is None:
-    #         target = self.compose(
-    #             tsf_layers, tsf_masks, occ_grid, tsf_bkgs, class_prob
-    #         )  # B(K**L*M)CHW
-    #         x = x.unsqueeze(1).expand(-1, K ** L * M, -1, -1, -1)
-    #         if img_masks != None:
-    #             img_masks = img_masks.unsqueeze(1).expand(-1, K ** L * M, -1, -1, -1)
-    #         distances = self.criterion(x, target, weights=img_masks)
-    #         loss_r = distances.min(1)[0].mean()
-    #         loss = (loss_r, loss_r, torch.Tensor([0.0]), torch.Tensor([0.0]))
-    #     else:
-    #         target = self.compose(
-    #             tsf_layers, tsf_masks, occ_grid, tsf_bkgs, class_prob
-    #         )  # BCHW
-    #         if img_masks != None:
-    #             img_masks = img_masks.unsqueeze(1)
-    #         if self.estimate_proba:
-    #             freq_loss = self.reg_func(class_prob, type="freq")
-    #             bin_loss = self.reg_func(class_prob, type="bin")
-    #
-    #             loss_r = self.criterion(
-    #                 x.unsqueeze(1), target.unsqueeze(1), weights=img_masks
-    #             ).mean()
-    #             if self.add_empty_sprite and not self.are_sprite_frozen:
-    #                 loss_em = self.reg_func(class_prob, type="empty_sprite")
-    #                 loss_r += loss_em
-    #             loss_freq = 1 - freq_loss.sum()
-    #             loss_bin = bin_loss.mean()
-    #             loss_all = (
-    #                     loss_r + self.freq_weight * loss_freq + self.curr_bin_weight * loss_bin
-    #             )
-    #             class_oh = torch.zeros(class_prob.shape, device=x.device).scatter_(
-    #                 1, class_prob.argmax(1, keepdim=True), 1
-    #             )
-    #             distances = 1 - class_oh.permute(2, 0, 1).flatten(1)  # B(L*K)
-    #             loss = (loss_all, loss_r, loss_bin, loss_freq, loss_em)
-    #         else:
-    #             loss_r = self.criterion(
-    #                 x.unsqueeze(1), target.unsqueeze(1), weights=img_masks
-    #             ).mean()
-    #             distances = 1 - class_prob.permute(2, 0, 1).flatten(1)  # B(L*K)
-    #             loss = (loss_r, loss_r, torch.Tensor([0.0]), torch.Tensor([0.0]), loss_em)
-    #
-    #     return loss, distances, class_prob
 
     def forward(self, x, img_masks=None):
         """
@@ -987,11 +954,6 @@ class DTISprites(nn.Module):
             return res.view(K**L * M, B, C, H, W).transpose(0, 1)
 
     def criterion(self, inp, target, weights=None, reduction="mean"):
-        # print()
-        # print()
-        # print(f"inp shape: {inp.shape}, range: [{inp.min():.3f}, {inp.max():.3f}]")
-        # print(f"target shape: {target.shape}, range: [{target.min():.3f}, {target.max():.3f}]")
-
         dist = self._criterion(inp, target)
         if weights is not None:
             dist = dist * weights

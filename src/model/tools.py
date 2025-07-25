@@ -57,13 +57,37 @@ def create_gaussian_weights(img_size, n_channels, std):
     g2d = np.outer(g1d_h, g1d_w)
     return torch.from_numpy(g2d).unsqueeze(0).expand(n_channels, -1, -1).float()
 
+def adjust_channels(sample, target_channels):
+    """
+    Adjust the number of channels of a tensor to match n_channels.
+    If the tensor has more channels, it averages them.
+    If it has fewer, it repeats the channels.
+    """
+    current_channels = sample.shape[0]
+    if current_channels == target_channels:
+        return sample
+    elif target_channels == 1 and current_channels == 3:
+        return sample.mean(0, keepdim=True)  # RGB to grayscale
+    elif target_channels == 3 and current_channels == 1:
+        return sample.repeat(3, 1, 1)  # Grayscale to RGB
+    raise ValueError(f"Cannot convert from {current_channels} to {target_channels} channels")
+
 initialization_type = Literal["sample", "random", "constant", "random_color", "gaussian", "mean", "kmeans"]
 
+
 def generate_data(
-    dataset, K, init_type: initialization_type="sample", value=None, noise_scale=None, std=None, size=None
+    dataset,
+    K,
+    init_type: initialization_type = "sample",
+    value=None,
+    noise_scale=None,
+    std=None,
+    size=None,
+    n_channels=None
 ):
     samples = []
     init_type = "sample" if not isinstance(init_type, str) else init_type
+    channels = n_channels or dataset.n_channels or dataset.img_size[0]
 
     if init_type == "kmeans":
         N = min(100 * K, len(dataset))
@@ -80,11 +104,12 @@ def generate_data(
                 F.interpolate(s.unsqueeze(0), size, mode="bilinear", align_corners=False)[0]
                 for s in samples
             ]
+        samples = [adjust_channels(s, channels) for s in samples]
     else:
         for _ in range(K):
             if init_type == "random":
                 noise_scale = noise_scale or 1
-                sample = torch.rand(dataset[0][0].shape)
+                sample = torch.rand(channels, *(size or dataset.img_size))
                 if value is not None:
                     sample += value
             elif init_type == "sample":
@@ -93,30 +118,32 @@ def generate_data(
                     sample = F.interpolate(
                         sample.unsqueeze(0), size, mode="bilinear", align_corners=False
                     )[0]
+                sample = adjust_channels(sample, channels)
             elif init_type == "constant":
                 if value is not None:
                     sample = torch.full(
-                        (dataset.n_channels, *(size or dataset.img_size)),
+                        (channels, *(size or dataset.img_size)),
                         value,
                         dtype=torch.float,
                     )
                 else:
                     raise ValueError("value arg is mandatory with init_type=='constant'")
             elif init_type == "random_color":
-                sample = torch.ones(3, *(size or dataset.img_size)) * torch.rand(3, 1, 1)
+                if channels == 1:
+                    sample = torch.rand(1, *(size or dataset.img_size))
+                else:
+                    sample = torch.ones(channels, *(size or dataset.img_size)) * torch.rand(channels, 1, 1)
             elif init_type == "gaussian":
                 sample = create_gaussian_weights(
-                    size or dataset.img_size, dataset.n_channels, std
+                    size or dataset.img_size, channels, std
                 )
             elif init_type == "mean":
-                images = next(
-                    iter(
-                        DataLoader(dataset, batch_size=100, shuffle=True, num_workers=4)
-                    )
-                )[0]
+                images = next(iter(DataLoader(dataset, batch_size=100, shuffle=True, num_workers=4)))[0]
                 sample = images.mean(0)
+                sample = adjust_channels(sample, channels)
             else:
                 raise NotImplementedError
+
             samples.append(sample)
 
     return samples
