@@ -82,15 +82,12 @@ def init_linear(hidden, out, init, n_channels=3, std=5, value=0.9, dataset=None,
 
 def layered_composition(layers, masks, occ_grid, proba=False):
     # LBCHW size of layers and masks and LLB size for occ_grid
+    occ_masks = masks.sum(dim=1) if proba else masks
+    occ_masks = (1 - occ_grid[..., None, None, None].transpose(0, 1) * occ_masks).prod(1)  # LBCHW
     if proba:
-        occ_masks = (1 - occ_grid[..., None, None, None].transpose(0, 1) * masks.sum(dim=1)).prod(
-            1
-        )  # LBCHW
-        final_layer = (masks*layers).sum(1) # LBCHW
+        final_layer = (masks * layers).sum(1) # LBCHW
         return (occ_masks * final_layer).sum(0)  # BCHW
-    else:
-        occ_masks = (1 - occ_grid[..., None, None, None].transpose(0, 1) * masks).prod(1)  # LBCHW
-        return (occ_masks * masks * layers).sum(0)  # BCHW
+    return (occ_masks * masks * layers).sum(0)  # BCHW
 
 
 def softmax(logits, tau=1., dim=-1):
@@ -377,7 +374,8 @@ class DTISprites(nn.Module):
 
     @staticmethod
     def set_param(dataset, n_sprites, init_type, value_param, size=None, std=25, freeze=False):
-        n_channels = 1 if freeze else None # nb of channels deduced from dataset inside generate_data
+        # NOTE maybe add n_channels explicitly in set_param arguments
+        n_channels = 1 if freeze else None # when None, n_channels deduced from dataset inside generate_data
         param = nn.Parameter(
             torch.stack(
                 generate_data(dataset, n_sprites, init_type=init_type, value=value_param, size=size, std=std, n_channels=n_channels)

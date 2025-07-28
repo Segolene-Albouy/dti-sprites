@@ -18,7 +18,7 @@ from .utils import (
     coerce_to_path_and_check_exist,
     coerce_to_path_and_create_dir,
 )
-from .utils.image import convert_to_img
+from .utils.image import convert_to_img, unify_channels
 from .utils.logger import print_warning
 from .utils.metrics import AverageTensorMeter, AverageMeter, Scores
 from .utils.path import RUNS_PATH
@@ -262,25 +262,34 @@ class Trainer(AbstractTrainer):
     def save_variances(self, cur_iter=None):
         self.save_pred(cur_iter, pred_name="variance", prefix="var", n_preds=self.n_prototypes)
 
+    def get_transformed_images(self, output):
+        """Ensure image and output have matching channels, then concatenate them."""
+        img_channels = self.images_to_tsf.shape[1]
+        out_channels = output.shape[2] if output.ndim == 5 else output.shape[1]
+
+        if img_channels != out_channels:
+            target_channels = max(img_channels, out_channels)
+            images = unify_channels(self.images_to_tsf, target_channels)
+            outputs = unify_channels(output, target_channels)
+        else:
+            images = self.images_to_tsf
+            outputs = output
+
+        return torch.cat([images.unsqueeze(1), outputs], dim=1)
+
     @torch.no_grad()
     def save_transformed_images(self, cur_iter=None):
         self.model.eval()
         output = self.model.transform(self.images_to_tsf)
 
-        transformed_imgs = torch.cat([self.images_to_tsf.unsqueeze(1), output], 1)
+        transformed_imgs = self.get_transformed_images(output)
         for k in range(transformed_imgs.size(0)):
             for j, img in enumerate(transformed_imgs[k][1:]):
-                if cur_iter is not None:
-                    convert_to_img(img).save(
-                        self.transformation_path
-                        / f"img{k}"
-                        / f"tsf{j}"
-                        / f"{cur_iter}.jpg"
-                    )
-                else:
-                    convert_to_img(img).save(
-                        self.transformation_path / f"img{k}" / f"tsf{j}.png"
-                    )
+                img_name = f"tsf{j}/{cur_iter}.jpg" if cur_iter is not None else f"tsf{j}.png"
+                convert_to_img(img).save(
+                    self.transformation_path / f"img{k}" / img_name
+                )
+
         return transformed_imgs
 
     def _save_additional_image_gifs(self, size):

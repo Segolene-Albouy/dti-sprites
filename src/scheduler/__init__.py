@@ -25,7 +25,7 @@ class ConstantLR(_LRScheduler):
         return [base_lr for base_lr in self.base_lrs]
 
     def __str__(self):
-        return '{}({})'.format(self.__class__.__name__, self.optimizer.__class__.__name__)
+        return f'{self.__class__.__name__}({self.optimizer.__class__.__name__})'
 
 
 class PolynomialLR(_LRScheduler):
@@ -44,12 +44,12 @@ class PolynomialLR(_LRScheduler):
 
     def __str__(self):
         params = [
-            'optimizer: {}'.format(self.optimizer.__class__.__name__),
-            'decay_iter: {}'.format(self.decay_iter),
-            'max_iter: {}'.format(self.max_iter),
-            'gamma: {}'.format(self.gamma),
+            f'optimizer: {self.optimizer.__class__.__name__}',
+            f'decay_iter: {self.decay_iter}',
+            f'max_iter: {self.max_iter}',
+            f'gamma: {self.gamma}',
         ]
-        return '{}({})'.format(self.__class__.__name__, ','.join(params))
+        return f"{self.__class__.__name__}({','.join(params)})"
 
 
 class MultiStepLR(_LRScheduler):
@@ -85,14 +85,16 @@ class MultiStepLR(_LRScheduler):
             return [lr / self.warmup * (self.last_epoch + 1) for lr in self.base_lrs]
         elif self.last_epoch not in self.milestones:
             return [group['lr'] for group in self.optimizer.param_groups]
-        else:
-            return [group['lr'] * gamma ** self.milestones[self.last_epoch]
-                    for group, gamma in zip(self.optimizer.param_groups, self.gamma)]
+        return [
+            group['lr'] * gamma ** self.milestones[self.last_epoch]
+            for group, gamma in zip(self.optimizer.param_groups, self.gamma)
+        ]
 
     def _get_closed_form_lr(self):
         if self.warmup > self.last_epoch:
             return [lr / self.warmup * (self.last_epoch + 1) for lr in self.base_lrs]
-        else:
-            milestones = list(sorted(self.milestones.elements()))
-            return [base_lr * gamma ** bisect_right(milestones, self.last_epoch)
-                    for base_lr, gamma in zip(self.base_lrs, self.gamma)]
+        milestones = list(sorted(self.milestones.elements()))
+        return [
+            base_lr * gamma ** bisect_right(milestones, self.last_epoch)
+            for base_lr, gamma in zip(self.base_lrs, self.gamma)
+        ]

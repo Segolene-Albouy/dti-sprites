@@ -155,22 +155,19 @@ class AbstractTrainer(ABC):
         self.dataset_kwargs = self.cfg["dataset"].copy()
         self.dataset_name = self.dataset_kwargs["name"]
 
-        train_dataset = get_dataset(self.dataset_name)("train", **self.dataset_kwargs)
-        val_dataset = get_dataset(self.dataset_name)("val", **self.dataset_kwargs)
+        self.train_dataset = get_dataset(self.dataset_name)("train", **self.dataset_kwargs)
+        self.val_dataset = get_dataset(self.dataset_name)("val", **self.dataset_kwargs)
 
-        self.n_classes = train_dataset.n_classes
-        self.is_val_empty = len(val_dataset) == 0
-        self.img_size = train_dataset.img_size
+        self.n_classes = self.train_dataset.n_classes
+        self.is_val_empty = len(self.val_dataset) == 0
+        self.img_size = self.train_dataset.img_size
 
         self.print_and_log_info(
-            f"Dataset {self.dataset_name} instantiated with {self.dataset_kwargs}"
+            f"Dataset {self.dataset_name} instantiated with img_size={self.train_dataset}, n_channels={self.train_dataset.n_channels}, "
         )
         self.print_and_log_info(
-            f"Found {self.n_classes} classes, {len(train_dataset)} train samples, {len(val_dataset)} val samples"
+            f"Found {len(self.train_dataset)} train samples / {len(self.val_dataset)} val samples"
         )
-
-        self.train_dataset = train_dataset
-        self.val_dataset = val_dataset
 
     def setup_dataloaders(self):
         """Create data loaders from datasets"""

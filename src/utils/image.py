@@ -23,6 +23,35 @@ def resize(img, size, keep_aspect_ratio=True, resample=Image.LANCZOS, fit_inside
     return img.resize(size, resample=resample)
 
 
+def adjust_channels(sample, target_channels):
+    """
+    Adjust the number of channels of a tensor to match n_channels.
+    If the tensor has more channels, it averages them.
+    If it has fewer, it repeats the channels.
+    """
+    input_channels = sample.shape[0]
+    if input_channels == target_channels:
+        return sample
+    elif target_channels == 1 and input_channels == 3:
+        return sample.mean(0, keepdim=True)  # RGB to grayscale
+    elif target_channels == 3 and input_channels == 1:
+        return sample.repeat(3, 1, 1)  # Grayscale to RGB
+    raise ValueError(f"Cannot convert from {input_channels} to {target_channels} channels")
+
+
+def unify_channels(x, target_channels):
+    if x.shape[1 if x.ndim == 4 else 2] == target_channels:
+        return x
+    if x.ndim == 4:  # [batch, channels, H, W]
+        return torch.stack([adjust_channels(img, target_channels) for img in x])
+
+    # [batch, n_proto, channels, H, W]
+    return torch.stack([
+        torch.stack([adjust_channels(img, target_channels) for img in batch])
+        for batch in x
+    ])
+
+
 def convert_to_img(arr):
     if isinstance(arr, torch.Tensor):
         if len(arr.shape) == 4:
@@ -51,7 +80,7 @@ def save_gif(path, name, in_ext='jpg', size=None, total_sec=10):
         imgs = [Image.open(f).convert('P', palette=Image.ADAPTIVE) for f in files]
     except OSError as e:
         print_warning(e)
-        return None
+        return
 
     if len(imgs) > 0:
         if size is not None and size != imgs[0].size:

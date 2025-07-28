@@ -10,6 +10,8 @@ from torch.nn import functional as F
 from torch.utils.data.dataloader import DataLoader
 from torchvision.transforms.functional import resize
 
+from ..utils.image import adjust_channels
+
 
 def get_bbox_from_mask(masks):
     from scipy import ndimage
@@ -57,20 +59,6 @@ def create_gaussian_weights(img_size, n_channels, std):
     g2d = np.outer(g1d_h, g1d_w)
     return torch.from_numpy(g2d).unsqueeze(0).expand(n_channels, -1, -1).float()
 
-def adjust_channels(sample, target_channels):
-    """
-    Adjust the number of channels of a tensor to match n_channels.
-    If the tensor has more channels, it averages them.
-    If it has fewer, it repeats the channels.
-    """
-    current_channels = sample.shape[0]
-    if current_channels == target_channels:
-        return sample
-    elif target_channels == 1 and current_channels == 3:
-        return sample.mean(0, keepdim=True)  # RGB to grayscale
-    elif target_channels == 3 and current_channels == 1:
-        return sample.repeat(3, 1, 1)  # Grayscale to RGB
-    raise ValueError(f"Cannot convert from {current_channels} to {target_channels} channels")
 
 initialization_type = Literal["sample", "random", "constant", "random_color", "gaussian", "mean", "kmeans"]
 
@@ -87,7 +75,7 @@ def generate_data(
 ):
     samples = []
     init_type = "sample" if not isinstance(init_type, str) else init_type
-    channels = n_channels or dataset.n_channels or dataset.img_size[0]
+    channels = n_channels or dataset.n_channels
 
     if init_type == "kmeans":
         N = min(100 * K, len(dataset))

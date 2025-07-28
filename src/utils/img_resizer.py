@@ -1,6 +1,6 @@
 import argparse
 
-from utils.image import ImageResizer
+from .image import ImageResizer
 
 
 if __name__ == "__main__":
