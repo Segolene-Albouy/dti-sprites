@@ -104,7 +104,10 @@ class AbstractTrainer(ABC):
     seg_eval = None
     instance_eval = None
 
-    interpolate_settings = {'mode': 'bilinear'}
+    interpolate_settings = {
+        'mode': 'bilinear',
+        'align_corners': False
+    }
 
     def __init__(self, cfg, run_dir, save=False, *args, **kwargs):
         self.run_dir = coerce_to_path_and_create_dir(run_dir)
@@ -792,10 +795,16 @@ class AbstractTrainer(ABC):
         if self.visualizer is None:
             return None
 
-        if max(images.shape[1:]) > VIZ_MAX_IMG_SIZE:
+        if max(images.shape[2:]) > VIZ_MAX_IMG_SIZE:
+            H, W = images.shape[2], images.shape[3]
+            if H > W:
+                new_size = (VIZ_MAX_IMG_SIZE, int(W * VIZ_MAX_IMG_SIZE / H))
+            else:
+                new_size = (int(H * VIZ_MAX_IMG_SIZE / W), VIZ_MAX_IMG_SIZE)
+
             images = torch.nn.functional.interpolate(
                 images,
-                size=VIZ_MAX_IMG_SIZE,
+                size=new_size,
                 **self.interpolate_settings
             )
 
@@ -810,6 +819,7 @@ class AbstractTrainer(ABC):
                 height=VIZ_HEIGHT
             ),
         )
+        return None
 
     def get_metrics_names(self, metrics=None, prefix="loss"):
         if not metrics:

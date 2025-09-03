@@ -45,10 +45,6 @@ class Trainer(AbstractTrainer):
     """Pipeline to train a NN model using a certain dataset, both specified by an YML config"""
 
     model_name = "dti_sprites"
-    interpolate_settings = {
-        'mode': 'bilinear',
-        'align_corners': False
-    }
 
     n_backgrounds = None
     n_objects = None
@@ -511,7 +507,7 @@ class Trainer(AbstractTrainer):
                 self.print_and_log_info(msg)
                 self.print_and_log_info(
                     ", ".join(
-                        ["prop_{}={:.4f}".format(k, prop[k]) for k in range(len(prop))]
+                        [f"prop_{k}={prop[k]:.4f}" for k in range(len(prop))]
                     )
                 )
         elif self.n_objects > 1:
