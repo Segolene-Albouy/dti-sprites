@@ -796,12 +796,15 @@ class AbstractTrainer(ABC):
             return None
 
         if max(images.shape[2:]) > VIZ_MAX_IMG_SIZE:
-            H, W = images.shape[2], images.shape[3]
-            if H > W:
-                new_size = (VIZ_MAX_IMG_SIZE, int(W * VIZ_MAX_IMG_SIZE / H))
-            else:
-                new_size = (int(H * VIZ_MAX_IMG_SIZE / W), VIZ_MAX_IMG_SIZE)
+            # H, W = images.shape[2], images.shape[3]
+            # if H > W:
+            #     new_size = (VIZ_MAX_IMG_SIZE, int(W * VIZ_MAX_IMG_SIZE / H))
+            # else:
+            #     new_size = (int(H * VIZ_MAX_IMG_SIZE / W), VIZ_MAX_IMG_SIZE)
 
+            H, W = images.shape[2], images.shape[3]
+            scale = VIZ_MAX_IMG_SIZE / max(H, W)
+            new_size = (int(H * scale), int(W * scale))
             images = torch.nn.functional.interpolate(
                 images,
                 size=new_size,
