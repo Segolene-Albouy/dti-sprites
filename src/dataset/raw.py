@@ -17,10 +17,9 @@ class _AbstractCollectionDataset(TorchDataset):
     __metaclass__ = ABCMeta
     root = DATASETS_PATH
     name = NotImplementedError
-    n_channels = 3
     include_recursive = False
 
-    def __init__(self, split, img_size, cache_images=False, **kwargs):
+    def __init__(self, split, img_size, cache_images=True, **kwargs):
         tag = kwargs.get("tag", "")
         self.data_path = (
             coerce_to_path_and_check_exist(self.root / self.name / tag) / split
