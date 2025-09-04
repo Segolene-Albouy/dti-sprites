@@ -188,9 +188,6 @@ class DTIKmeans(AbstractDTI):
             raise ValueError(f"undefined regularizer: {type}")
 
     def forward(self, x, img_masks=None):
-        # is_nan_t = torch.stack([torch.isnan(p).any() for p in self.transformer.parameters()]).any()
-        # is_nan_c = torch.stack([torch.isnan(p).any() for p in self.cluster_parameters()]).any()
-
         if self.proto_source == "generator":
             params = self.generator(self.latent_params)
             if len(params.size()) != 4:
@@ -199,60 +196,41 @@ class DTIKmeans(AbstractDTI):
                 )
         else:
             params = self.prototype_params
+
         prototypes = params.unsqueeze(1).expand(-1, x.size(0), x.size(1), -1, -1)
 
         if hasattr(self, "proba"):
             inp, target, features = self.transformer(x, prototypes)
             logits = self.estimate_logits(features)
+
             if self.training:
                 probas = F.gumbel_softmax(logits, dim=-1)
             else:
                 probas = F.softmax(logits, dim=-1)
+
             freq_loss = self.reg_func(probas, type="freq")
 
-            # Weight transformed sprites and sum
             if self.weighting == "tr_sprite":
+                # Weight transformed sprites and sum
                 weighted_target = (probas[..., None, None, None] * target).sum(1)
+                distances = self.criterion(inp[:, 0, ...], weighted_target, masks=img_masks)
 
-                # MARKER distances = (inp[:, 0, ...] - weighted_target) ** 2
-                distances = self.criterion(
-                    inp[:, 0, ...],
-                    weighted_target,
-                    masks=img_masks,
-                    reduction="mean"
-                )
+                # Distances of input from transformed sprites
+                samplewise_distances = self.criterion(inp, target, masks=img_masks)
 
-                if self.loss_weights is not None:
-                    distances = distances * self.loss_weights
-                distances = distances.flatten(1).mean(1)
-
-                # distances of input from transformed sprites
-                samplewise_distances = (inp - target) ** 2
-                samplewise_distances = samplewise_distances.flatten(2).mean(2)
                 bin_loss = self.reg_func(probas, type="bin")
                 a = distances.mean()
                 b = self.freq_weight * (1 - freq_loss.sum())
                 c = self.bin_weight * (bin_loss.mean())
+
                 return (
-                    a + b + c, #distances.mean()
-                    #+ self.freq_weight * (1 - freq_loss.sum())
-                    #+ self.bin_weight * (bin_loss.mean()),
+                    a + b + c,
                     samplewise_distances,
                     probas,
                 )
-            # Weight differences
-            elif self.weighting == "diff":
-                # MARKER distances = (inp - target) ** 2
-                distances = self.criterion(
-                    inp,
-                    target,
-                    masks=img_masks.unsqueeze(1) if img_masks else None,
-                    reduction="mean"
-                )
 
-                if self.loss_weights is not None:
-                    distances = distances * self.loss_weights
-                distances = distances.flatten(2).mean(2)
+            elif self.weighting == "diff":
+                distances = self.criterion(inp, target, masks=img_masks)
                 dist_min = (distances * probas).sum(1)
 
                 return (
@@ -260,24 +238,13 @@ class DTIKmeans(AbstractDTI):
                     distances,
                     probas,
                 )
-            else:
-                raise ValueError(f"Probability weighting is not implemented: {self.weighting}")
+            raise ValueError(f"Probability weighting is not implemented: {self.weighting}")
 
-        else:
-            inp, target, features = self.transformer(x, prototypes)
-            # MARKER distances = (inp - target) ** 2
-            distances = self.criterion(
-                inp,
-                target,
-                masks=img_masks.unsqueeze(1) if img_masks else None,
-                reduction="mean"
-            )
-
-            if self.loss_weights is not None:
-                distances = distances * self.loss_weights
-            distances = distances.flatten(2).mean(2)
-            dist_min = distances.min(1)[0]
-            return dist_min.mean(), distances, None
+        # no proba
+        inp, target, features = self.transformer(x, prototypes)
+        distances = self.criterion(inp, target, masks=img_masks)
+        dist_min = distances.min(1)[0]
+        return dist_min.mean(), distances, None
 
     @torch.no_grad()
     def transform(self, x, inverse=False):

@@ -33,8 +33,8 @@ class AbstractDTI(nn.Module, ABC):
             dist = dist * masks
 
             if reduction == "mean":
-                valid_pixels = masks.sum(dim=(-2, -1), keepdim=True).clamp(min=1)
-                return (dist.sum(dim=(-2, -1), keepdim=True) / valid_pixels).squeeze(-1).squeeze(-1)
+                visible_pixels = masks.sum(dim=(-2, -1), keepdim=True).clamp(min=1)
+                return (dist.sum(dim=(-2, -1), keepdim=True) / visible_pixels).squeeze(-1).squeeze(-1)
             elif reduction == "sum":
                 return dist.sum(dim=(-2, -1))
             elif reduction == "none":
