@@ -20,7 +20,7 @@ model:
     source: generator
     generator: mlp
     data:
-      freeze: [True, True, False]
+      freeze: [1, 1, 10]
       init: ["constant", "constant", "gaussian"]
       value: [0., 0.9, 0.]
       gaussian_weights_std: 5
@@ -41,7 +41,7 @@ training:
     name: multi_step
     gamma: [1, 0.1]
     milestones: [20, 25]
-  n_epoches: 30 
+  n_epochs: 30
   train_stat_interval: 500
   val_stat_interval: 100
   check_cluster_interval: 1000

@@ -1,4 +1,4 @@
-'''
+"""
 Properly implemented ResNet-s for CIFAR10 as described in paper [1].
 
 The implementation and structure of this file is hugely influenced by [2]
@@ -26,7 +26,7 @@ Reference:
 
 If you use this implementation in you work, please don't forget to mention the
 author, Yerlan Idelbayev.
-'''
+"""
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.init as init

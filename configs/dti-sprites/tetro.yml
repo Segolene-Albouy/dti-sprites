@@ -5,14 +5,13 @@ model:
   n_sprites: 19
   n_backgrounds: 0
   n_objects: 3
-  freeze_sprite: 1
   inject_noise: 0.4
   prototype:
     source: data
     data:
-      freeze: [1, 1, 1]
+      freeze: [0, 0, 1]
       init: ["constant", "constant", "gaussian"]
-      value: [0.9, 0.9, 0.]
+      value: [0.9, 0., 0.]
       gaussian_weights_std: 5
   encoder_name: resnet32
   transformation_sequence: identity
@@ -37,13 +36,13 @@ training:
     name: multi_step
     gamma: [1, 0.1]
     milestones: [100, 200]
-  n_epoches: 210
+  n_epochs: 210
   train_stat_interval: 500
-  val_stat_interval: 1000
+  val_stat_interval: 100
   check_cluster_interval: 50
   eval_with_bkg: True
   eval_semantic: True
-  seed: 65176
+  seed: 48480
   visualizer_port:
   pretrained: 
   resume: 

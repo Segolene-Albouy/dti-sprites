@@ -5,8 +5,16 @@ model:
   n_sprites: 6
   n_backgrounds: 1
   n_objects: 6
-  freeze_sprite: 40
   inject_noise: 0.4
+  prototype:
+    source: data
+    data:
+      freeze: [0, 0, 40]
+      init: ["constant", "mean", "gaussian"]
+      value: [0.9, 0., 0.]
+      gaussian_weights_std: 10
+  init_latent_linear: gaussian
+  init_bkg_linear: mean
   encoder_name: resnet18
   with_pool: [2, 2]
   transformation_sequence: identity_projective
@@ -15,11 +23,7 @@ model:
   curriculum_learning: [150]
   curriculum_learning_bkg: False
   curriculum_learning_layer: False
-  proto_init: constant
-  mask_init: gaussian
-  bkg_init: mean
   sprite_size: [40, 40]
-  gaussian_weights_std: 10
   pred_occlusion: True
   estimate_minimum: True
   greedy_algo_iter: 3
@@ -37,13 +41,13 @@ training:
     name: multi_step
     gamma: [1, 0.1]
     milestones: [250, 400]
-  n_epoches: 450
+  n_epochs: 450
   train_stat_interval: 1000
   val_stat_interval: 2000
   check_cluster_interval: 250
   eval_with_bkg: True
   eval_semantic: True
-  seed: 41459
+  seed: 4502
   visualizer_port:
   pretrained: 
   resume: 

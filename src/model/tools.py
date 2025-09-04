@@ -1,4 +1,5 @@
 from collections import OrderedDict
+from typing import Literal
 
 import numpy as np
 from scipy import signal
@@ -7,9 +8,19 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 from torch.utils.data.dataloader import DataLoader
+from torchvision.transforms.functional import resize
+
+from ..utils.image import adjust_channels
 
 
-def get_bbox_from_mask(binary_masks):
+def get_bbox_from_mask(masks):
+    from scipy import ndimage
+
+    k = np.ones((3, 3)) / 9
+    masks = ndimage.convolve(masks, k, mode="constant", cval=0.0)
+
+    binary_masks = (masks > 0.5).long()
+
     indices_y, indices_x = torch.where(binary_masks.view(binary_masks.shape[0], -1))
 
     x_min = indices_x.min(dim=1).values
@@ -49,15 +60,26 @@ def create_gaussian_weights(img_size, n_channels, std):
     return torch.from_numpy(g2d).unsqueeze(0).expand(n_channels, -1, -1).float()
 
 
+initialization_type = Literal["sample", "random", "constant", "random_color", "gaussian", "mean", "kmeans"]
+
+
 def generate_data(
-    dataset, K, init_type="sample", value=None, noise_scale=None, std=None, size=None
+    dataset,
+    K,
+    init_type: initialization_type = "sample",
+    value=None,
+    noise_scale=None,
+    std=None,
+    size=None,
+    n_channels=None
 ):
     samples = []
+    init_type = "sample" if not isinstance(init_type, str) else init_type
+    channels = n_channels or dataset.n_channels
+
     if init_type == "kmeans":
         N = min(100 * K, len(dataset))
-        images = next(
-            iter(DataLoader(dataset, batch_size=N, shuffle=True, num_workers=4))
-        )[0]
+        images = next(iter(DataLoader(dataset, batch_size=N, shuffle=True, num_workers=4)))[0]
         img_size = images.shape[1:]
         X = images.flatten(1).numpy()
         cluster = KMeans(K)
@@ -67,16 +89,15 @@ def generate_data(
         )
         if size is not None:
             samples = [
-                F.interpolate(
-                    s.unsqueeze(0), size, mode="bilinear", align_corners=False
-                )[0]
+                F.interpolate(s.unsqueeze(0), size, mode="bilinear", align_corners=False)[0]
                 for s in samples
             ]
+        samples = [adjust_channels(s, channels) for s in samples]
     else:
         for _ in range(K):
-            if init_type == "soup":
+            if init_type == "random":
                 noise_scale = noise_scale or 1
-                sample = torch.rand(dataset[0][0].shape)
+                sample = torch.rand(channels, *(size or dataset.img_size))
                 if value is not None:
                     sample += value
             elif init_type == "sample":
@@ -85,34 +106,32 @@ def generate_data(
                     sample = F.interpolate(
                         sample.unsqueeze(0), size, mode="bilinear", align_corners=False
                     )[0]
+                sample = adjust_channels(sample, channels)
             elif init_type == "constant":
                 if value is not None:
                     sample = torch.full(
-                        (dataset.n_channels, *(size or dataset.img_size)),
+                        (channels, *(size or dataset.img_size)),
                         value,
                         dtype=torch.float,
                     )
                 else:
-                    raise ValueError(
-                        "value arg is mandatory with init_type=='constant'"
-                    )
+                    raise ValueError("value arg is mandatory with init_type=='constant'")
             elif init_type == "random_color":
-                sample = torch.ones(3, *(size or dataset.img_size)) * torch.rand(
-                    3, 1, 1
-                )
+                if channels == 1:
+                    sample = torch.rand(1, *(size or dataset.img_size))
+                else:
+                    sample = torch.ones(channels, *(size or dataset.img_size)) * torch.rand(channels, 1, 1)
             elif init_type == "gaussian":
                 sample = create_gaussian_weights(
-                    size or dataset.img_size, dataset.n_channels, std
+                    size or dataset.img_size, channels, std
                 )
             elif init_type == "mean":
-                images = next(
-                    iter(
-                        DataLoader(dataset, batch_size=100, shuffle=True, num_workers=4)
-                    )
-                )[0]
+                images = next(iter(DataLoader(dataset, batch_size=100, shuffle=True, num_workers=4)))[0]
                 sample = images.mean(0)
+                sample = adjust_channels(sample, channels)
             else:
                 raise NotImplementedError
+
             samples.append(sample)
 
     return samples
@@ -177,9 +196,13 @@ def get_nb_out_channels(layer):
     ].out_channels
 
 
-def get_output_size(in_channels, img_size, model):
+@torch.no_grad()
+def get_output_size(in_channels, img_size, model, encoder_name):
     x = torch.zeros(1, in_channels, *img_size)
-    return np.prod(model(x).shape)
+    if encoder_name == "dinov2":
+        x = resize(x, (28, 28))
+    shape = model(x).shape
+    return np.prod(shape)
 
 
 class Identity(nn.Module):
@@ -269,7 +292,7 @@ class TPSGrid(nn.Module):
         forward_kernel[-2:, :N].copy_(target_control_points.transpose(0, 1))
         inverse_kernel = torch.inverse(forward_kernel)
 
-        # create target cordinate matrix
+        # create target coordinate matrix
         HW = img_height * img_width
         y, x = torch.meshgrid(
             torch.linspace(-1, 1, img_height),

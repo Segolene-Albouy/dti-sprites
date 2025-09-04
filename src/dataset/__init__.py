@@ -14,6 +14,7 @@ def get_dataset(dataset_name):
         DSpritesGrayDataset,
         TetrominoesDataset,
         CLEVR6Dataset,
+        CLEVRDataset,
         FleuronsCompDataset,
         FleuronsCompSyntDataset,
     )
@@ -38,6 +39,7 @@ def get_dataset(dataset_name):
         "frgc": FRGCDataset,
         # MultiObject
         "clevr6": CLEVR6Dataset,
+        "clevr": CLEVRDataset,
         "dsprites_gray": DSpritesGrayDataset,
         "tetrominoes": TetrominoesDataset,
         "fleuron_compounds": FleuronsCompDataset,
@@ -57,8 +59,8 @@ def get_dataset(dataset_name):
         "Lettre_a": LettersDataset,
         "Lettre_e": LettersDataset,
         "Lettre_i": LettersDataset,
-        # CoA
-        "coa": CoADataset,
         # Generic
         "generic": GenericDataset,
+        # CoA
+        "coa_marion": CoADataset,
     }[dataset_name]

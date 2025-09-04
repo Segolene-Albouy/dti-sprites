@@ -30,11 +30,11 @@ training:
     name: multi_step
     gamma: 0.1
     milestones: [50]
-  n_epoches: 55
+  n_epochs: 55
   train_stat_interval: 400
   val_stat_interval: 800
   check_cluster_interval: 100
-  seed: 26474
+  seed: 62140
   visualizer_port:
   pretrained:
   resume:

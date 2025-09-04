@@ -29,7 +29,7 @@ class Metrics:
         return self.meters[name]
 
     def __repr__(self):
-        return ', '.join(['{}={:.4f}'.format(name, self.meters[name].avg) for name in self.names])
+        return ', '.join(['{}={:.8f}'.format(name, self.meters[name].avg) for name in self.names])
 
     @property
     def avg_values(self):
@@ -171,7 +171,7 @@ class InstanceSegScores:
     """Computes Adjusted Rand Index, original implementation from sklearn.metrics.adjusted_rand_score"""
     def __init__(self, n_instances, with_bkg=False):
         self.n_instances = n_instances  # XXX should take a background instance into account
-        self.names = ["mean_ari"]
+        self.names = ["mean_ari", "avg_iou"]
         self.score_name = "mean_ari"
         self.with_bkg = with_bkg
         self.reset()
@@ -179,19 +179,64 @@ class InstanceSegScores:
 
     def reset(self):
         self.aris = []
+        self.ious = []
 
     def __getitem__(self, k):
         return self.values[k]
 
     def compute(self):
-        self.values = OrderedDict(zip(self.names, [np.mean(self.aris)]))
+        self.values = OrderedDict(zip(self.names, [np.mean(self.aris), np.mean(self.ious)]))
         return self.values
 
     def update(self, label_true, label_pred):
         B = len(label_true)
+        iou = self.cpu_iou(label_true, label_pred)
         for k in range(B):
             ari = self.cpu_ari(label_true[k], label_pred[k])
             self.aris.append(ari)
+        self.ious.extend(iou)
+
+    def cpu_iou(self, true_masks, pred_masks):
+        assert self.with_bkg
+        # adapted from AST-argmax code
+        pred_masks = np.expand_dims(np.eye(self.n_instances)[pred_masks].transpose(0, 3, 1, 2),2)
+        true_masks = np.eye(self.n_instances)[true_masks].transpose(0, 4, 1, 2, 3)
+
+        iou_matrix = np.zeros((pred_masks.shape[0], pred_masks.shape[1], true_masks.shape[1]))
+
+        true_masks_sums = true_masks.sum((-1, -2, -3))
+        pred_masks_sums = pred_masks.sum((-1, -2, -3))
+
+        pred_masks = pred_masks.astype(np.bool)
+        true_masks = true_masks.astype(np.bool)
+
+        # Fill IoU row-wise
+        for pi in range(pred_masks.shape[1]):
+            # Intersection against all cols
+            # pandt = (pred_masks[:, pi:pi + 1] * true_masks).sum((-1, -2, -3))
+            pandt = (pred_masks[:, pi:pi + 1] & true_masks).astype(np.float).sum((-1, -2, -3))
+            # Union against all colls
+            # port = pred_masks_sums[:, pi:pi + 1] + true_masks_sums
+            port = (pred_masks[:, pi:pi + 1] | true_masks).astype(np.float).sum((-1, -2, -3))
+            iou_matrix[:, pi] = pandt / port
+            iou_matrix[pred_masks_sums[:, pi] == 0., pi] = 0.
+
+
+        for ti in range(true_masks.shape[1]):
+            iou_matrix[true_masks_sums[:, ti] == 0., :, ti] = 0.
+
+        # NaNs, Inf might come from empty masks (sums are 0, such as on empty masks)
+        # Set them to 0. as there are no intersections here and we should not reindex
+        iou_matrix = np.nan_to_num(iou_matrix, nan=0., posinf=0., neginf=0.)
+
+        ious = np.zeros(pred_masks.shape[:2])
+        pred_inds = np.zeros(pred_masks.shape[:2], dtype=int)
+        for bi in range(iou_matrix.shape[0]):
+            true_ind, pred_ind = linear_sum_assignment(iou_matrix[bi].T, maximize=True)
+            iou_matrix[bi].T[:, pred_ind].argmax(1)  # Gives which true mask is best for EACH predicted
+            ious[bi] = iou_matrix[bi].T[true_ind, pred_ind]
+            pred_inds[bi] = pred_ind
+        return ious
 
     def cpu_ari(self, label_true, label_pred):
         label_true, label_pred = label_true.flatten(), label_pred.flatten()

@@ -37,3 +37,73 @@ report.sh
 evaluate.sh
 recluster.sh
 debug.sh
+/multirun
+/outputs
+
+# Environment variables
+.env
+
+# Virtual environments
+.env/
+.venv/
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Temporary outputs
+*/tmp/
+
+# Logs
+*.log
+*/stdout
+*/log
+*/error.log
+*/stdout.log
+
+# PyCharm
+.idea/
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+cover/
+
+# Translations
+*.mo
+*.pot
+
+# IPython
+profile_default/
+ipython_config.py
+
+__pypackages__/
+.webassets-cache
+
+node_modules/
+celerybeat-schedule.db
+
+datasets/*

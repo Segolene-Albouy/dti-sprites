@@ -62,7 +62,7 @@ class _AbstractMultiObjectDataset(TorchDataset):
                 ).long()
             else:
                 label = -1
-        return inp, label, [], self.data_path / "images" / f"{idx}.png"
+        return inp, label, [], str(self.data_path / "images" / f"{idx}.png")
 
     @property
     @lru_cache()
@@ -88,6 +88,11 @@ class CLEVR6Dataset(_AbstractMultiObjectDataset):
     N = 34963
     n_classes = 7
 
+class CLEVRDataset(_AbstractMultiObjectDataset):
+    name = "clevr"
+    img_size = (128, 128)
+    N = 100000
+    n_classes = 7
 
 class TetrominoesDataset(_AbstractMultiObjectDataset):
     name = "tetrominoes"
