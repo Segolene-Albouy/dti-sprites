@@ -172,14 +172,14 @@ class Trainer(AbstractTrainer):
 
         for epoch in range(self.start_epoch, self.n_epochs + 1):
             batch_start = self.start_batch if epoch == self.start_epoch else 1
-            for batch, (images, labels, _, _) in enumerate(self.train_loader, start=1):
+            for batch, (images, labels, masks, _) in enumerate(self.train_loader, start=1):
                 if batch < batch_start:
                     continue
                 cur_iter += 1
                 if cur_iter > self.n_iterations:
                     break
 
-                self.single_train_batch_run(images, labels)
+                self.single_train_batch_run(images, labels, masks)
                 if self.scheduler_update_range == "batch":
                     self.update_scheduler(epoch, batch=batch)
 
@@ -209,14 +209,16 @@ class Trainer(AbstractTrainer):
 
         self.print_and_log_info("Training run is over")
 
-    def single_train_batch_run(self, images, labels):
+    def single_train_batch_run(self, images, labels, masks=None):
         start_time = time.time()
         B = images.size(0)
         self.model.train()
         images = images.to(self.device)
 
+        masks = masks.to(self.device) if masks else None
+
         self.optimizer.zero_grad()
-        loss, distances, probas = self.model(images)
+        loss, distances, probas = self.model(images, masks)
         loss.backward()
         self.optimizer.step()
 

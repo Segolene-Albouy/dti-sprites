@@ -5,6 +5,7 @@ import torch.nn.functional as F
 import numpy as np
 from itertools import chain
 
+from .abstract_dti import AbstractDTI
 from .transformer import PrototypeTransformationNetwork
 from .tools import copy_with_noise, create_gaussian_weights, generate_data
 from ..utils.logger import print_warning
@@ -17,7 +18,7 @@ LATENT_SIZE = 128
 EPSILON = 1e-6
 
 
-class DTIKmeans(nn.Module):
+class DTIKmeans(AbstractDTI):
     name = "dtikmeans"
 
     def __init__(self, dataset=None, n_prototypes=10, **kwargs):
@@ -186,7 +187,7 @@ class DTIKmeans(nn.Module):
         else:
             raise ValueError(f"undefined regularizer: {type}")
 
-    def forward(self, x):
+    def forward(self, x, img_masks=None):
         # is_nan_t = torch.stack([torch.isnan(p).any() for p in self.transformer.parameters()]).any()
         # is_nan_c = torch.stack([torch.isnan(p).any() for p in self.cluster_parameters()]).any()
 
@@ -212,7 +213,15 @@ class DTIKmeans(nn.Module):
             # Weight transformed sprites and sum
             if self.weighting == "tr_sprite":
                 weighted_target = (probas[..., None, None, None] * target).sum(1)
-                distances = (inp[:, 0, ...] - weighted_target) ** 2
+
+                # MARKER distances = (inp[:, 0, ...] - weighted_target) ** 2
+                distances = self.criterion(
+                    inp[:, 0, ...],
+                    weighted_target,
+                    masks=img_masks,
+                    reduction="mean"
+                )
+
                 if self.loss_weights is not None:
                     distances = distances * self.loss_weights
                 distances = distances.flatten(1).mean(1)
@@ -233,7 +242,14 @@ class DTIKmeans(nn.Module):
                 )
             # Weight differences
             elif self.weighting == "diff":
-                distances = (inp - target) ** 2
+                # MARKER distances = (inp - target) ** 2
+                distances = self.criterion(
+                    inp,
+                    target,
+                    masks=img_masks.unsqueeze(1) if img_masks else None,
+                    reduction="mean"
+                )
+
                 if self.loss_weights is not None:
                     distances = distances * self.loss_weights
                 distances = distances.flatten(2).mean(2)
@@ -249,7 +265,14 @@ class DTIKmeans(nn.Module):
 
         else:
             inp, target, features = self.transformer(x, prototypes)
-            distances = (inp - target) ** 2
+            # MARKER distances = (inp - target) ** 2
+            distances = self.criterion(
+                inp,
+                target,
+                masks=img_masks.unsqueeze(1) if img_masks else None,
+                reduction="mean"
+            )
+
             if self.loss_weights is not None:
                 distances = distances * self.loss_weights
             distances = distances.flatten(2).mean(2)

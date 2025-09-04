@@ -9,6 +9,7 @@ from torch.utils.data.dataloader import DataLoader
 import torchvision
 import torch.nn.functional as F
 
+from .abstract_dti import AbstractDTI
 from .transformer import (
     PrototypeTransformationNetwork as Transformer,
     N_HIDDEN_UNITS,
@@ -96,7 +97,7 @@ def softmax(logits, tau=1., dim=-1):
     return F.softmax(logits/tau, dim=dim)
 
 
-class DTISprites(nn.Module):
+class DTISprites(AbstractDTI):
     name = "dti_sprites"
     learn_masks = True
 
@@ -150,7 +151,8 @@ class DTISprites(nn.Module):
 
         if proto_source == "data" or freeze_frg:
             self.prototype_params = self.set_param(
-                dataset, n_sprites, proto_init, value_frg, size, self.std, freeze=freeze_frg
+                layer="frg", n_channels=n_ch
+                # dataset, n_sprites, proto_init, value_frg, size, self.std, freeze=freeze_frg
             )
 
         if proto_source == "data":
@@ -257,7 +259,8 @@ class DTISprites(nn.Module):
         if self.learn_backgrounds:
             if proto_source == "data" or freeze_bkg:
                 self.bkg_params = self.set_param(
-                    dataset, M, bkg_init, value_bkg, std=self.std, freeze=freeze_bkg
+                    layer="bkg", n_channels=n_ch
+                    # dataset, M, bkg_init, value_bkg, std=self.std, freeze=freeze_bkg
                 )
             else:
                 print_warning("Background will be generated from latent variables.")
@@ -299,7 +302,6 @@ class DTISprites(nn.Module):
         else:
             self.register_buffer("occ_grid", torch.tril(torch.ones(self.n_objects, self.n_objects), diagonal=-1))
 
-        self._criterion = nn.MSELoss(reduction="none")
         self.empty_cluster_threshold = kwargs.get(
             "empty_cluster_threshold", EMPTY_CLUSTER_THRESHOLD / n_sprites
         )
@@ -366,7 +368,6 @@ class DTISprites(nn.Module):
     #     param.requires_grad = not freeze
     #     return param
     def set_param(self, layer="frg", n_channels=None):
-        # NOTE maybe add n_channels explicitly in set_param arguments
         n_obj = self.n_sprites if layer == "frg" else self.n_bkg
         size = self.sprite_size if layer == "frg" else None
         layer_idx = FRG_IDX if layer == "frg" else BKG_IDX
@@ -1003,29 +1004,6 @@ class DTISprites(nn.Module):
                         occ_masks *= 1 - occ_grid[j, k] * masks[j]
                 res += occ_masks * masks[k] * layers[k]
             return res.view(K**L * M, B, C, H, W).transpose(0, 1)
-
-    def criterion(self, inp, target, masks=None, reduction="mean"):
-        dist = self._criterion(inp, target)
-        if masks is not None:
-            # Ignore transparent pixels if alpha channel is provided
-            masks = masks.clamp(0, 1)
-            dist = dist * masks
-
-            if reduction == "mean":
-                # normalize by valid pixels
-                valid_pixels = masks.sum(dim=(2, 3), keepdim=True)  # B x C x 1 x 1
-                valid_pixels = valid_pixels.clamp(min=1)  # prevent division by 0
-
-                loss_per_sample = dist.sum(dim=(2, 3), keepdim=True) / valid_pixels
-                return loss_per_sample.squeeze(-1).squeeze(-1)  # B x C
-
-        if reduction == "mean":
-            return dist.flatten(2).mean(2)
-        elif reduction == "sum":
-            return dist.flatten(2).sum(2)
-        elif reduction == "none":
-            return dist
-        raise NotImplementedError(f"Reduction {reduction} not supported")
 
     @torch.no_grad()
     def transform(
