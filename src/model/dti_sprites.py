@@ -1007,7 +1007,17 @@ class DTISprites(nn.Module):
     def criterion(self, inp, target, masks=None, reduction="mean"):
         dist = self._criterion(inp, target)
         if masks is not None:
+            # Ignore transparent pixels if alpha channel is provided
+            masks = masks.clamp(0, 1)
             dist = dist * masks
+
+            if reduction == "mean":
+                # normalize by valid pixels
+                valid_pixels = masks.sum(dim=(2, 3), keepdim=True)  # B x C x 1 x 1
+                valid_pixels = valid_pixels.clamp(min=1)  # prevent division by 0
+
+                loss_per_sample = dist.sum(dim=(2, 3), keepdim=True) / valid_pixels
+                return loss_per_sample.squeeze(-1).squeeze(-1)  # B x C
 
         if reduction == "mean":
             return dist.flatten(2).mean(2)
@@ -1015,8 +1025,7 @@ class DTISprites(nn.Module):
             return dist.flatten(2).sum(2)
         elif reduction == "none":
             return dist
-        else:
-            raise NotImplementedError
+        raise NotImplementedError(f"Reduction {reduction} not supported")
 
     @torch.no_grad()
     def transform(
