@@ -33,6 +33,8 @@ NOISE_SCALE = 0.0001
 EMPTY_CLUSTER_THRESHOLD = 0.2
 LATENT_SIZE = 128
 
+FRG_IDX, BKG_IDX, MSK_IDX = 0, 1, 2
+
 def softmax(logits, tau=1., dim=-1):
     return F.softmax(logits/tau, dim=dim)
 
@@ -102,23 +104,27 @@ class DTISprites(nn.Module):
         super().__init__()
         if dataset is None:
             raise NotImplementedError
-        else:
-            img_size = dataset.img_size
-            n_ch = dataset.n_channels
 
+        self.dataset = dataset
         self.count = 0
-
         self.num_epochs = n_epochs
+        self.kwargs = kwargs
+        self.n_objects = n_objects
+        self.n_sprites = n_sprites + (1 if kwargs.get("add_empty_sprite", False) else 0)
+        self.n_bkg = kwargs.get("n_backgrounds", 0)
+
+        img_size = dataset.img_size
+        n_ch = dataset.n_channels
+
         # Prototypes & masks
         size = kwargs.get("sprite_size", img_size)
         self.sprite_size = size
         self.img_size = img_size
         self.return_map_out = kwargs.get("return_map_out", False)
-        color_channels = kwargs.get("color_channels", 3)
-        self.color_channels = color_channels
-        self.add_empty_sprite = kwargs.get("add_empty_sprite", False)
+
+        self.color_channels = kwargs.get("color_channels", 3)
         self.lambda_empty_sprite = kwargs.get("lambda_empty_sprite", 0)
-        self.n_sprites = n_sprites + 1 if self.add_empty_sprite else n_sprites
+        self.add_empty_sprite = kwargs.get("add_empty_sprite", False)
 
         proto_args = kwargs.get("prototype")
         proto_source = proto_args.get("source", "data")
@@ -126,10 +132,14 @@ class DTISprites(nn.Module):
         self.proto_source = proto_source
 
         data_args = proto_args.get("data", {})
-        freeze_frg, freeze_bkg, freeze_sprite = data_args.get("freeze", [False, False, False])
-        value_frg, value_bkg, value_mask = data_args.get("value", [0.5, 0.5, 0.5])
-        std = data_args.get("gaussian_weights_std", 25)
-        proto_init, bkg_init, mask_init = data_args.get("init", ["constant", "constant", "constant"])
+        self.freeze = data_args.get("freeze", [False, False, False])
+        self.value = data_args.get("value", [0.5, 0.5, 0.5])
+        self.std = data_args.get("gaussian_weights_std", 25)
+        self.init = data_args.get("init", ["constant", "constant", "constant"])
+
+        proto_init, bkg_init, mask_init = self.init
+        value_frg, value_bkg, value_mask = self.value
+        freeze_frg, freeze_bkg, freeze_sprite = self.freeze
 
         self.freeze_frg_milestone = freeze_frg or -1
         # freeze_frg = False
@@ -140,12 +150,12 @@ class DTISprites(nn.Module):
 
         if proto_source == "data" or freeze_frg:
             self.prototype_params = self.set_param(
-                dataset, n_sprites, proto_init, value_frg, size, std, freeze=freeze_frg
+                dataset, n_sprites, proto_init, value_frg, size, self.std, freeze=freeze_frg
             )
 
         if proto_source == "data":
             self.mask_params = nn.Parameter(
-                self.init_masks(n_sprites, mask_init, size, std, value_mask, dataset)
+                self.init_masks(n_sprites, mask_init, size, self.std, value_mask, dataset)
             )
         else:
             print_warning("Sprites will be generated from latent variables.")
@@ -161,10 +171,10 @@ class DTISprites(nn.Module):
             if not freeze_frg:
                 self.frg_generator = self.init_generator(
                     gen_name,
-                    color_channels,
-                    color_channels * size[0] * size[1],
+                    self.color_channels,
+                    self.color_channels * size[0] * size[1],
                     proto_init,
-                    std=std,
+                    std=self.std,
                     value=value_frg,
                 )
 
@@ -173,7 +183,7 @@ class DTISprites(nn.Module):
                 1,
                 size[0] * size[1],
                 mask_init,
-                std=std,
+                std=self.std,
                 value=0.0,
             )
         # end MARKER
@@ -184,10 +194,8 @@ class DTISprites(nn.Module):
         self.estimate_minimum = kwargs.get("estimate_minimum", False)
         self.greedy_algo_iter = kwargs.get("greedy_algo_iter", 1)
 
-        self.freeze_milestone = 1 if freeze_sprite else -1
-        self.freeze_frg = freeze_frg
-        self.freeze_bkg = freeze_bkg
-        
+        self.freeze_milestone = int(freeze_sprite or 0) or -1
+
         # softmax_f = kwargs.get("softmax", "softmax")
 
         self.learn_tau = kwargs.get("learn_tau", False)
@@ -196,7 +204,6 @@ class DTISprites(nn.Module):
             if self.learn_tau else tau
 
         # Sprite transformers
-        self.n_objects = n_objects
         self.has_layer_tsf = kwargs.get(
             "transformation_sequence_layer", "identity"
         ) not in ["id", "identity"]
@@ -248,44 +255,35 @@ class DTISprites(nn.Module):
         self.learn_backgrounds = M > 0
         # MARKER
         if self.learn_backgrounds:
-            if proto_source == "data":
+            if proto_source == "data" or freeze_bkg:
                 self.bkg_params = self.set_param(
-                    dataset, M, bkg_init, value_bkg, std=std, freeze=freeze_bkg
+                    dataset, M, bkg_init, value_bkg, std=self.std, freeze=freeze_bkg
                 )
             else:
-                if freeze_bkg:
-                    self.bkg_params = self.set_param(
-                        dataset, M, bkg_init, value_bkg, std=std, freeze=freeze_bkg
+                print_warning("Background will be generated from latent variables.")
+                self.bkg_generator = self.init_generator(
+                    gen_name,
+                    self.color_channels,
+                    self.color_channels * img_size[0] * img_size[1],
+                    kwargs.get("init_bkg_linear", "random"),
+                    std=None,
+                    dataset=dataset,
+                    value=value_bkg,
+                )
+                self.latent_bkg_params = nn.Parameter(
+                    torch.stack(
+                        [torch.normal(mean=0.0, std=1.0, size=latent_dims) for _ in range(M)]
                     )
-                else:
-                    print_warning("Background will be generated from latent variables.")
-                    self.bkg_generator = self.init_generator(
-                        gen_name,
-                        color_channels,
-                        color_channels * img_size[0] * img_size[1],
-                        kwargs.get("init_bkg_linear", "random"),
-                        std=None,
-                        dataset=dataset,
-                        value=value_bkg,
-                    )
-                    self.latent_bkg_params = nn.Parameter(
-                        torch.stack(
-                            [
-                                torch.normal(mean=0.0, std=1.0, size=latent_dims)
-                                for k in range(M)
-                            ]
-                        )
-                    )
+                )
 
             bkg_kwargs = deepcopy(kwargs)
-            bkg_kwargs["transformation_sequence"] = kwargs[
-                "transformation_sequence_bkg"
-            ]
+            bkg_kwargs["transformation_sequence"] = kwargs["transformation_sequence_bkg"]
             bkg_kwargs["curriculum_learning"] = kwargs["curriculum_learning_bkg"]
             bkg_kwargs["padding_mode"] = "border"
             self.bkg_transformer = Transformer(
                 n_ch, img_size, M, encoder=self.encoder, **bkg_kwargs
             )
+
         # end MARKER
 
         # Image composition and aux
@@ -356,16 +354,37 @@ class DTISprites(nn.Module):
             raise NotImplementedError(f"unknown mask_init: {mask_init}")
         return masks
 
-    @staticmethod
-    def set_param(dataset, n_sprites, init_type, value_param, size=None, std=25, freeze=False):
+    # @staticmethod
+    # def set_param(dataset, n_sprites, init_type, value_param, size=None, std=25, freeze=False):
+    #     # NOTE maybe add n_channels explicitly in set_param arguments
+    #     n_channels = 1 if freeze else None # when None, n_channels deduced from dataset inside generate_data
+    #     param = nn.Parameter(
+    #         torch.stack(
+    #             generate_data(dataset, n_sprites, init_type=init_type, value=value_param, size=size, std=std, n_channels=n_channels)
+    #         )
+    #     )
+    #     param.requires_grad = not freeze
+    #     return param
+    def set_param(self, layer="frg", n_channels=None):
         # NOTE maybe add n_channels explicitly in set_param arguments
-        n_channels = 1 if freeze else None # when None, n_channels deduced from dataset inside generate_data
+        n_obj = self.n_sprites if layer == "frg" else self.n_bkg
+        size = self.sprite_size if layer == "frg" else None
+        layer_idx = FRG_IDX if layer == "frg" else BKG_IDX
+        n_channels = n_channels or (1 if self.freeze[layer_idx] else None)  # when None, n_channels deduced from dataset inside generate_data
         param = nn.Parameter(
             torch.stack(
-                generate_data(dataset, n_sprites, init_type=init_type, value=value_param, size=size, std=std, n_channels=n_channels)
+                generate_data(
+                    self.dataset,
+                    n_obj,
+                    init_type=self.init[layer_idx],
+                    value=self.value[layer_idx],
+                    size=size,
+                    std=self.std,
+                    n_channels=n_channels
+                )
             )
         )
-        param.requires_grad = not freeze
+        param.requires_grad = not self.freeze[layer_idx]
         return param
 
 
@@ -406,81 +425,82 @@ class DTISprites(nn.Module):
     def n_prototypes(self):
         return self.n_sprites
 
-    def learn_layer(self, layer="bkg", src="data", gen_name="mlp", freeze=False):
-        pass
-        # gen_name = proto_args.get("generator", "mlp")
-        # latent_dims = (LATENT_SIZE,) if gen_name == "mlp" else (1, size[0], size[1])
-        #
-        # if proto_source == "data" or freeze_frg:
-        #     self.prototype_params = self.set_param(
-        #         dataset, n_sprites, proto_init, value_frg, size, std, freeze=freeze_frg
-        #     )
-        #
-        # if proto_source == "data":
-        #     self.mask_params = nn.Parameter(
-        #         self.init_masks(n_sprites, mask_init, size, std, value_mask, dataset)
-        #     )
-        # else:
-        #     print_warning("Sprites will be generated from latent variables.")
-        #     # gen_name = proto_args.get("generator", "mlp")
-        #     assert gen_name in ["mlp", "unet"]
-        #
-        #     # latent_dims = (LATENT_SIZE,) if gen_name == "mlp" else (1, size[0], size[1])
-        #     self.latent_params = nn.Parameter(
-        #         torch.stack(
-        #             [torch.normal(mean=0.0, std=1.0, size=latent_dims) for _ in range(n_sprites)],
-        #             dim=0,
-        #         )
-        #     )
-        #
-        #     if not freeze_frg:
-        #         self.frg_generator = self.init_generator(
-        #             gen_name,
-        #             color_channels,
-        #             color_channels * size[0] * size[1],
-        #             proto_init,
-        #             std=std,
-        #             value=value_frg,
-        #         )
-        #
-        #     self.mask_generator = self.init_generator(
-        #         gen_name,
-        #         1,
-        #         size[0] * size[1],
-        #         mask_init,
-        #         std=std,
-        #         value=0.0,
-        #     )
-        #
-        # # MARKER
-        # if proto_source == "data":
-        #     self.bkg_params = self.set_param(
-        #         dataset, M, bkg_init, value_bkg, std=std, freeze=freeze_bkg
-        #     )
-        # else:
-        #     if freeze_bkg:
-        #         self.bkg_params = self.set_param(
-        #             dataset, M, bkg_init, value_bkg, std=std, freeze=freeze_bkg
-        #         )
-        #     else:
-        #         print_warning("Background will be generated from latent variables.")
-        #         self.bkg_generator = self.init_generator(
-        #             gen_name,
-        #             color_channels,
-        #             color_channels * img_size[0] * img_size[1],
-        #             kwargs.get("init_bkg_linear", "random"),
-        #             std=None,
-        #             dataset=dataset,
-        #             value=value_bkg,
-        #         )
-        #         self.latent_bkg_params = nn.Parameter(
-        #             torch.stack(
-        #                 [
-        #                     torch.normal(mean=0.0, std=1.0, size=latent_dims)
-        #                     for k in range(M)
-        #                 ]
-        #             )
-        #         )
+    def learn_layer(self, layer="bkg", channels=1):
+        # MARKER
+        size = self.sprite_size
+        gen_name = self.kwargs.get("prototype", {}).get("generator", "mlp")
+        latent_dims = (LATENT_SIZE,) if gen_name == "mlp" else (1, size[0], size[1])
+
+        if layer == "bkg":
+            if self.proto_source == "data" or self.freeze[BKG_IDX]:
+                # self.bkg_params = self.set_param(
+                #     self.dataset, self.n_bkg, self.init[BKG_IDX], self.value[BKG_IDX], std=self.std, freeze=self.freeze[BKG_IDX]
+                # )
+                self.bkg_params = self.set_param(layer="bkg", n_channels=channels)
+            else:
+                print_warning("Background will be generated from latent variables.")
+                self.bkg_generator = self.init_generator(
+                    gen_name,
+                    channels,
+                    channels * self.img_size[0] * self.img_size[1],
+                    self.kwargs.get("init_bkg_linear", "random"),
+                    std=None,
+                    dataset=self.dataset,
+                    value=self.value[BKG_IDX],
+                )
+                self.latent_bkg_params = nn.Parameter(
+                    torch.stack(
+                        [torch.normal(mean=0.0, std=1.0, size=latent_dims) for _ in range(self.n_bkg)]
+                    )
+                )
+
+            bkg_kwargs = deepcopy(self.kwargs)
+            bkg_kwargs["transformation_sequence"] = self.kwargs["transformation_sequence_bkg"]
+            bkg_kwargs["curriculum_learning"] = self.kwargs["curriculum_learning_bkg"]
+            bkg_kwargs["padding_mode"] = "border"
+            self.bkg_transformer = Transformer(
+                self.dataset.n_channels, self.img_size, self.n_bkg, encoder=self.encoder, **bkg_kwargs
+            )
+        elif layer == "sprite":
+            if self.proto_source == "data" or self.freeze[FRG_IDX]:
+                # self.prototype_params = self.set_param(
+                #     self.dataset, self.n_sprites, self.init[FRG_IDX], self.value[FRG_IDX], self.sprite_size, self.std, freeze=self.freeze[FRG_IDX]
+                # )
+                self.prototype_params = self.set_param(layer="frg", n_channels=channels)
+
+            if self.proto_source == "data":
+                self.mask_params = nn.Parameter(
+                    self.init_masks(self.n_sprites, self.init[MSK_IDX], self.sprite_size, self.std, self.value[MSK_IDX], self.dataset)
+                )
+            else:
+                print_warning("Sprites will be generated from latent variables.")
+                assert gen_name in ["mlp", "unet"]
+
+                self.latent_params = nn.Parameter(
+                    torch.stack(
+                        [torch.normal(mean=0.0, std=1.0, size=latent_dims) for _ in range(self.n_sprites)],
+                        dim=0,
+                    )
+                )
+
+                if not self.freeze[FRG_IDX]:
+                    self.frg_generator = self.init_generator(
+                        gen_name,
+                        channels,
+                        channels * self.sprite_size[0] * self.sprite_size[1],
+                        self.init[FRG_IDX],
+                        std=self.std,
+                        value=self.value[FRG_IDX],
+                    )
+
+                self.mask_generator = self.init_generator(
+                    gen_name,
+                    1,
+                    self.sprite_size[0] * self.sprite_size[1],
+                    self.init[MSK_IDX],
+                    std=self.std,
+                    value=0.0,
+                )
 
     @property
     def transformer_is_identity(self):
@@ -519,7 +539,7 @@ class DTISprites(nn.Module):
     def prototypes(self):
         params = self.prototype_params
 
-        if not self.freeze_frg and self.proto_source != "data":
+        if not self.freeze[FRG_IDX] and self.proto_source != "data":
             with torch.no_grad():
                 params = self.frg_generator(self.latent_params)
                 if len(params.size()) != 4:
@@ -541,7 +561,7 @@ class DTISprites(nn.Module):
     def backgrounds(self):
         params = self.bkg_params
 
-        if not self.freeze_bkg and self.proto_source != "data":
+        if not self.freeze[BKG_IDX] and self.proto_source != "data":
             with torch.no_grad():
                 params = self.bkg_generator(self.latent_bkg_params)
                 if len(params.size()) != 4:
@@ -573,9 +593,9 @@ class DTISprites(nn.Module):
             params = list(chain(*[self.mask_generator.parameters()])) + [
                 self.latent_params
             ]
-            if not self.freeze_frg:
+            if not self.freeze[FRG_IDX]:
                 params.extend(list(chain(*[self.frg_generator.parameters()])))
-            if self.learn_backgrounds and not self.freeze_bkg:
+            if self.learn_backgrounds and not self.freeze[BKG_IDX]:
                 params.append(self.latent_bkg_params)
                 params.extend(list(chain(*[self.bkg_generator.parameters()])))
         if self.estimate_proba:
@@ -660,13 +680,14 @@ class DTISprites(nn.Module):
             x = x.expand(-1, K**L * M, -1, -1, -1)
             if img_masks is not None:
                 img_masks = img_masks.expand(-1, K ** L * M, -1, -1, -1)
-            distances = self.criterion(x, target, weights=img_masks)
+            distances = self.criterion(x, target, masks=img_masks)
             loss_r = distances.min(1)[0].mean()
             loss = (loss_r, loss_r, torch.Tensor([0.0]), torch.Tensor([0.0]))
 
         else:
             # target = BCHW
-            loss_r = self.criterion(x, target.unsqueeze(1), weights=img_masks).mean()
+            distances = self.criterion(x, target.unsqueeze(1), masks=img_masks)
+            loss_r = distances.mean()
             loss_bin, loss_freq = torch.Tensor([0.0]), torch.Tensor([0.0])
             loss_all = loss_r
             class_oh = class_prob
@@ -701,14 +722,14 @@ class DTISprites(nn.Module):
         if hasattr(self, "mask_generator"):
             masks = self.mask_generator(self.latent_params)
             masks = masks.reshape(-1, 1, self.sprite_size[0], self.sprite_size[1])
-            if self.freeze_frg:
+            if self.freeze[FRG_IDX]:
                 prototypes = self.prototypes
             else:
                 prototypes = self.frg_generator(self.latent_params).reshape(
                     -1, self.color_channels, self.sprite_size[0], self.sprite_size[1]
                 )
             if self.add_empty_sprite:
-                if not self.freeze_frg:
+                if not self.freeze[FRG_IDX]:
                     prototypes = torch.cat(
                         [
                             prototypes,
@@ -768,7 +789,7 @@ class DTISprites(nn.Module):
 
         if self.learn_backgrounds:
             if hasattr(self, "mask_generator"):
-                if not self.freeze_bkg:
+                if not self.freeze[BKG_IDX]:
                     backgrounds = self.bkg_generator(self.latent_bkg_params).reshape(
                         -1, self.color_channels, self.img_size[0], self.img_size[1]
                     )
@@ -983,10 +1004,11 @@ class DTISprites(nn.Module):
                 res += occ_masks * masks[k] * layers[k]
             return res.view(K**L * M, B, C, H, W).transpose(0, 1)
 
-    def criterion(self, inp, target, weights=None, reduction="mean"):
+    def criterion(self, inp, target, masks=None, reduction="mean"):
         dist = self._criterion(inp, target)
-        if weights is not None:
-            dist = dist * weights
+        if masks is not None:
+            dist = dist * masks
+
         if reduction == "mean":
             return dist.flatten(2).mean(2)
         elif reduction == "sum":
@@ -1093,7 +1115,7 @@ class DTISprites(nn.Module):
             self.bkg_transformer.step()
         if hasattr(self, "proba") and self.curr_bin_weight < self.bin_weight:
             if not self.are_sprite_frozen:
-                self.curr_bin_weight = self.start_bin_weight + (self.bin_weight - self.start_bin_weight) * ((self.cur_epoch-self.freeze_milestone) / 40)
+                self.curr_bin_weight = self.start_bin_weight + (self.bin_weight - self.start_bin_weight) * ((self.cur_epoch - self.freeze_milestone) / 40)
                 print(f"Updating bin weight to {self.curr_bin_weight}")
         # if hasattr(self, "proba") and self.cur_epoch == 25:
         #    self.curr_bin_weight = 0.01
@@ -1158,7 +1180,7 @@ class DTISprites(nn.Module):
         else:
             self.mask_params[i].data.copy_(self.mask_params[j].detach().clone())
             params = [self.mask_params]
-            if not self.freeze_frg:
+            if not self.freeze[FRG_IDX]:
                 self.prototype_params[i].data.copy_(
                     copy_with_noise(self.prototype_params[j], NOISE_SCALE)
                 )

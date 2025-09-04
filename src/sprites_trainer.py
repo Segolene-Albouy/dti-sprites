@@ -278,15 +278,16 @@ class Trainer(AbstractTrainer):
         self.evaluate()
         self.print_and_log_info("Training run is over")
 
-    def single_train_batch_run(self, images, masks):
+    def single_train_batch_run(self, images, masks=None):
         start_time = time.time()
         B = images.size(0)
         self.model.train()
         images = images.to(self.device)
-        if masks != []:
-            masks = masks.to(self.device)
-        else:
-            masks = None
+        # if masks != []:
+        #     masks = masks.to(self.device)
+        # else:
+        #     masks = None
+        masks = masks.to(self.device) if masks else None
         self.optimizer.zero_grad()
 
         loss, distances, class_prob = self.model(images, masks)

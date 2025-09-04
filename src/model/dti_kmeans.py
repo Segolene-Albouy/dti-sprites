@@ -60,7 +60,6 @@ class DTIKmeans(nn.Module):
             )
             self.generator = self.init_generator(
                 gen_name,
-                LATENT_SIZE,
                 self.color_channels,
                 self.color_channels * self.img_size[0] * self.img_size[1],
             )
@@ -134,7 +133,7 @@ class DTIKmeans(nn.Module):
         return self.transformer.parameters()
 
     @staticmethod
-    def init_generator(name, latent_dim, color_channel, out_channel):
+    def init_generator(name, color_channel, out_channel, latent_dim=LATENT_SIZE):
         if name == "unet":
             return UNet(1, color_channel)
         elif name == "mlp":
