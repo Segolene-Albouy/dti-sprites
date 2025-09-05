@@ -215,7 +215,7 @@ class Trainer(AbstractTrainer):
         self.model.train()
         images = images.to(self.device)
 
-        masks = masks.to(self.device) if masks else None
+        masks = masks.to(self.device) if masks != [] else None
 
         self.optimizer.zero_grad()
         loss, distances, probas = self.model(images, masks)

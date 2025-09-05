@@ -135,7 +135,7 @@ class DTISprites(AbstractDTI):
         self.value = data_args.get("value", [0.5, 0.5, 0.5])
         self.init = data_args.get("init", ["constant", "constant", "constant"])
         # n_obj contains = [layers, backgrounds, sprites]
-        self.n_obj = [self.n_objects, self.n_backgrounds, self.n_sprites]
+        self.n_obj = [self.n_objects, self.n_bkg, self.n_sprites]
         self.std = data_args.get("gaussian_weights_std", 25)
 
         self.freeze_frg_milestone = self.freeze[FRG_IDX] or -1
