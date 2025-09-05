@@ -25,11 +25,11 @@ class AbstractDTI(nn.Module, ABC):
         """
         pass
 
-    def criterion(self, inp, target, masks=None, reduction="mean"):
+    def criterion(self, inp, target, alpha_masks=None, reduction="mean"):
         dist = self._criterion(inp, target)
 
-        if masks is not None:
-            masks = masks.clamp(0, 1)
+        if alpha_masks is not None:
+            masks = alpha_masks.clamp(0, 1)
             dist = dist * masks
 
             if reduction == "mean":

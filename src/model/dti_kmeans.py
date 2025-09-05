@@ -213,10 +213,10 @@ class DTIKmeans(AbstractDTI):
             if self.weighting == "tr_sprite":
                 # Weight transformed sprites and sum
                 weighted_target = (probas[..., None, None, None] * target).sum(1)
-                distances = self.criterion(inp[:, 0, ...], weighted_target, masks=img_masks)
+                distances = self.criterion(inp[:, 0, ...], weighted_target, alpha_masks=img_masks)
 
                 # Distances of input from transformed sprites
-                samplewise_distances = self.criterion(inp, target, masks=img_masks)
+                samplewise_distances = self.criterion(inp, target, alpha_masks=img_masks)
 
                 bin_loss = self.reg_func(probas, type="bin")
                 a = distances.mean()
@@ -230,7 +230,7 @@ class DTIKmeans(AbstractDTI):
                 )
 
             elif self.weighting == "diff":
-                distances = self.criterion(inp, target, masks=img_masks)
+                distances = self.criterion(inp, target, alpha_masks=img_masks)
                 dist_min = (distances * probas).sum(1)
 
                 return (
@@ -242,7 +242,7 @@ class DTIKmeans(AbstractDTI):
 
         # no proba
         inp, target, features = self.transformer(x, prototypes)
-        distances = self.criterion(inp, target, masks=img_masks)
+        distances = self.criterion(inp, target, alpha_masks=img_masks)
         dist_min = distances.min(1)[0]
         return dist_min.mean(), distances, None
 
