@@ -52,6 +52,30 @@ def unify_channels(x, target_channels):
     ])
 
 
+def normalize_values(data, target_min=0.1, target_max=0.9, min_range_threshold=0.1):
+    """
+    Normalize tensor values to a given range [target_min, target_max].
+    In order to improve contrast and avoid aberrations
+    """
+    data = data.detach()
+
+    data_min, data_max = data.min(), data.max()
+    data_range = data_max - data_min
+
+    if data_range > min_range_threshold:
+        if data_min < 0 or data_max > 1:
+            data = (data - data_min) / (data_range + 1e-8)
+    else:
+        if data_range > 1e-6:
+            data = (data - data_min) / (data_range + 1e-8)
+            data = data * (target_max - target_min) + target_min
+        else:
+            # all values are the same, set to mid-range
+            data = torch.full_like(data, (target_min + target_max) / 2)
+
+    return data
+
+
 def convert_to_img(arr):
     if isinstance(arr, torch.Tensor):
         if len(arr.shape) == 4:

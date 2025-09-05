@@ -349,9 +349,7 @@ class Trainer(AbstractTrainer):
     def save_transformed_images(self, cur_iter=None):
         self.model.eval()
         if self.learn_masks:
-            output, compositions, _ = self.model.transform(
-                self.images_to_tsf, with_composition=True
-            )
+            output, compositions, _ = self.model.transform(self.images_to_tsf, with_composition=True)
         else:
             output, compositions = self.model.transform(self.images_to_tsf), []
 

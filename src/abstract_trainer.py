@@ -26,7 +26,7 @@ try:
 except ModuleNotFoundError:
     pass
 
-from .utils.image import convert_to_img, save_gif
+from .utils.image import convert_to_img, save_gif, normalize_values
 from .utils.logger import print_info, get_logger
 from .utils.consts import *
 
@@ -476,7 +476,8 @@ class AbstractTrainer(ABC):
                 data = preds[k]
                 if transform_fn:
                     data = transform_fn(data, k)
-                img = convert_to_img(data)
+
+                img = convert_to_img(normalize_values(data))
 
                 if cur_iter is not None:
                     img.save(pred_path / f"{prefix}{k}" / f"{cur_iter}.jpg")
