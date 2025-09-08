@@ -463,7 +463,7 @@ class AbstractTrainer(ABC):
         self.print_and_log_info(f"Model saved at {save_path}")
 
     @torch.no_grad()
-    def save_pred(self, cur_iter=None, pred_name="prototype", prefix=None, transform_fn=None, n_preds=None, normalize_contrast=False):
+    def save_pred(self, cur_iter=None, pred_name="prototype", prefix=None, transform_fn=None, n_preds=None):
         prefix = prefix or pred_name
         pred_names = f"{pred_name}s"
 
@@ -477,9 +477,6 @@ class AbstractTrainer(ABC):
                 if transform_fn:
                     data = transform_fn(data, k)
 
-                if normalize_contrast:
-                    data = normalize_values(data)
-
                 img = convert_to_img(data)
 
                 if cur_iter is not None:
@@ -490,8 +487,9 @@ class AbstractTrainer(ABC):
         except AttributeError as e:
             self.print_and_log_info(f"Warning: Could not save {pred_names}: {e}")
 
-    def save_prototypes(self, cur_iter=None, normalize_contrast=False):
-        self.save_pred(cur_iter, pred_name="prototype", prefix="proto", normalize_contrast=normalize_contrast)
+    def save_prototypes(self, cur_iter=None, normalize_contrast=True):
+        tsf = (lambda proto, k: normalize_values(proto)) if normalize_contrast else None
+        self.save_pred(cur_iter, pred_name="prototype", prefix="proto", transform_fn=tsf)
 
     @abstractmethod
     def save_transformed_images(self, cur_iter=None):
