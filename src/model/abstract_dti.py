@@ -35,15 +35,11 @@ class AbstractDTI(nn.Module, ABC):
             if reduction == "mean":
                 visible_pixels = masks.sum(dim=(-2, -1), keepdim=True).clamp(min=1)
                 return (dist.sum(dim=(-2, -1), keepdim=True) / visible_pixels).squeeze(-1).squeeze(-1)
-            elif reduction == "sum":
-                return dist.sum(dim=(-2, -1))
-            elif reduction == "none":
-                return dist
 
         if reduction == "mean":
-            return dist.flatten(-2).mean(-1)
+            return dist.mean(dim=(-2, -1))
         elif reduction == "sum":
-            return dist.flatten(-2).sum(-1)
+            return dist.sum(dim=(-2, -1))
         elif reduction == "none":
             return dist
 
