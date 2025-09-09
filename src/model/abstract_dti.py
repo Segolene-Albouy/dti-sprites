@@ -30,6 +30,9 @@ class AbstractDTI(nn.Module, ABC):
 
         if alpha_masks is not None:
             masks = alpha_masks.clamp(0, 1)
+            if masks.shape != dist.shape:
+                masks = masks.expand_as(dist)
+
             dist = dist * masks
 
             if reduction == "mean":

@@ -351,25 +351,6 @@ class DTISprites(AbstractDTI):
             raise NotImplementedError(f"Unknown initialisation: {init}")
         return masks
 
-    # @staticmethod
-    # def set_param(dataset, n_sprites, init_type, value_param, size=None, std=25, freeze=False):
-    #     # NOTE maybe add n_channels explicitly in set_param arguments
-    #     n_channels = 1 if freeze else None # when None, n_channels deduced from dataset inside generate_data
-    #     param = nn.Parameter(
-    #         torch.stack(
-    #             generate_data(
-    #               dataset,
-    #               n_sprites,
-    #               init_type=init_type,
-    #               value=value_param,
-    #               size=size,
-    #               std=std,
-    #               n_channels=n_channels
-    #            )
-    #         )
-    #     )
-    #     param.requires_grad = not freeze
-    #     return param
     def set_param(self, layer="frg", n_channels=None):
         layer_idx = FRG_IDX if layer == "frg" else BKG_IDX
         n_obj = self.n_sprites if layer == "frg" else self.n_bkg
@@ -676,8 +657,8 @@ class DTISprites(AbstractDTI):
             # target = B(K**L*M)CHW
             L, K, M = self.n_objects, self.n_sprites, self.n_backgrounds or 1
             x = x.expand(-1, K**L * M, -1, -1, -1)
-            if img_masks is not None:
-                img_masks = img_masks.expand(-1, K ** L * M, -1, -1, -1)
+            # if img_masks is not None:
+            #     img_masks = img_masks.expand(-1, K ** L * M, -1, -1, -1)
             distances = self.criterion(x, target, alpha_masks=img_masks)
             loss_r = distances.min(1)[0].mean()
             loss = (loss_r, loss_r, torch.Tensor([0.0]), torch.Tensor([0.0]))
