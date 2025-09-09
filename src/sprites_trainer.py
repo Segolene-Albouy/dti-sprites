@@ -24,7 +24,7 @@ from .optimizer import get_optimizer
 from .utils import (
     use_seed,
     coerce_to_path_and_check_exist,
-    coerce_to_path_and_create_dir, get_attr,
+    coerce_to_path_and_create_dir,
 )
 from .utils.image import convert_to_img, save_gif
 from .utils.logger import print_warning
