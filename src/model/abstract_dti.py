@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 from abc import ABC, abstractmethod
 
@@ -47,3 +48,29 @@ class AbstractDTI(nn.Module, ABC):
             return dist
 
         raise NotImplementedError(f"Reduction {reduction} not supported")
+
+    def reassign_empty_clusters(self, proportions):
+        if not self._reassign_cluster  or getattr(self, "are_sprite_frozen", False):
+            return [], 0
+
+        if self.n_prototypes == 1:
+            return [], 0
+
+        if getattr(self, "add_empty_sprite", False):
+            proportions = proportions[:-1] / max(proportions[:-1])
+
+        if not isinstance(proportions, torch.Tensor):
+            proportions = torch.tensor(proportions, device=next(self.parameters()).device)
+
+        n_proto = len(proportions) # self.n_prototypes
+
+        idx = torch.argmax(proportions).item()
+        reassigned = []
+        for i in range(n_proto):
+            if proportions[i] < self.empty_cluster_threshold:
+                self.restart_branch_from(i, idx)
+                reassigned.append(i)
+
+        if len(reassigned) > 0:
+            self.restart_branch_from(idx, idx)
+        return reassigned, idx

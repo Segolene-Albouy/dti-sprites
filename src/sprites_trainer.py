@@ -26,7 +26,7 @@ from .utils import (
     coerce_to_path_and_check_exist,
     coerce_to_path_and_create_dir,
 )
-from .utils.image import convert_to_img, save_gif
+from .utils.image import convert_to_img
 from .utils.logger import print_warning
 from .utils.metrics import (
     AverageTensorMeter,

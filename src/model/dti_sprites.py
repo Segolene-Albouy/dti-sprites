@@ -1117,25 +1117,6 @@ class DTISprites(AbstractDTI):
         if len(unloaded_params) > 0:
             print_warning(f"load_state_dict: {unloaded_params} not found")
 
-    def reassign_empty_clusters(self, proportions):
-        if not self._reassign_cluster or self.are_sprite_frozen:
-            return [], 0
-        if self.add_empty_sprite:
-            proportions = proportions[:-1] / max(proportions[:-1])
-
-        N, threshold = len(proportions), self.empty_cluster_threshold
-        reassigned = []
-        idx = torch.argmax(proportions).item()
-        for i in range(N):
-            if proportions[i] < threshold:
-                self.restart_branch_from(i, idx)
-                reassigned.append(i)
-                # break  # if one cluster is split, stop reassigning
-        if len(reassigned) > 0:
-            self.restart_branch_from(idx, idx)
-
-        return reassigned, idx
-
     def restart_branch_from(self, i, j):
         if hasattr(self, "mask_generator"):
             self.latent_params[i].data.copy_(

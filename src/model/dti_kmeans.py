@@ -275,20 +275,6 @@ class DTIKmeans(AbstractDTI):
         if len(unloaded_params) > 0:
             print_warning(f"load_state_dict: {unloaded_params} not found")
 
-    def reassign_empty_clusters(self, proportions):
-        if not self._reassign_cluster:
-            return [], 0
-        idx = np.argmax(proportions)
-        reassigned = []
-        for i in range(self.n_prototypes):
-            if proportions[i] < self.empty_cluster_threshold:
-                self.restart_branch_from(i, idx)
-                reassigned.append(i)
-        # to add noise to reassigned class with max number of samples
-        if len(reassigned) > 0:
-            self.restart_branch_from(idx, idx)
-        return reassigned, idx
-
     def restart_branch_from(self, i, j):
         if hasattr(self, "generator"):
             self.latent_params[i].data.copy_(
