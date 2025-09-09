@@ -24,7 +24,7 @@ from .optimizer import get_optimizer
 from .utils import (
     use_seed,
     coerce_to_path_and_check_exist,
-    coerce_to_path_and_create_dir,
+    coerce_to_path_and_create_dir, get_attr,
 )
 from .utils.image import convert_to_img, save_gif
 from .utils.logger import print_warning
@@ -226,6 +226,29 @@ class Trainer(AbstractTrainer):
         )
         self.print_and_log_info("LR = {}".format(self.cur_lr))
 
+    def compute_cluster_assignments(self, dist, class_prob, batch_size):
+        """
+        Generate cluster mask from model output.
+        """
+        if getattr(self, "learn_proba", False) and class_prob is not None:
+            class_oh = torch.zeros(class_prob.shape, device=class_prob.device).scatter_(
+                1, class_prob.argmax(1, keepdim=True), 1
+            )
+            one_hot_mask = class_oh.permute(2, 0, 1).flatten(1)  # B(L*K)
+            props = one_hot_mask.mean(0)
+            # argmin_idx = class_oh.permute(2, 0, 1).flatten(1).argmax(1)
+            return None, None, props # we do not use mask and arg_min_idx in sprites trainer single_batch_run
+
+        # distances B(L*K), discovery
+        if getattr(self, "pred_class", False) and dist is not None:
+            props = (1 - dist).mean(0)
+            # argmin_idx = torch.zeros(batch_size, dtype=torch.long, device=self.device)
+            # mask = torch.ones(batch_size, dist.size(1), device=self.device)
+            return None, None, props # we do not use mask and arg_min_idx in sprites trainer single_batch_run
+
+        # distances B(K**L*M), clustering
+        return super().compute_cluster_assignments(dist, class_prob, batch_size)
+
     @use_seed()
     def run(self):
         cur_iter = (self.start_epoch - 1) * self.n_batches + self.start_batch - 1
@@ -291,21 +314,7 @@ class Trainer(AbstractTrainer):
         self.optimizer.step()
 
         with torch.no_grad():
-            if self.learn_proba:
-                class_oh = torch.zeros(class_prob.shape, device=class_prob.device).scatter_(
-                    1, class_prob.argmax(1, keepdim=True), 1
-                )
-                one_hot = class_oh.permute(2, 0, 1).flatten(1)  # B(L*K)
-                proportions = one_hot.mean(0)
-            else:
-                if self.pred_class:  # distances B(L*K), discovery
-                    proportions = (1 - distances).mean(0)
-                else:  # distances B(K**L*M), clustering
-                    argmin_idx = distances.argmin(1)
-                    one_hot = torch.zeros(
-                        B, distances.size(1), device=self.device
-                    ).scatter(1, argmin_idx[:, None], 1)
-                    proportions = one_hot.sum(0) / B
+            _, _, proportions = self.compute_cluster_assignments(distances, class_prob, B)
 
         self.train_metrics.update(
             {

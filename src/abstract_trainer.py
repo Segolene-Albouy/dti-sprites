@@ -364,55 +364,55 @@ class AbstractTrainer(ABC):
     #    MAIN METHODS    #
     ######################
 
-    @abstractmethod
-    def run(self):
-        # """Main training loop with defined sequence of operations"""
-        # self._setup()
-        #
-        # for epoch in range(self.start_epoch, self.n_epochs + 1):
-        #     self._run_epoch(epoch)
-        #
-        # self._finalize()
-        # return self.results
-        pass
-
-    def _run_epoch(self, epoch):
-        """Run a single epoch"""
-        # self._before_epoch(epoch)
-        #
-        # for batch_idx, batch_data in enumerate(self.train_loader):
-        #     self._process_batch(batch_idx, batch_data, is_training=True)
-        #
-        #     if self._should_validate(batch_idx):
-        #         self._validate()
-        #
-        # self._after_epoch(epoch)
-        pass
-
-    def _before_epoch(self, epoch):
-        """Hook called before each epoch"""
-        # self.model.train()
-        # self._log_info(f"Starting epoch {epoch}/{self.n_epochs}")
-        pass
-
-    def _process_batch(self, batch_idx, batch_data, is_training):
-        # raise NotImplementedError
-        pass
-
-    def _after_epoch(self, epoch):
-        # """Hook called after each epoch"""
-        # if self.scheduler and self.scheduler_update_range == "epoch":
-        #     self.scheduler.step()
-        #
-        # # Default implementation can be overridden
-        # self._save_checkpoint(epoch)
-        pass
-
-    def _finalize(self):
-        # """Finalize training and save model"""
-        # self._save_checkpoint(self.n_epochs)
-        # self.logger.info("Training finished.")
-        pass
+    # @abstractmethod
+    # def run(self):
+    #     # """Main training loop with defined sequence of operations"""
+    #     # self._setup()
+    #     #
+    #     # for epoch in range(self.start_epoch, self.n_epochs + 1):
+    #     #     self._run_epoch(epoch)
+    #     #
+    #     # self._finalize()
+    #     # return self.results
+    #     pass
+    #
+    # def _run_epoch(self, epoch):
+    #     """Run a single epoch"""
+    #     # self._before_epoch(epoch)
+    #     #
+    #     # for batch_idx, batch_data in enumerate(self.train_loader):
+    #     #     self._process_batch(batch_idx, batch_data, is_training=True)
+    #     #
+    #     #     if self._should_validate(batch_idx):
+    #     #         self._validate()
+    #     #
+    #     # self._after_epoch(epoch)
+    #     pass
+    #
+    # def _before_epoch(self, epoch):
+    #     """Hook called before each epoch"""
+    #     # self.model.train()
+    #     # self._log_info(f"Starting epoch {epoch}/{self.n_epochs}")
+    #     pass
+    #
+    # def _process_batch(self, batch_idx, batch_data, is_training):
+    #     # raise NotImplementedError
+    #     pass
+    #
+    # def _after_epoch(self, epoch):
+    #     # """Hook called after each epoch"""
+    #     # if self.scheduler and self.scheduler_update_range == "epoch":
+    #     #     self.scheduler.step()
+    #     #
+    #     # # Default implementation can be overridden
+    #     # self._save_checkpoint(epoch)
+    #     pass
+    #
+    # def _finalize(self):
+    #     # """Finalize training and save model"""
+    #     # self._save_checkpoint(self.n_epochs)
+    #     # self.logger.info("Training finished.")
+    #     pass
 
     @abstractmethod
     def load_from_tag(self, tag, resume=False):
@@ -438,6 +438,42 @@ class AbstractTrainer(ABC):
     def run_val(self):
         """Run validation process"""
         raise NotImplementedError
+
+    def compute_cluster_assignments(self, dist, proba, batch_size):
+        """
+        Generate cluster mask from model output.
+
+        Args:
+            dist: distances
+            proba: probas/class_prob
+            batch_size: Batch size (B)
+
+        Returns:
+            mask: Tensor of shape (B, n_proto) with one-hot cluster assignments
+            argmin_idx: Tensor of shape (B,) with cluster indices
+            props: Tensor of shape (n_proto,) with cluster props
+        """
+
+        if self.n_prototypes == 1:
+            # all samples assigned to cluster 0
+            mask = torch.ones(batch_size, 1, device=self.device)
+            argmin_idx = torch.zeros(batch_size, dtype=torch.long, device=self.device)
+            props = torch.ones(1, device=self.device)
+            return mask, argmin_idx, props
+
+        if hasattr(self.model, "proba") and proba is not None:
+            argmin_idx = proba.argmax(1)  # Shape: (B,)
+        else:
+            argmin_idx = dist.min(1)[1]  # Shape: (B,)
+
+        mask_size = dist.size(1) if dist is not None else self.n_prototypes
+        mask = torch.zeros(batch_size, mask_size, device=self.device)
+        mask.scatter_(1, argmin_idx.unsqueeze(1), 1)
+
+        # compute prop of samples that belong to each cluster
+        props = mask.sum(0) / batch_size
+
+        return mask, argmin_idx, props
 
     ######################
     #   SAVING METHODS   #

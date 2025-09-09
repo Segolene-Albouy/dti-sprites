@@ -226,13 +226,7 @@ class Trainer(AbstractTrainer):
             self.sprite_optimizer.step()
 
         with torch.no_grad():
-            if hasattr(self.model, "proba"):
-                argmin_idx = probas.argmax(1)  # probas: B, K
-            else:
-                argmin_idx = distances.min(1)[1]
-            mask = torch.zeros(B, self.n_prototypes, device=self.device).scatter(
-                1, argmin_idx[:, None], 1
-            )
+            mask, argmin_idx, proportions = self.compute_cluster_assignments(distances, probas, B)
 
             if hasattr(self.model, "proba"):
                 winners = probas * mask  # B, K
@@ -244,8 +238,6 @@ class Trainer(AbstractTrainer):
                 self.train_metrics.update(
                     {f"proba_clus{i}": p for i, p in enumerate(probabilities)}
                 )
-            proportions = mask.sum(0).cpu().numpy() / B
-            # argmin_idx = argmin_idx.cpu().numpy()
 
             self.train_metrics.update(
                 {
