@@ -505,10 +505,11 @@ class Trainer(AbstractTrainer):
                 reassigned, idx = self.model.reassign_empty_clusters(
                     prop, is_background=is_bkg
                 )
-                msg = f"{self.progress_str(epoch, batch)}: Reassigned clusters {reassigned} from cluster {idx}"
-                if is_bkg:
-                    msg += " for backgrounds"
-                self.print_and_log_info(msg)
+                if len(reassigned) != 0:
+                    msg = f"{self.progress_str(epoch, batch)}: Reassigned clusters {reassigned} from cluster {idx}"
+                    if is_bkg:
+                        msg += " for backgrounds"
+                    self.print_and_log_info(msg)
                 self.print_and_log_info(
                     ", ".join(
                         [f"prop_{k}={prop[k]:.4f}" for k in range(len(prop))]
@@ -526,10 +527,9 @@ class Trainer(AbstractTrainer):
             else:
                 prop = proportions.view(self.n_objects, self.n_prototypes)[k]
             reassigned, idx = self.model.reassign_empty_clusters(prop)
-            msg = f"{self.progress_str(epoch, batch)}: Reassigned clusters {reassigned} from cluster {idx}"
-
-            msg += f" for object layer {k}"
-            self.print_and_log_info(msg)
+            if len(reassigned) != 0:
+                msg = f"{self.progress_str(epoch, batch)}: Reassigned clusters {reassigned} from cluster {idx} for object layer {k}"
+                self.print_and_log_info(msg)
             self.print_and_log_info(
                 ", ".join(
                     ["prop_{}={:.4f}".format(k, prop[k]) for k in range(len(prop))]
@@ -537,8 +537,9 @@ class Trainer(AbstractTrainer):
             )
         else:
             reassigned, idx = self.model.reassign_empty_clusters(proportions)
-            msg = f"{self.progress_str(epoch, batch)}: Reassigned clusters {reassigned} from cluster {idx}"
-            self.print_and_log_info(msg)
+            if len(reassigned) != 0:
+                msg = f"{self.progress_str(epoch, batch)}: Reassigned clusters {reassigned} from cluster {idx}"
+                self.print_and_log_info(msg)
         self.train_metrics.reset(*[f"prop_clus{i}" for i in range(self.n_clusters)])
 
     @torch.no_grad()

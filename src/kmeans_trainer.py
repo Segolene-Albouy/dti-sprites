@@ -316,8 +316,9 @@ class Trainer(AbstractTrainer):
             self.train_metrics[f"prop_clus{i}"].avg for i in range(self.n_prototypes)
         ]
         reassigned, idx = self.model.reassign_empty_clusters(proportions)
-        msg = f"{self.progress_str(epoch, batch)}: Reassigned clusters {reassigned} from cluster {idx}"
-        self.print_and_log_info(msg)
+        if len(reassigned) != 0:
+            msg = f"{self.progress_str(epoch, batch)}: Reassigned clusters {reassigned} from cluster {idx}"
+            self.print_and_log_info(msg)
         self.train_metrics.reset(*[f"prop_clus{i}" for i in range(self.n_prototypes)])
         self.train_metrics.reset(*[f"proba_clus{i}" for i in range(self.n_prototypes)])
 
