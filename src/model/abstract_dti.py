@@ -26,27 +26,39 @@ class AbstractDTI(nn.Module, ABC):
         """
         pass
 
-    def criterion(self, inp, target, alpha_masks=None, reduction="mean"):
+    @staticmethod
+    def match_dist_shape(dist, w):
+        if w.shape != dist.shape:
+            # dist.shape = (B, n_proto, C, H, W) // mask.shape = (B, 1, H, W)
+            while w.ndim < dist.ndim:
+                w = w.unsqueeze(-3)
+            w = w.expand_as(dist)
+        return w
+
+
+    def criterion(self, inp, target, alpha_masks=None, weights=None, reduction="mean"):
+        # dist.shape = (B, n_proto, C, H, W)
         dist = self._criterion(inp, target)
+        normalizer = torch.ones_like(dist)
 
         if alpha_masks is not None:
-            masks = alpha_masks.clamp(0, 1)
-            if masks.shape != dist.shape:
-                masks = masks.expand_as(dist)
+            # mask.shape = (B, 1, H, W)
+            alpha_masks = self.match_dist_shape(dist, alpha_masks.clamp(0, 1))
+            dist *= alpha_masks
+            normalizer *= alpha_masks
 
-            dist = dist * masks
-
-            if reduction == "mean":
-                visible_pixels = masks.sum(dim=(-2, -1), keepdim=True).clamp(min=1)
-                return (dist.sum(dim=(-2, -1), keepdim=True) / visible_pixels).squeeze(-1).squeeze(-1)
+        if weights is not None:
+            weights = self.match_dist_shape(dist, weights)
+            dist *= weights
+            normalizer *= weights
 
         if reduction == "mean":
-            return dist.mean(dim=(-2, -1))
+            valid_weights = normalizer.sum(dim=(-2, -1), keepdim=True).clamp(min=1)
+            return (dist.sum(dim=(-2, -1), keepdim=True) / valid_weights).squeeze(-1).squeeze(-1)
         elif reduction == "sum":
             return dist.sum(dim=(-2, -1))
         elif reduction == "none":
             return dist
-
         raise NotImplementedError(f"Reduction {reduction} not supported")
 
     def reassign_empty_clusters(self, proportions):

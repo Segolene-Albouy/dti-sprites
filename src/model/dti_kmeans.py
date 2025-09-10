@@ -187,6 +187,22 @@ class DTIKmeans(AbstractDTI):
         else:
             raise ValueError(f"undefined regularizer: {type}")
 
+    def criterion(self, inp, target, alpha_masks=None, weights=None, reduction="mean"):
+        """
+        make sur criterion returns [B, n_prototypes]
+        """
+        dist = super().criterion(inp, target, alpha_masks, reduction=reduction)
+        if dist.dim() > 2:
+            raise ValueError(f"Distance shape ({dist.shape}) does not match expected [B, n_prototypes]")
+
+        if dist.dim() == 2 and dist.shape[0] == self.n_prototypes:
+            dist = dist.transpose(0, 1)  # [n_prototypes, B] -> [B, n_prototypes]
+        elif dist.dim() == 1:
+            # reshape to [B, 1]
+            dist = dist.unsqueeze(1)
+
+        return dist
+
     def forward(self, x, img_masks=None):
         if self.proto_source == "generator":
             params = self.generator(self.latent_params)
@@ -213,7 +229,7 @@ class DTIKmeans(AbstractDTI):
             if self.weighting == "tr_sprite":
                 # Weight transformed sprites and sum
                 weighted_target = (probas[..., None, None, None] * target).sum(1)
-                distances = self.criterion(inp[:, 0, ...], weighted_target, alpha_masks=img_masks)
+                distances = self.criterion(inp[:, 0, ...], weighted_target, alpha_masks=img_masks, weights=self.loss_weights)
 
                 # Distances of input from transformed sprites
                 samplewise_distances = self.criterion(inp, target, alpha_masks=img_masks)
@@ -230,7 +246,7 @@ class DTIKmeans(AbstractDTI):
                 )
 
             elif self.weighting == "diff":
-                distances = self.criterion(inp, target, alpha_masks=img_masks)
+                distances = self.criterion(inp, target, alpha_masks=img_masks, weights=self.loss_weights)
                 dist_min = (distances * probas).sum(1)
 
                 return (
@@ -242,7 +258,7 @@ class DTIKmeans(AbstractDTI):
 
         # no proba
         inp, target, features = self.transformer(x, prototypes)
-        distances = self.criterion(inp, target, alpha_masks=img_masks)
+        distances = self.criterion(inp, target, alpha_masks=img_masks, weights=self.loss_weights)
         dist_min = distances.min(1)[0]
         return dist_min.mean(), distances, None
 

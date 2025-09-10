@@ -76,6 +76,17 @@ def normalize_values(data, target_min=0.1, target_max=0.9, min_range_threshold=0
     return data
 
 
+def gen_checkerboard(h, w, tile_size=8, dark_color=128, light_color=192):
+    """Create a checkerboard pattern image of given height and width."""
+    checkerboard = np.zeros((h, w, 3), dtype=np.uint8)
+    for y in range(h):
+        for x in range(w):
+            if ((x // tile_size) + (y // tile_size)) % 2 == 0:
+                checkerboard[y, x] = light_color
+            else:
+                checkerboard[y, x] = dark_color
+    return checkerboard
+
 def convert_to_img(arr):
     if isinstance(arr, torch.Tensor):
         if len(arr.shape) == 4:
