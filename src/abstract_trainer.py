@@ -364,56 +364,6 @@ class AbstractTrainer(ABC):
     #    MAIN METHODS    #
     ######################
 
-    # @abstractmethod
-    # def run(self):
-    #     # """Main training loop with defined sequence of operations"""
-    #     # self._setup()
-    #     #
-    #     # for epoch in range(self.start_epoch, self.n_epochs + 1):
-    #     #     self._run_epoch(epoch)
-    #     #
-    #     # self._finalize()
-    #     # return self.results
-    #     pass
-    #
-    # def _run_epoch(self, epoch):
-    #     """Run a single epoch"""
-    #     # self._before_epoch(epoch)
-    #     #
-    #     # for batch_idx, batch_data in enumerate(self.train_loader):
-    #     #     self._process_batch(batch_idx, batch_data, is_training=True)
-    #     #
-    #     #     if self._should_validate(batch_idx):
-    #     #         self._validate()
-    #     #
-    #     # self._after_epoch(epoch)
-    #     pass
-    #
-    # def _before_epoch(self, epoch):
-    #     """Hook called before each epoch"""
-    #     # self.model.train()
-    #     # self._log_info(f"Starting epoch {epoch}/{self.n_epochs}")
-    #     pass
-    #
-    # def _process_batch(self, batch_idx, batch_data, is_training):
-    #     # raise NotImplementedError
-    #     pass
-    #
-    # def _after_epoch(self, epoch):
-    #     # """Hook called after each epoch"""
-    #     # if self.scheduler and self.scheduler_update_range == "epoch":
-    #     #     self.scheduler.step()
-    #     #
-    #     # # Default implementation can be overridden
-    #     # self._save_checkpoint(epoch)
-    #     pass
-    #
-    # def _finalize(self):
-    #     # """Finalize training and save model"""
-    #     # self._save_checkpoint(self.n_epochs)
-    #     # self.logger.info("Training finished.")
-    #     pass
-
     @abstractmethod
     def load_from_tag(self, tag, resume=False):
         """Load model from a previous run tag"""
@@ -516,14 +466,14 @@ class AbstractTrainer(ABC):
                 img = convert_to_img(data)
 
                 if cur_iter is not None:
-                    img.save(pred_path / f"{prefix}{k}" / f"{cur_iter}.jpg")
+                    img.save(pred_path / f"{prefix}{k}" / f"{cur_iter}.png")
                 else:
                     img.save(pred_path / f"{prefix}{k}.png")
 
         except AttributeError as e:
             self.print_and_log_info(f"Warning: Could not save {pred_names}: {e}")
 
-    def save_prototypes(self, cur_iter=None, normalize_contrast=True):
+    def save_prototypes(self, cur_iter=None, normalize_contrast=False):
         tsf = (lambda proto, k: normalize_values(proto)) if normalize_contrast else None
         self.save_pred(cur_iter, pred_name="prototype", prefix="proto", transform_fn=tsf)
 

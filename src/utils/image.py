@@ -87,6 +87,37 @@ def gen_checkerboard(h, w, tile_size=8, dark_color=128, light_color=192):
                 checkerboard[y, x] = dark_color
     return checkerboard
 
+
+def combine_frg_bkg_mask(frg, mask, bkg=None, transparent=False, checkerboard=False):
+    """
+    Combine foreground, mask, and background into a single image.
+
+    Args:
+        frg: Foreground tensor [3, H, W] or [C, H, W]
+        mask: Alpha mask tensor [1, H, W]
+        bkg: Background tensor [3, H, W] or [C, H, W] (optional)
+        transparent: If True, return RGBA with alpha channel (no background)
+        checkerboard: If True, use checkerboard pattern as background
+
+    Returns:
+        Combined tensor: [3, H, W] for RGB or [4, H, W] for RGBA
+    """
+    C, H, W = frg.shape
+
+    alpha = mask.expand(C, -1, -1) if mask.shape[0] == 1 else mask
+    if transparent:
+        return torch.cat([frg, mask], dim=0)  # [4, H, W] = RGB + A
+
+    if checkerboard or bkg is None:
+        checker = gen_checkerboard(H, W)
+        checker = torch.from_numpy(checker).permute(2, 0, 1).float() / 255.0  # [3, H, W]
+        if C == 1:  # Grayscale foreground
+            checker = checker.mean(0, keepdim=True)
+        bkg = checker.to(frg.device)
+
+    result = bkg * (1 - alpha) + frg * alpha
+    return result
+
 def convert_to_img(arr):
     if isinstance(arr, torch.Tensor):
         if len(arr.shape) == 4:
@@ -100,7 +131,11 @@ def convert_to_img(arr):
         arr = arr[:, :, 0]
     if np.issubdtype(arr.dtype, np.floating):
         arr = (arr.clip(0, 1) * 255)
-    return Image.fromarray(arr.astype(np.uint8)).convert('RGB')
+
+    if len(arr.shape) == 3 and arr.shape[2] == 4:
+        return Image.fromarray(arr.astype(np.uint8), 'RGBA')
+    else:
+        return Image.fromarray(arr.astype(np.uint8)).convert('RGB')
 
 
 def convert_to_rgba(t):

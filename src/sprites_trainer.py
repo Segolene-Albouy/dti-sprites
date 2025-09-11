@@ -26,7 +26,7 @@ from .utils import (
     coerce_to_path_and_check_exist,
     coerce_to_path_and_create_dir,
 )
-from .utils.image import convert_to_img
+from .utils.image import convert_to_img, combine_frg_bkg_mask
 from .utils.logger import print_warning
 from .utils.metrics import (
     AverageTensorMeter,
@@ -334,12 +334,13 @@ class Trainer(AbstractTrainer):
     ######################
 
     @torch.no_grad()
-    def save_masked_prototypes(self, cur_iter=None):
+    def save_masked_prototypes(self, cur_iter=None, alpha_channel=True):
+        tsf = lambda proto, k: combine_frg_bkg_mask(proto, self.model.masks[k], self.model.backgrounds[k], transparent=alpha_channel)
         self.save_pred(
             cur_iter,
             pred_name="prototype",
-            transform_fn=lambda proto, k: proto * self.model.masks[k],
-            prefix="proto"
+            transform_fn=tsf,
+            prefix="proto",
         )
 
     @torch.no_grad()
