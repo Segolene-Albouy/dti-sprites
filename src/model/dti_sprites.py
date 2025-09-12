@@ -343,9 +343,17 @@ class DTISprites(AbstractDTI):
             masks = torch.rand(mask_nb, 1, *size)
         elif init == "sample":
             assert dataset
-            masks = torch.stack(
-                generate_data(dataset, self.n_sprites, init_type=init, value=value, std=std)
-            )
+            sampled_data = generate_data(dataset, self.n_sprites, init_type=init, value=value, std=std)
+            masks = torch.stack(sampled_data)
+
+            # Handle potential channel dimension mismatch
+            if masks.dim() == 4 and masks.shape[1] != 1:
+                if masks.shape[1] == 3:  # RGB to grayscale
+                    masks = masks.mean(dim=1, keepdim=True)
+                elif masks.shape[1] > 1:  # Multi-channel to single channel
+                    masks = masks[:, :1]  # Take first channel
+            elif masks.dim() == 3:  # Add channel dimension if missing
+                masks = masks.unsqueeze(1)
             assert masks.shape[1] == 1
         else:
             raise NotImplementedError(f"Unknown initialisation: {init}")
