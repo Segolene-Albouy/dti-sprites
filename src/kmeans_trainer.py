@@ -253,8 +253,8 @@ class Trainer(AbstractTrainer):
     #   SAVING METHODS   #
     ######################
 
-    def save_variances(self, cur_iter=None):
-        self.save_pred(cur_iter, pred_name="variance", prefix="var", n_preds=self.n_prototypes)
+    def save_variances(self, cur_iter=None, path=None):
+        self.save_pred(cur_iter, pred_name="variance", prefix="var", n_preds=self.n_prototypes, pred_path=path)
 
     def get_transformed_images(self, output):
         """Ensure image and output have matching channels, then concatenate them."""
@@ -361,7 +361,7 @@ class Trainer(AbstractTrainer):
         with open(scores_path, mode="w") as f:
             f.write("loss\n")
 
-        cluster_path = coerce_to_path_and_create_dir(self.run_dir / "clusters")
+        # self.cluster_path = coerce_to_path_and_create_dir(self.run_dir / "clusters") # MARKER
         dataset = self.train_loader.dataset
         train_loader = DataLoader(
             dataset,
@@ -409,22 +409,21 @@ class Trainer(AbstractTrainer):
         self.print_and_log_info("final_loss: {:.5}".format(loss.avg))
 
         # Save results
-        with open(cluster_path / "cluster_counts.tsv", mode="w") as f:
+        with open(self.cluster_path / "cluster_counts.tsv", mode="w") as f:
             f.write("\t".join([str(k) for k in range(self.n_prototypes)]) + "\n")
             f.write(
                 "\t".join([str(averages[k].count) for k in range(self.n_prototypes)])
                 + "\n"
             )
         for k in range(self.n_prototypes):
-            path = coerce_to_path_and_create_dir(cluster_path / f"cluster{k}")
             indices = np.where(cluster_idx == k)[0]
             top_idx = np.argsort(distances[indices])[:N_CLUSTER_SAMPLES]
             for j, idx in enumerate(top_idx):
                 inp = dataset[indices[idx]][0].unsqueeze(0).to(self.device)
-                convert_to_img(inp).save(path / f"top{j}_raw.png")
+                convert_to_img(inp).save(self.cluster_path / f"cluster{k}" / f"top{j}_raw.png")
                 if not self.model.transformer.is_identity:
                     convert_to_img(self.model.transform(inp)[0, k]).save(
-                        path / f"top{j}_tsf.png"
+                        self.cluster_path / f"cluster{k}" / f"top{j}_tsf.png"
                     )
             if len(indices) <= N_CLUSTER_SAMPLES:
                 random_idx = indices
@@ -432,13 +431,13 @@ class Trainer(AbstractTrainer):
                 random_idx = np.random.choice(indices, N_CLUSTER_SAMPLES, replace=False)
             for j, idx in enumerate(random_idx):
                 inp = dataset[idx][0].unsqueeze(0).to(self.device)
-                convert_to_img(inp).save(path / f"random{j}_raw.png")
+                convert_to_img(inp).save(self.cluster_path / f"cluster{k}" / f"random{j}_raw.png")
                 if not self.model.transformer.is_identity:
                     convert_to_img(self.model.transform(inp)[0, k]).save(
-                        path / f"random{j}_tsf.png"
+                        self.cluster_path / f"cluster{k}" / f"random{j}_tsf.png"
                     )
             try:
-                convert_to_img(averages[k].avg).save(path / "avg.png")
+                convert_to_img(averages[k].avg).save(self.cluster_path / f"cluster{k}" / "avg.png")
             except AssertionError:
                 print_warning(f"no image found in cluster {k}")
 

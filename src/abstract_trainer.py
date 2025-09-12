@@ -39,6 +39,7 @@ class AbstractTrainer(ABC):
     run_dir = None
     logger = None
     save_img = False
+    save_iter = True
     device = None
     cfg = None
 
@@ -98,6 +99,7 @@ class AbstractTrainer(ABC):
     # Image transformation
     images_to_tsf = None
     prototypes_path = None
+    cluster_path = None
     transformation_path = None
 
     # Evaluation modes
@@ -237,15 +239,18 @@ class AbstractTrainer(ABC):
             return
 
         self.prototypes_path = coerce_to_path_and_create_dir(self.run_dir / "prototypes")
+        self.cluster_path = coerce_to_path_and_create_dir(self.run_dir / "clusters")
         for k in range(self.n_prototypes):
             coerce_to_path_and_create_dir(self.prototypes_path / f"proto{k}")
+            coerce_to_path_and_create_dir(self.cluster_path / f"cluster{k}")
 
         self.transformation_path = coerce_to_path_and_create_dir(self.run_dir / "transformations")
-        self.images_to_tsf = next(iter(self.train_loader))[0][:N_TRANSFORMATION_PREDICTIONS].to(self.device)
+        self.setup_images_to_tsf()
 
         for k in range(self.images_to_tsf.size(0)):
             out = coerce_to_path_and_create_dir(self.transformation_path / f"img{k}")
             convert_to_img(self.images_to_tsf[k]).save(out / "input.png")
+
 
     @abstractmethod
     def setup_optimizer(self):
@@ -338,8 +343,10 @@ class AbstractTrainer(ABC):
         self.val_scores_path = self.run_dir / VAL_SCORES_FILE
         self.save_metrics_file(self.val_scores_path, self.val_scores.names)
 
+    def setup_images_to_tsf(self):
+        self.images_to_tsf = next(iter(self.train_loader))[0][:N_TRANSFORMATION_PREDICTIONS].to(self.device)
+
     def setup_prototypes(self):
-        # self.images_to_tsf = next(iter(self.train_loader))[0][:N_TRANSFORMATION_PREDICTIONS].to(self.device)
         pass
 
     @abstractmethod
@@ -449,14 +456,14 @@ class AbstractTrainer(ABC):
         self.print_and_log_info(f"Model saved at {save_path}")
 
     @torch.no_grad()
-    def save_pred(self, cur_iter=None, pred_name="prototype", prefix=None, transform_fn=None, n_preds=None):
+    def save_pred(self, cur_iter=None, pred_name="prototype", prefix=None, transform_fn=None, n_preds=None, pred_path=None):
         prefix = prefix or pred_name
         pred_names = f"{pred_name}s"
 
         try:
             preds = getattr(self.model, pred_names)
             n_preds = n_preds or getattr(self, f"n_{pred_names}", None) or self.n_prototypes
-            pred_path = getattr(self, f"{pred_names}_path")
+            pred_path = getattr(self, f"{pred_names}_path") if pred_path is None else self.run_dir / pred_path
 
             for k in range(n_preds):
                 data = preds[k]
@@ -464,18 +471,17 @@ class AbstractTrainer(ABC):
                     data = transform_fn(data, k)
 
                 img = convert_to_img(data)
-
-                if cur_iter is not None:
-                    img.save(pred_path / f"{prefix}{k}" / f"{cur_iter}.png")
-                else:
+                if cur_iter is None:
                     img.save(pred_path / f"{prefix}{k}.png")
+                elif self.save_iter:
+                    img.save(pred_path / f"{prefix}{k}" / f"{cur_iter}.png")
 
         except AttributeError as e:
             self.print_and_log_info(f"Warning: Could not save {pred_names}: {e}")
 
-    def save_prototypes(self, cur_iter=None, normalize_contrast=False):
+    def save_prototypes(self, cur_iter=None, normalize_contrast=False, path=None):
         tsf = (lambda proto, k: normalize_values(proto)) if normalize_contrast else None
-        self.save_pred(cur_iter, pred_name="prototype", prefix="proto", transform_fn=tsf)
+        self.save_pred(cur_iter, pred_name="prototype", prefix="proto", transform_fn=tsf, pred_path=path)
 
     @abstractmethod
     def save_transformed_images(self, cur_iter=None):

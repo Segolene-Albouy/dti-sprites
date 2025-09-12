@@ -26,7 +26,7 @@ from .utils import (
     coerce_to_path_and_check_exist,
     coerce_to_path_and_create_dir,
 )
-from .utils.image import convert_to_img, combine_frg_bkg_mask
+from .utils.image import convert_to_img, combine_layers
 from .utils.logger import print_warning
 from .utils.metrics import (
     AverageTensorMeter,
@@ -182,7 +182,7 @@ class Trainer(AbstractTrainer):
     def setup_prototypes(self):
         super().save_prototypes()
         self.check_cluster_interval = self.cfg["training"]["check_cluster_interval"]
-        if not self.save_img:
+        if not self.save_img or not self.save_iter:
             return
         for k in range(self.images_to_tsf.size(0)):
             convert_to_img(self.images_to_tsf[k]).save(self.transformation_path / f"img{k}" / "input.png")
@@ -200,7 +200,7 @@ class Trainer(AbstractTrainer):
     ######################
 
     def load_from_tag(self, tag, resume=False):
-        self.print_and_log_info("Loading model from run {}".format(tag))
+        self.print_and_log_info(f"Loading model from run {tag}")
         path = coerce_to_path_and_check_exist(
             RUNS_PATH / self.dataset_name / tag / MODEL_FILE
         )
@@ -334,26 +334,28 @@ class Trainer(AbstractTrainer):
     ######################
 
     @torch.no_grad()
-    def save_masked_prototypes(self, cur_iter=None, alpha_channel=True):
-        tsf = lambda proto, k: combine_frg_bkg_mask(proto, self.model.masks[k], self.model.backgrounds[k], transparent=alpha_channel)
+    def save_masked_prototypes(self, cur_iter=None, alpha_channel=False, checkerboard=False, path=None):
+        tsf = lambda proto, k: combine_layers(proto, self.model.masks[k], self.model.backgrounds[k], transparent=alpha_channel, checkerboard=checkerboard)
         self.save_pred(
             cur_iter,
             pred_name="prototype",
             transform_fn=tsf,
             prefix="proto",
+            pred_path=path
         )
 
     @torch.no_grad()
-    def save_masks(self, cur_iter=None):
+    def save_masks(self, cur_iter=None, path=None):
         self.save_pred(
             cur_iter=cur_iter,
             pred_name="mask",
-            n_preds=self.n_prototypes
+            n_preds=self.n_prototypes,
+            pred_path=path
         )
 
     @torch.no_grad()
-    def save_backgrounds(self, cur_iter=None):
-        self.save_pred(cur_iter, pred_name="background", prefix="bkg")
+    def save_backgrounds(self, cur_iter=None, path=None):
+        self.save_pred(cur_iter, pred_name="background", prefix="bkg", pred_path=path)
 
     @torch.no_grad()
     def save_transformed_images(self, cur_iter=None):
@@ -701,11 +703,10 @@ class Trainer(AbstractTrainer):
         with open(scores_path, mode="w") as f:
             f.write("loss\n")
             for k in range(self.n_prototypes):
-                f.write("clus_loss{" + str(k) + "}\n")
+                f.write(f"clus_loss{k}\n")
             for k in range(self.n_prototypes):
-                f.write("ctr_clus_loss{" + str(k) + "}\n")
+                f.write(f"ctr_clus_loss{k}\n")
 
-        cluster_path = coerce_to_path_and_create_dir(self.run_dir / "clusters")
         dataset = self.train_loader.dataset
         train_loader = DataLoader(
             dataset,
@@ -760,21 +761,20 @@ class Trainer(AbstractTrainer):
         self.print_and_log_info("final_loss: {:.5}".format(float(loss.avg)))
 
         # Save results
-        with open(cluster_path / "cluster_counts.tsv", mode="w") as f:
+        with open(self.cluster_path / "cluster_counts.tsv", mode="w") as f:
             f.write("\t".join([str(k) for k in range(self.n_prototypes)]) + "\n")
             f.write(
                 "\t".join([str(averages[k].count) for k in range(self.n_prototypes)])
                 + "\n"
             )
         for k in range(self.n_prototypes):
-            path = coerce_to_path_and_create_dir(cluster_path / f"cluster{k}")
             indices = np.where(cluster_idx == k)[0]
             top_idx = np.argsort(distances[indices])[:N_CLUSTER_SAMPLES]
             for j, idx in enumerate(top_idx):
                 inp = dataset[indices[idx]][0].unsqueeze(0).to(self.device)
-                convert_to_img(inp).save(path / f"top{j}_raw.png")
+                convert_to_img(inp).save(self.cluster_path / f"cluster{k}" / f"top{j}_raw.png")
                 convert_to_img(self.model.transform(inp)[0, k]).save(
-                    path / f"top{j}_tsf.png"
+                    self.cluster_path / f"cluster{k}" / f"top{j}_tsf.png"
                 )
             if len(indices) <= N_CLUSTER_SAMPLES:
                 random_idx = indices
@@ -783,7 +783,7 @@ class Trainer(AbstractTrainer):
             for j, idx in enumerate(random_idx):
                 inp = dataset[idx][0].unsqueeze(0).to(self.device)
             try:
-                convert_to_img(averages[k].avg).save(path / "avg.png")
+                convert_to_img(averages[k].avg).save(self.cluster_path / f"cluster{k}" / "avg.png")
             except AssertionError:
                 print_warning(f"no image found in cluster {k}")
 

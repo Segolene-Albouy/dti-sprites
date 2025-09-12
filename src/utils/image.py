@@ -88,7 +88,7 @@ def gen_checkerboard(h, w, tile_size=8, dark_color=128, light_color=192):
     return checkerboard
 
 
-def combine_frg_bkg_mask(frg, mask, bkg=None, transparent=False, checkerboard=False):
+def combine_layers(frg, mask, bkg=None, transparent=False, checkerboard=False):
     """
     Combine foreground, mask, and background into a single image.
 
