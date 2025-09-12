@@ -335,7 +335,7 @@ class Trainer(AbstractTrainer):
 
     @torch.no_grad()
     def save_masked_prototypes(self, cur_iter=None, alpha_channel=False, checkerboard=False, path=None):
-        tsf = lambda proto, k: combine_layers(proto, self.model.masks[k], self.model.backgrounds[k], transparent=alpha_channel, checkerboard=checkerboard)
+        tsf = lambda proto, k: combine_layers(proto, self.model.masks[k], self.model.backgrounds[min(k, self.n_backgrounds - 1)], transparent=alpha_channel, checkerboard=checkerboard)
         self.save_pred(
             cur_iter,
             pred_name="prototype",
