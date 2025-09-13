@@ -279,10 +279,19 @@ class Trainer(AbstractTrainer):
         transformed_imgs = self.get_transformed_images(output)
         for k in range(transformed_imgs.size(0)):
             for j, img in enumerate(transformed_imgs[k][1:]):
-                img_name = f"tsf{j}/{cur_iter}.jpg" if cur_iter is not None else f"tsf{j}.png"
-                convert_to_img(img).save(
-                    self.transformation_path / f"img{k}" / img_name
-                )
+                if cur_iter is None:
+                    convert_to_img(img).save(
+                        self.transformation_path / f"img{k}" / f"tsf{j}.png"
+                    )
+                elif self.save_iter:
+                    convert_to_img(img).save(
+                        self.transformation_path / f"img{k}" / f"tsf{j}/{cur_iter}.jpg"
+                    )
+
+                # img_name = f"tsf{j}/{cur_iter}.jpg" if cur_iter is not None else f"tsf{j}.png"
+                # convert_to_img(img).save(
+                #     self.transformation_path / f"img{k}" / img_name
+                # )
 
         return transformed_imgs
 

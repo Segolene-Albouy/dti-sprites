@@ -371,10 +371,10 @@ class Trainer(AbstractTrainer):
         for k in range(transformed_imgs.size(0)):
             for j, img in enumerate(transformed_imgs[k][1:]):
                 tsf_path = self.transformation_path / f"img{k}"
-                if cur_iter is not None:
-                    self.save_img_to_path(img, tsf_path / f"tsf{j}", f"{cur_iter}.jpg")
-                else:
+                if cur_iter is None:
                     self.save_img_to_path(img, tsf_path, f"tsf{j}.png")
+                elif self.save_iter:
+                    self.save_img_to_path(img, tsf_path / f"tsf{j}", f"{cur_iter}.jpg")
 
         i = 0
         for name in ["frg", "mask", "bkg", "frg_aux", "mask_aux"]:
@@ -389,10 +389,11 @@ class Trainer(AbstractTrainer):
                 for k in range(transformed_imgs.size(0)):
                     tmp_path = self.transformation_path / f"img{k}"
                     for j, img in enumerate(compositions[i][k][1:]):
-                        if cur_iter is not None:
-                            self.save_img_to_path(img, tmp_path / f"{name}_tsf{j}", f"{cur_iter}.jpg")
-                        else:
+
+                        if cur_iter is None:
                             self.save_img_to_path(img, tmp_path, f"{name}_tsf{j}.png")
+                        elif self.save_iter:
+                            self.save_img_to_path(img, tmp_path / f"{name}_tsf{j}", f"{cur_iter}.jpg")
             i += 1
 
         return transformed_imgs, compositions
