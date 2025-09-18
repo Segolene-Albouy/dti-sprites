@@ -395,6 +395,12 @@ class DTISprites(AbstractDTI):
         if name == "unet":
             return UNet(1, color_channel)
         elif name == "mlp":
+            # Ensure out_channel accounts for both color and mask channels
+            if hasattr(dataset, 'n_channels'):
+                # For sprites: RGB + alpha channel
+                size = (dataset.img_size[0] * dataset.img_size[1])
+                out_channel = color_channel * size + size
+
             linear = init_linear(
                 8 * latent_dim,
                 out_channel,
