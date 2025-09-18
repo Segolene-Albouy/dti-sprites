@@ -26,7 +26,7 @@ try:
 except ModuleNotFoundError:
     pass
 
-from .utils.image import convert_to_img, save_gif, normalize_values
+from .utils.image import convert_to_img, save_gif, normalize_values, align_img
 from .utils.logger import print_info, get_logger
 from .utils.consts import *
 
@@ -160,8 +160,9 @@ class AbstractTrainer(ABC):
         self.dataset_kwargs = self.cfg["dataset"].copy()
         self.dataset_name = self.dataset_kwargs["name"]
 
-        self.train_dataset = get_dataset(self.dataset_name)("train", **self.dataset_kwargs)
-        self.val_dataset = get_dataset(self.dataset_name)("val", **self.dataset_kwargs)
+        dataset = get_dataset(self.dataset_name)
+        self.train_dataset = dataset("train", **self.dataset_kwargs)
+        self.val_dataset = dataset("val", **self.dataset_kwargs)
 
         self.n_classes = self.train_dataset.n_classes
         self.is_val_empty = len(self.val_dataset) == 0
@@ -251,7 +252,6 @@ class AbstractTrainer(ABC):
             out = coerce_to_path_and_create_dir(self.transformation_path / f"img{k}")
             convert_to_img(self.images_to_tsf[k]).save(out / "input.png")
 
-
     @abstractmethod
     def setup_optimizer(self):
         """Configure optimizer for training"""
@@ -303,7 +303,6 @@ class AbstractTrainer(ABC):
             self.load_from_tag(checkpoint_path_resume, resume=True)
         else:
             self.start_epoch, self.start_batch = 1, 1
-
 
     def setup_metrics(self):
         """Initialize metrics for training and evaluation"""
@@ -396,6 +395,7 @@ class AbstractTrainer(ABC):
         """Run validation process"""
         raise NotImplementedError
 
+    @torch.no_grad()
     def compute_cluster_assignments(self, dist, proba, batch_size):
         """
         Generate cluster mask from model output.
@@ -431,6 +431,10 @@ class AbstractTrainer(ABC):
         props = mask.sum(0) / batch_size
 
         return mask, argmin_idx, props
+
+    @torch.no_grad()
+    def get_cluster_assignments(self, images):
+        raise NotImplementedError()
 
     ######################
     #   SAVING METHODS   #
@@ -487,6 +491,92 @@ class AbstractTrainer(ABC):
     def save_transformed_images(self, cur_iter=None):
         """Save transformed images"""
         raise NotImplementedError
+
+    @torch.no_grad()
+    def save_aligned_images(self, path="aligned", prefix="aligned", bkg="#FF3C00", only_translate=True):
+        """
+        # get original images (without initial resizing) from a cluster
+        # get the transformation that was applied to the image inside Dataset class to fit to model img_size
+        # extract from all transformations the affine one
+        # if only_translate, extract only translation from affine matrix
+        # call align_img to apply inverse transformation to original image
+
+        Args:
+            path: Save path (defaults to run_dir/aligned_clusters)
+            prefix: Filename prefix
+            bkg: Background color for empty regions (hex color)
+            only_translate: If True, extract only translation from spatial transformations
+        """
+        # tsf_seq = self.cfg.model.get("transformation_sequence", "[]")
+        # if "aff" not in tsf_seq:
+        #     self.print_and_log_info("No spatial transformation in model, skipping aligned image saving")
+        #     return
+        #
+        # path = coerce_to_path_and_create_dir(self.run_dir / path)
+        # for k in range(self.n_prototypes):
+        #     coerce_to_path_and_create_dir(path / f"cluster{k}")
+        #
+        # dataset = self.train_dataset
+        # train_loader = DataLoader(
+        #     dataset,
+        #     batch_size=self.batch_size,
+        #     num_workers=self.n_workers,
+        #     shuffle=False,
+        # )
+        #
+        # cluster_data = {k: [] for k in range(self.n_prototypes)}
+        # img_idx = 0
+        #
+        # for images, _, _, paths in train_loader:
+        #     images = images.to(self.device)
+        #     batch_distances, batch_argmin_idx = self.get_cluster_assignments(images)
+        #
+        #     # Extract affine parameters for each image and cluster
+        #     features = self.model.transformer.encoder(images) if hasattr(self.model, 'transformer') else None
+        #     affine_params = self._extract_affine_parameters(images, features)
+        #
+        #     for b, (img, idx, d, p) in enumerate(zip(images, batch_argmin_idx, batch_distances, paths)):
+        #         # Get original image and dataset transform info
+        #         ori_img = dataset.get_original(img_idx)
+        #         resize_transform = self._get_dataset_resize_transform(ori_img.size, dataset.img_size)
+        #
+        #         # Get affine transformation for this specific cluster assignment
+        #         if affine_params is not None:
+        #             if self.model.shared_t:
+        #                 affine_matrix = affine_params[b].view(2, 3)
+        #             else:
+        #                 affine_matrix = affine_params[idx][b].view(2, 3)
+        #         else:
+        #             affine_matrix = torch.eye(2, 3)  # Identity if no affine transform
+        #
+        #         cluster_data[idx].append({
+        #             'img_idx': img_idx,
+        #             'path': p,
+        #             'distance': d,
+        #             'ori_img': ori_img,
+        #             'resize_tsf': resize_transform,
+        #             'affine_matrix': affine_matrix.cpu().numpy()
+        #         })
+        #         img_idx += 1
+        #
+        # # Save aligned images for each cluster
+        # for cluster_id, data_list in cluster_data.items():
+        #     self.print_and_log_info(f"Processing cluster {cluster_id} with {len(data_list)} images")
+        #
+        #     for i, data in enumerate(data_list):
+        #         aligned_img = align_img(
+        #             data['ori_img'],
+        #             data['resize_tsf'],
+        #             data['affine_matrix'],
+        #             bkg_color=bkg,
+        #             only_translate=only_translate
+        #         )
+        #
+        #         # Save aligned image
+        #         save_path = path / f"cluster{cluster_id}" / f"{prefix}_{i:04d}.png"
+        #         aligned_img.save(save_path)
+        #
+        # self.print_and_log_info(f"Saved aligned cluster images to {path}")
 
     def save_training_metrics(self):
         """Save training metrics, plots, and visualizations"""

@@ -1,5 +1,8 @@
 from functools import partial
 from PIL import Image
+import torch.nn.functional as F
+from torchvision.transforms.functional import to_tensor, to_pil_image
+
 
 import numpy as np
 import torch
@@ -88,21 +91,40 @@ def gen_checkerboard(h, w, tile_size=8, dark_color=128, light_color=192):
     return checkerboard
 
 
-def combine_layers(frg, mask, bkg=None, transparent=False, checkerboard=False):
+def combine_layers(frg=None, mask=None, bkg=None, transparent=False, checkerboard=False):
     """
     Combine foreground, mask, and background into a single image.
 
     Args:
-        frg: Foreground tensor [3, H, W] or [C, H, W]
+        frg: Foreground tensor [C, H, W]
         mask: Alpha mask tensor [1, H, W]
-        bkg: Background tensor [3, H, W] or [C, H, W] (optional)
+        bkg: Background tensor [C, H, W]
         transparent: If True, return RGBA with alpha channel (no background)
         checkerboard: If True, use checkerboard pattern as background
 
     Returns:
         Combined tensor: [3, H, W] for RGB or [4, H, W] for RGBA
     """
-    C, H, W = frg.shape
+    if frg is not None:
+        C, H, W = frg.shape
+        device = frg.device
+    elif mask is not None:
+        _, H, W = mask.shape
+        device = mask.device
+        C = 3  # Default to RGB
+    elif bkg is not None:
+        C, H, W = bkg.shape
+        device = bkg.device
+    else:
+        raise ValueError("At least one of frg, mask, or bkg must be provided")
+
+    if frg is None:
+        # set to black
+        frg = torch.zeros(C, H, W, device=device)
+
+    if mask is None:
+        # set to 1 (no masking)
+        mask = torch.ones(1, H, W, device=device)
 
     alpha = mask.expand(C, -1, -1) if mask.shape[0] == 1 else mask
     if transparent:
@@ -113,7 +135,7 @@ def combine_layers(frg, mask, bkg=None, transparent=False, checkerboard=False):
         checker = torch.from_numpy(checker).permute(2, 0, 1).float() / 255.0  # [3, H, W]
         if C == 1:  # Grayscale foreground
             checker = checker.mean(0, keepdim=True)
-        bkg = checker.to(frg.device)
+        bkg = checker.to(device)
 
     result = bkg * (1 - alpha) + frg * alpha
     return result
@@ -167,6 +189,33 @@ def draw_border(img, color, width):
         a[:, k] = color
         a[:, -k-1] = color
     return Image.fromarray(a)
+
+
+def align_img(
+    original_img,
+    resize_tsf,
+    affine_tsf,
+    bkg_color=(255,60,0),
+    only_translate=True
+):
+    """
+    Apply inverse transformation to align original image with cluster prototype.
+
+    Args:
+        original_img: PIL Image (original size)
+        resize_tsf: transformation from original size to model image size
+        affine_tsf: predicted affine transformation to fit image to cluster prototype
+        bkg_color: Background color for empty pixel after transform
+        only_translate: Extract only the translation component from the affine tran
+
+    Returns:
+        PIL Image aligned at the same size as original_img
+    """
+    # if only_translate, extract translation from affine matrix
+    # then combine resize and affine transformations
+    # apply inverse transformation to original image
+    # pixels outside the original image are filled with bkg_color
+    # then a mask (binarized) is added as alpha channel to hide bkg_color
 
 
 class ImageResizer:
