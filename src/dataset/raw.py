@@ -59,21 +59,28 @@ class _AbstractCollectionDataset(TorchDataset):
         return self.size
 
     def __getitem__(self, idx):
+        img_name = self.input_files[idx]
         if self.cache_images and idx in self._image_cache:
-            print(f"🏞️ Using cached image for index {idx}!")
+            print(f"🏞️ Using cached image {img_name}!")
             return self._image_cache[idx]
 
-        img = Image.open(self.input_files[idx])
+        img = Image.open(img_name)
         alpha = img.split()[-1] if img.mode == "RGBA" else Image.new("L", img.size, (255))
 
         # keep grayscale images as is
         inp = self.transform(img.convert("RGB") if self.n_channels >= 3 else img)
         alpha = self.transform(alpha)
 
-        item = (inp, self.labels[idx], alpha, str(self.input_files[idx]))
+        item = (inp, self.labels[idx], alpha, str(img_name))
         if self.cache_images:
             self._image_cache[idx] = item
         return item
+
+    def get_original(self, idx):
+        img = Image.open(self.input_files[idx])
+        # keep grayscale images as is
+        return img.convert("RGB") if self.n_channels >= 3 else img
+
 
     @property
     @lru_cache()
@@ -84,6 +91,11 @@ class _AbstractCollectionDataset(TorchDataset):
         else:
             transform = [Resize(self.img_size), ToTensor()]
         return Compose(transform)
+
+    def inverse_transform(self, idx):
+        orig_size = self.get_original(idx).size
+        return Compose([Resize(orig_size)])
+
 
     def get_n_channels(self):
         # try:
