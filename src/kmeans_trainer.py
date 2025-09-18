@@ -249,6 +249,14 @@ class Trainer(AbstractTrainer):
                 {f"prop_clus{i}": p for i, p in enumerate(proportions)}
             )
 
+    @torch.no_grad()
+    def get_cluster_assignments(self, images):
+        distances = self.model(images)[1]
+        dist_min_by_sample, argmin_idx = map(
+            lambda t: t.cpu().numpy(), distances.min(1)
+        )
+        return dist_min_by_sample, argmin_idx
+
     ######################
     #   SAVING METHODS   #
     ######################

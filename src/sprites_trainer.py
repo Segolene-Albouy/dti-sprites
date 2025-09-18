@@ -329,26 +329,36 @@ class Trainer(AbstractTrainer):
             {f"prop_clus{i}": p.item() for i, p in enumerate(proportions)}
         )
 
+    @torch.no_grad()
+    def get_cluster_assignments(self, images):
+        dist = self.model(images)[1]
+        if self.n_backgrounds > 1:
+            dist = dist.view(images.size(0), self.n_prototypes, self.n_backgrounds).min(2)[0]
+        dist_min_by_sample, argmin_idx = map(lambda t: t.cpu().numpy(), dist.min(1))
+        return dist_min_by_sample, argmin_idx
+
     ######################
     #   SAVING METHODS   #
     ######################
 
     @torch.no_grad()
-    def save_masked_prototypes(self, cur_iter=None, alpha_channel=False, checkerboard=False, path=None):
-        tsf = lambda proto, k: combine_layers(proto, self.model.masks[k], self.model.backgrounds[min(k, self.n_backgrounds - 1)], transparent=alpha_channel, checkerboard=checkerboard)
+    def save_masked_prototypes(self, cur_iter=None, checkerboard=False, prefix="proto", path=None):
+        tsf = lambda proto, k: combine_layers(proto, self.model.masks[k], self.model.backgrounds[min(k, self.n_backgrounds - 1)], checkerboard=checkerboard)
         self.save_pred(
             cur_iter,
             pred_name="prototype",
             transform_fn=tsf,
-            prefix="proto",
+            prefix=prefix,
             pred_path=path
         )
 
     @torch.no_grad()
-    def save_masks(self, cur_iter=None, path=None):
+    def save_masks(self, cur_iter=None, path=None, alpha_channel=True):
+        tsf = lambda mask, k: combine_layers(frg=None, mask=mask, bkg=None, transparent=alpha_channel)
         self.save_pred(
             cur_iter=cur_iter,
             pred_name="mask",
+            transform_fn=tsf,
             n_preds=self.n_prototypes,
             pred_path=path
         )
@@ -370,11 +380,10 @@ class Trainer(AbstractTrainer):
         transformed_imgs = transformed_imgs[:, : N + 1]
         for k in range(transformed_imgs.size(0)):
             for j, img in enumerate(transformed_imgs[k][1:]):
-                tsf_path = self.transformation_path / f"img{k}"
                 if cur_iter is None:
-                    self.save_img_to_path(img, tsf_path, f"tsf{j}.png")
+                    self.save_img_to_path(img, self.transformation_path / f"img{k}", f"tsf{j}.png")
                 elif self.save_iter:
-                    self.save_img_to_path(img, tsf_path / f"tsf{j}", f"{cur_iter}.jpg")
+                    self.save_img_to_path(img, self.transformation_path / f"img{k}" / f"tsf{j}", f"{cur_iter}.jpg")
 
         i = 0
         for name in ["frg", "mask", "bkg", "frg_aux", "mask_aux"]:
