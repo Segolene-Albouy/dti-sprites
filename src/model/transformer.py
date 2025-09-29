@@ -243,157 +243,29 @@ class PrototypeTransformationNetwork(nn.Module):
 
         Returns:
             torch.Tensor: Transformation matrix or identity if not active/present
+                Spatial transforms: [B, 3, 3] homogeneous matrices
+                Color transforms: [B, 4, 4] homogeneous matrices
+                TPS: [B, grid_size^2, 2] control points
+                Morphological: [B, kernel_size, kernel_size] structuring element
         """
         tsf_name = normalize_tsf_name(tsf_name)
         batch_size = x.size(0)
+        params, module = None, None
+
         if self.is_identity or not self.is_tsf_in_seq(tsf_name):
-            return self.get_id_matrix(tsf_name, batch_size, x.device)
+            module = TransformationSequence.get_module(tsf_name)(self.enc_out_channels, **self.tsf_kwargs)
+        else:
+            tsf_sequence = self.tsf_sequences if self.shared_t else self.tsf_sequences[prototype_idx]
+            for module, name, activated in zip(tsf_sequence.tsf_modules, tsf_sequence.tsf_names, tsf_sequence.activations):
+                if name == tsf_name and activated:
+                    params = module.regressor(self.encoder(x))
+                    break
 
-        features = self.encoder(x)
-        tsf_sequence = self.tsf_sequences if self.shared_t else self.tsf_sequences[prototype_idx]
-
-        for module, name, activated in zip(tsf_sequence.tsf_modules, tsf_sequence.tsf_names, tsf_sequence.activations):
-            if name == tsf_name:
-                if not activated:
-                    return module.get_matrix_representation(
-                        params=None,
-                        batch_size=batch_size,
-                        device=x.device
-                    )
-                params = module.regressor(features)
-                return module.get_matrix_representation(
-                    params=params,
-                    batch_size=batch_size,
-                    device=x.device
-                )
-
-        return self.get_id_matrix(tsf_name, batch_size, x.device)
-
-    # @staticmethod
-    # def param_to_tsf(module, params, batch_size):
-    #     """Convert transformation parameters to matrix format."""
-    #     if isinstance(module, AffineModule):
-    #         # Return 2x3 affine matrix [B, 2, 3]
-    #         return params.view(batch_size, 2, 3) + module.identity
-    #
-    #     elif isinstance(module, LinearColorModule):
-    #         # Return 3x3 color matrix [B, 3, 3]
-    #         color_weights = params.view(batch_size, module.color_ch, 1)
-    #         return (color_weights.expand(-1, -1, module.color_ch) * module.identity + module.identity)
-    #
-    #     elif isinstance(module, TPSModule):
-    #         # Return control points [B, grid_size^2, 2]
-    #         return module.identity + params.view(batch_size, -1, 2)
-    #
-    #     elif isinstance(module, MorphologicalModule):
-    #         # Return morphological kernel [B, kernel_size, kernel_size]
-    #         morph_params = params + module.identity
-    #         return morph_params[:, 1:].view(batch_size, module.kernel_size, module.kernel_size)
-    #
-    #     elif isinstance(module, ColorModule):
-    #         # Return color parameters [B, 4] (hue, saturation, brightness, contrast)
-    #         return params + module.identity
-    #
-    #     if hasattr(module, 'identity'):
-    #         return params + module.identity
-    #     return params
-    #
-    # def get_identity_tsf(self, tsf_name, x, module=None):
-    #     batch_size = x.size(0)
-    #     device = x.device
-    #
-    #     if module is not None:
-    #         return self.get_module_identity(module, x)
-    #
-    #     if tsf_name in ['affine', 'aff']:  # [B, 2, 3]
-    #         identity = torch.cat([torch.eye(2, 2), torch.zeros(2, 1)], dim=1)
-    #         return identity.unsqueeze(0).expand(batch_size, -1, -1).to(device)
-    #
-    #     elif tsf_name in ['color', 'col', 'linearcolor']:  # [B, 3, 3]
-    #         identity = torch.eye(3, 3)
-    #         return identity.unsqueeze(0).expand(batch_size, -1, -1).to(device)
-    #
-    #     elif tsf_name in ['tps', 'thinplatespline']:  # [B, grid_size^2, 2]
-    #         grid_size = self.tsf_kwargs.get("grid_size", 4)
-    #         y, x_coord = torch.meshgrid(
-    #             torch.linspace(-1, 1, grid_size), torch.linspace(-1, 1, grid_size), indexing='ij'
-    #         )
-    #         identity = torch.stack([x_coord.flatten(), y.flatten()], dim=1)
-    #         return identity.unsqueeze(0).expand(batch_size, -1, -1).to(device)
-    #
-    #     elif tsf_name in ['morpho', 'morphological']:  # [B, 3, 3]
-    #         kernel_size = 3
-    #         identity = torch.full((kernel_size, kernel_size), fill_value=-5, dtype=torch.float)
-    #         center = kernel_size // 2
-    #         identity[center, center] = 5
-    #         return identity.unsqueeze(0).expand(batch_size, -1, -1).to(device)
-    #
-    #     elif tsf_name in ['proj', 'projective', 'homography']:  # [B, 3, 3]
-    #         identity = torch.eye(3, 3)
-    #         return identity.unsqueeze(0).expand(batch_size, -1, -1).to(device)
-    #
-    #     return torch.zeros(batch_size, 1).to(device)
-    #
-    # @staticmethod
-    # def get_module_identity(module, x):
-    #     batch_size = x.size(0)
-    #     if isinstance(module, AffineModule):
-    #         return module.identity.unsqueeze(0).expand(batch_size, -1, -1)
-    #     elif isinstance(module, LinearColorModule):
-    #         return module.identity.unsqueeze(0).expand(batch_size, -1, -1)
-    #     elif isinstance(module, TPSModule):
-    #         return module.identity.unsqueeze(0).expand(batch_size, -1, -1)
-    #     elif isinstance(module, MorphologicalModule):
-    #         # module.identity is [kernel_size^2 + 1], need to extract kernel part
-    #         kernel_identity = module.identity[1:]  # Skip first element (bias)
-    #         kernel_matrix = kernel_identity.view(module.kernel_size, module.kernel_size)
-    #         return kernel_matrix.unsqueeze(0).expand(batch_size, -1, -1)
-    #     elif isinstance(module, ColorModule):
-    #         return module.identity.unsqueeze(0).expand(batch_size, -1)
-    #     if hasattr(module, 'identity'):
-    #         identity = module.identity
-    #         # Add batch dimension and expand
-    #         for _ in range(len(identity.shape)):
-    #             identity = identity.unsqueeze(0)
-    #         return identity.expand(batch_size, *[-1] * len(module.identity.shape))
-    #     return torch.zeros(batch_size, 1, device=x.device)
-
-    def get_id_matrix(self, tsf_name, batch_size, device):
-        """Get identity matrix by transformation name when module not available."""
-        if tsf_name in ['affine', 'aff']:
-            identity = torch.cat([torch.eye(2, 2), torch.zeros(2, 1)], dim=1)
-            return identity.unsqueeze(0).expand(batch_size, -1, -1).to(device)
-
-        elif tsf_name in ['color', 'col']:
-            weight = torch.eye(3, 3)
-            bias = torch.zeros(3, 1)
-            return torch.cat([weight, bias], dim=1).unsqueeze(0).expand(batch_size, -1, -1).to(device)
-
-        elif tsf_name in ['linearcolor']:
-            # [B, 3, 3] - diagonal only, no bias
-            return torch.eye(3, 3).unsqueeze(0).expand(batch_size, -1, -1).to(device)
-
-        elif tsf_name in ['tps', 'thinplatespline']:
-            grid_size = self.tsf_kwargs.get("grid_size", 4)
-            y, x_coord = torch.meshgrid(
-                torch.linspace(-1, 1, grid_size, device=device),
-                torch.linspace(-1, 1, grid_size, device=device),
-                indexing='ij'
-            )
-            identity = torch.stack([x_coord.flatten(), y.flatten()], dim=1)
-            return identity.unsqueeze(0).expand(batch_size, -1, -1)
-
-        elif tsf_name in ['morpho', 'morphological']:
-            kernel_size = self.tsf_kwargs.get("kernel_size", 3)
-            identity = torch.full((kernel_size, kernel_size), -5.0, device=device)
-            center = kernel_size // 2
-            identity[center, center] = 5.0
-            return identity.unsqueeze(0).expand(batch_size, -1, -1)
-
-        elif tsf_name in ['proj', 'projective', 'homography']:
-            return torch.eye(3, 3).unsqueeze(0).expand(batch_size, -1, -1).to(device)
-
-        return torch.zeros(batch_size, 1, device=device)
+        return module.get_matrix_representation(
+            params=params,
+            batch_size=batch_size,
+            device=x.device
+        )
 
 
 class Encoder(nn.Module):
@@ -454,7 +326,7 @@ class Encoder(nn.Module):
                 in_channels, img_size, self.encoder, encoder_name
             )
         else:
-            None
+            pass
         self.encoder_name = encoder_name
 
     def forward(self, x):
@@ -613,8 +485,13 @@ class _AbstractTransformationModule(nn.Module):
             batch_size: Number of samples in batch
             device: Target device for tensors
 
-        Returns:
-            torch.Tensor: Matrix representation [B, ...]
+        Matrix formats by transformation type:
+        - Spatial (affine, similarity, rotation, translation, position): [B, 3, 3]
+        - Projective: [B, 3, 3]
+        - Color: [B, 4, 4]
+        - LinearColor: [B, 4, 4]
+        - TPS: [B, grid_size^2, 2] (control points, not a matrix)
+        - Morphological: [B, kernel_size, kernel_size] (structuring element)
         """
         if device is None:
             device = self.identity.device if hasattr(self, 'identity') else torch.device('cpu')
@@ -624,10 +501,17 @@ class _AbstractTransformationModule(nn.Module):
 
         return self.param_2_matrix(params, batch_size)
 
-    @abstractmethod
     def get_id_matrix(self, batch_size, device):
         """Returns identity transformation matrix."""
-        self.identity.unsqueeze(0).expand(batch_size, -1, -1).to(device)
+        if not hasattr(self, 'identity'):
+            raise NotImplementedError(
+                f"{self.__class__.__name__} must implement get_id_matrix or register 'identity' buffer"
+            )
+
+        identity = self.identity
+        while len(identity.shape) < 3:
+            identity = identity.unsqueeze(0)
+        return identity.expand(batch_size, *identity.shape[1:]).to(device)
 
     @abstractmethod
     def param_2_matrix(self, params, batch_size):
@@ -654,12 +538,12 @@ class IdentityModule(_AbstractTransformationModule):
     def load_with_noise(self, module, noise_scale):
         pass
 
-    def get_id_matrix(self, batch_size, device):
-        return torch.zeros(batch_size, 0, device=device)
-
     def param_2_matrix(self, params, batch_size):
         return torch.zeros(batch_size, 0, device=params.device)
 
+#########################
+#     Color Modules     #
+#########################
 
 class ColorModule(_AbstractTransformationModule):
     def __init__(self, in_channels, **kwargs):
@@ -702,19 +586,32 @@ class ColorModule(_AbstractTransformationModule):
             output = torch.cat([output, mask], dim=1)
         return output
 
+    # def get_id_matrix(self, batch_size, device):
+    #     """Returns identity color matrix [B, 3, 4] as [weight | bias]."""
+    #     weight = super().get_id_matrix(batch_size, device)
+    #     bias = torch.zeros(batch_size, self.color_ch, 1, device=device)
+    #     return torch.cat([weight, bias], dim=2)
+    #
+    # def param_2_matrix(self, params, batch_size):
+    #     """Converts color parameters to weight matrix [B, 3, 3] and bias [B, 3]."""
+    #     weight, bias = torch.split(params.view(batch_size, self.color_ch, 2), [1, 1], dim=2)
+    #     weight_matrix = (weight.expand(-1, -1, self.color_ch) * self.identity + self.identity)
+    #     return torch.cat([weight_matrix, bias], dim=2)
+
     def get_id_matrix(self, batch_size, device):
-        """Returns identity color matrix [B, 3, 4] as [weight | bias]."""
-        # TODO use _AbstractTransformationModule
-        weight = self.identity.unsqueeze(0).expand(batch_size, -1, -1).to(device)
-        bias = torch.zeros(batch_size, self.color_ch, device=device)
-        return torch.cat([weight, bias], dim=2).to(device)
+        """Returns [B, 4, 4] homogeneous color matrix: [[I_3x3 | 0], [0 0 0 1]]."""
+        identity = torch.eye(4, device=device).unsqueeze(0).expand(batch_size, -1, -1)
+        return identity
 
     def param_2_matrix(self, params, batch_size):
-        """Converts color parameters to weight matrix [B, 3, 3] and bias [B, 3]."""
+        """Converts to [B, 4, 4]: [[weight | bias], [0 0 0 1]]."""
         weight, bias = torch.split(params.view(batch_size, self.color_ch, 2), [1, 1], dim=2)
-        weight_matrix = (weight.expand(-1, -1, self.color_ch) * self.identity + self.identity)
-        # bias = bias.squeeze(-1)
-        return torch.cat([weight_matrix, bias], dim=2)
+        weight_matrix = weight.expand(-1, -1, self.color_ch) * self.identity + self.identity
+
+        top = torch.cat([weight_matrix, bias], dim=2)
+        bottom = torch.zeros(batch_size, 1, 4, device=params.device)
+        bottom[:, 0, 3] = 1.0
+        return torch.cat([top, bottom], dim=1)
 
 class LinearColorModule(_AbstractTransformationModule):
     def __init__(self, in_channels, **kwargs):
@@ -756,14 +653,18 @@ class LinearColorModule(_AbstractTransformationModule):
         return output
 
     def get_id_matrix(self, batch_size, device):
-        """Returns identity diagonal color matrix [B, 3, 3]."""
-        # TODO use _AbstractTransformationModule
-        return self.identity.unsqueeze(0).expand(batch_size, -1, -1).to(device)
+        """Returns [B, 4, 4] homogeneous diagonal matrix."""
+        return torch.eye(4, device=device).unsqueeze(0).expand(batch_size, -1, -1)
 
     def param_2_matrix(self, params, batch_size):
-        """Converts linear color parameters to diagonal matrix [B, 3, 3]."""
-        color_weights = params.view(batch_size, self.color_ch)
-        return torch.diag_embed(color_weights) + self.identity
+        """Converts to [B, 4, 4]: [[diag(w) | 0], [0 0 0 1]]."""
+        weights = params.view(batch_size, self.color_ch)
+        diag = torch.diag_embed(weights) + self.identity
+
+        top = torch.cat([diag, torch.zeros(batch_size, 3, 1, device=params.device)], dim=2)
+        bottom = torch.zeros(batch_size, 1, 4, device=params.device)
+        bottom[:, 0, 3] = 1.0
+        return torch.cat([top, bottom], dim=1)
 
 ########################
 #    Spatial Modules   #
@@ -837,14 +738,12 @@ class AffineModule(_AbstractTransformationModule):
                 align_corners=False,
             )
 
-    def get_id_matrix(self, batch_size, device):
-        """Returns identity affine matrix [B, 2, 3]."""
-        # TODO use _AbstractTransformationModule
-        return self.identity.unsqueeze(0).expand(batch_size, -1, -1).to(device)
-
     def param_2_matrix(self, params, batch_size):
-        """Converts affine parameters to 2x3 matrix [B, 2, 3]."""
-        return params.view(batch_size, 2, 3) + self.identity
+        """Converts to [B, 3, 3]: [[A | t], [0 0 1]]."""
+        matrix_2x3 = params.view(batch_size, 2, 3) + self.identity
+        bottom_row = torch.zeros(batch_size, 1, 3, device=params.device)
+        bottom_row[:, 0, 2] = 1.0
+        return torch.cat([matrix_2x3, bottom_row], dim=1)
 
 
 class TranslationModule(_AbstractTransformationModule):
@@ -884,13 +783,13 @@ class TranslationModule(_AbstractTransformationModule):
         )   
         return out
 
-    def get_id_matrix(self, batch_size, device):
-        # TODO use _AbstractTransformationModule
-        return self.identity.unsqueeze(0).expand(batch_size, -1, -1).to(device)
-
     def param_2_matrix(self, params, batch_size):
-        # TODO check whether this is correct
-        return params.view(batch_size, 2) + self.identity[:, 2].unsqueeze(0)
+        t = params.view(batch_size, 2, 1)
+        scale = torch.eye(2, 2, device=params.device).unsqueeze(0).expand(batch_size, -1, -1)
+        matrix_2x3 = torch.cat([scale, t], dim=2) + self.identity.unsqueeze(0)
+        bottom_row = torch.zeros(batch_size, 1, 3, device=params.device)
+        bottom_row[:, 0, 2] = 1.0
+        return torch.cat([matrix_2x3, bottom_row], dim=1)
 
 class PositionModule(_AbstractTransformationModule):
     def __init__(self, in_channels, img_size, **kwargs):
@@ -929,13 +828,14 @@ class PositionModule(_AbstractTransformationModule):
         )   
         return out
 
-    def get_id_matrix(self, batch_size, device):
-        # TODO use _AbstractTransformationModule
-        return self.identity.unsqueeze(0).expand(batch_size, -1, -1).to(device)
-
     def param_2_matrix(self, params, batch_size):
-        # TODO check whether this is correct
-        return params.view(batch_size, 2) + self.identity[:, 2].unsqueeze(0)
+        s, t = params.split([1, 2], dim=1)
+        s = torch.exp(s)
+        scale = s.unsqueeze(-1) * torch.eye(2, 2, device=params.device).unsqueeze(0)
+        matrix_2x3 = torch.cat([scale, t.unsqueeze(2)], dim=2) + self.identity.unsqueeze(0)
+        bottom_row = torch.zeros(batch_size, 1, 3, device=params.device)
+        bottom_row[:, 0, 2] = 1.0
+        return torch.cat([matrix_2x3, bottom_row], dim=1)
 
 class RotationModule(_AbstractTransformationModule):
     def __init__(self, in_channels, img_size, **kwargs):
@@ -954,7 +854,7 @@ class RotationModule(_AbstractTransformationModule):
 
     def _transform(self, x, beta, inverse=False):
         if inverse:
-            print_warning("Inverse transform for SimilarityModule is not implemented.")
+            print_warning("Inverse transform for RotationModule is not implemented.")
             return x
         b = beta
         t = torch.zeros(b.shape[0], 2).to(b.device)
@@ -975,13 +875,15 @@ class RotationModule(_AbstractTransformationModule):
         )
         return out
 
-    def get_id_matrix(self, batch_size, device):
-        # TODO use _AbstractTransformationModule
-        return self.identity.unsqueeze(0).expand(batch_size, -1, -1).to(device)
-
     def param_2_matrix(self, params, batch_size):
-        # TODO check whether this is correct
-        return params.view(batch_size, 2)
+        theta = params.view(batch_size, 1)
+        b_eye = torch.tensor([[0, -1], [1, 0]], device=params.device, dtype=params.dtype)
+        rot_matrix = theta.unsqueeze(-1) * b_eye.unsqueeze(0)
+        t = torch.zeros(batch_size, 2, 1, device=params.device)
+        matrix_2x3 = torch.cat([rot_matrix, t], dim=2) + self.identity.unsqueeze(0)
+        bottom_row = torch.zeros(batch_size, 1, 3, device=params.device)
+        bottom_row[:, 0, 2] = 1.0
+        return torch.cat([matrix_2x3, bottom_row], dim=1)
 
 class SimilarityModule(_AbstractTransformationModule):
     def __init__(self, in_channels, img_size, **kwargs):
@@ -1005,13 +907,15 @@ class SimilarityModule(_AbstractTransformationModule):
         grid = F.affine_grid(beta, (x.size(0), x.size(1), self.img_size[0], self.img_size[1]), align_corners=False)
         return F.grid_sample(x, grid, mode='bilinear', padding_mode=self.padding_mode, align_corners=False)
 
-    def get_id_matrix(self, batch_size, device):
-        # TODO use _AbstractTransformationModule
-        return self.identity.unsqueeze(0).expand(batch_size, -1, -1).to(device)
-
     def param_2_matrix(self, params, batch_size):
-        # TODO check whether this is correct
-        return params.view(batch_size, 2, 3) + self.identity
+        a, b, t = params.split([1, 1, 2], dim=1)
+        a_eye = torch.eye(2, 2, device=params.device)
+        b_eye = torch.tensor([[0, -1], [1, 0]], device=params.device, dtype=params.dtype)
+        scaled_rot = a.unsqueeze(-1) * a_eye + b.unsqueeze(-1) * b_eye
+        matrix_2x3 = torch.cat([scaled_rot, t.unsqueeze(2)], dim=2) + self.identity.unsqueeze(0)
+        bottom_row = torch.zeros(batch_size, 1, 3, device=params.device)
+        bottom_row[:, 0, 2] = 1.0
+        return torch.cat([matrix_2x3, bottom_row], dim=1)
 
 class ProjectiveModule(_AbstractTransformationModule):
     def __init__(self, in_channels, **kwargs):
@@ -1036,11 +940,6 @@ class ProjectiveModule(_AbstractTransformationModule):
             mode="bilinear",
             padding_mode=self.padding_mode,
         )
-
-    def get_id_matrix(self, batch_size, device):
-        """Returns identity projective matrix [B, 3, 3]."""
-        # TODO use _AbstractTransformationModule
-        return self.identity.unsqueeze(0).expand(batch_size, -1, -1).to(device)
 
     def param_2_matrix(self, params, batch_size):
         """Converts projective parameters to 3x3 matrix [B, 3, 3]."""
@@ -1092,13 +991,9 @@ class TPSModule(_AbstractTransformationModule):
             align_corners=False,
         )
 
-    def get_id_matrix(self, batch_size, device):
-        """Get identity control points for a specific module instance."""
-        # TODO use _AbstractTransformationModule
-        return self.identity.unsqueeze(0).expand(batch_size, -1, -1).to(device)
-
     def param_2_matrix(self, params, batch_size):
         """Get control points from parameters for a specific module instance."""
+        # Return control points [B, grid_size^2, 2]
         return self.identity + params.view(batch_size, -1, 2)
 
 
@@ -1161,11 +1056,11 @@ class MorphologicalModule(_AbstractTransformationModule):
         return ((x_unf * w).sum(2) / w.sum(2)).view(B, C, H, W)
 
     def get_id_matrix(self, batch_size, device):
-        """Get identity kernel for a specific module instance."""
         kernel_identity = self.identity[1:].view(self.kernel_size, self.kernel_size)
         return kernel_identity.unsqueeze(0).expand(batch_size, -1, -1).to(device)
 
     def param_2_matrix(self, params, batch_size):
         """Get kernel from parameters for a specific module instance."""
+        # Return morphological kernel [B, kernel_size, kernel_size]
         kernel_params = params[:, 1:] + self.identity[1:]
         return kernel_params.view(batch_size, self.kernel_size, self.kernel_size)
