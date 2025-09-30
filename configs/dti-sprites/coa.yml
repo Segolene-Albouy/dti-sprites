@@ -1,14 +1,12 @@
 dataset:
   name: coa
-  tag: simple-all
-  json_file: annotation.json
   img_size: 128
 model:
   name: dti_sprites
   n_sprites: 5
   n_backgrounds: 1
   n_objects: 1
-  inject_noise: 0 
+  inject_noise: 0
   prototype:
     source: data # or generator
     generator: mlp

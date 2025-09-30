@@ -20,6 +20,7 @@ class _AbstractCollectionDataset(TorchDataset):
     root = DATASETS_PATH
     name = NotImplementedError
     include_recursive = False
+    output_paths = False
 
     def __init__(self, split, img_size, cache_images=True, **kwargs):
         tag = kwargs.get("tag", "")

@@ -157,8 +157,7 @@ def convert_to_img(arr):
 
     if len(arr.shape) == 3 and arr.shape[2] == 4:
         return Image.fromarray(arr.astype(np.uint8), 'RGBA')
-    else:
-        return Image.fromarray(arr.astype(np.uint8)).convert('RGB')
+    return Image.fromarray(arr.astype(np.uint8)).convert('RGB')
 
 
 def convert_to_rgba(t):
