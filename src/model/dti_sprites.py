@@ -602,6 +602,14 @@ class DTISprites(AbstractDTI):
                 params.extend(list(chain(*[self.proba.parameters()])))
         return iter(params)
 
+    @torch.no_grad()
+    def get_tsf_matrix(self, tsf_name, x, sprite_idx=0, background=False):
+        if background and hasattr(self, 'bkg_transformer'):
+            return self.bkg_transformer.get_tsf_matrix(tsf_name, x)
+        elif hasattr(self, 'sprite_transformers'):
+            return self.sprite_transformers[sprite_idx].get_tsf_matrix(tsf_name, x)
+        return self.transformer.get_tsf_matrix(tsf_name, x)
+
     def transformer_parameters(self):
         params = [t.get_parameters() for t in self.sprite_transformers]
         if hasattr(self, "layer_transformer"):

@@ -2,6 +2,7 @@ from functools import partial
 from PIL import Image
 import torch.nn.functional as F
 from torchvision.transforms.functional import to_tensor, to_pil_image
+from torchvision.transforms import ToTensor
 
 
 import numpy as np
@@ -191,31 +192,75 @@ def draw_border(img, color, width):
     return Image.fromarray(a)
 
 
+def pad_center(img_tensor, out_h, out_w):
+    in_h, in_w = img_tensor.shape[2:]
+    pad_l, pad_t = (out_w - in_w) // 2, (out_h - in_h) // 2
+    return F.pad(img_tensor, (pad_l, out_w - in_w - pad_l, pad_t, out_h - in_h - pad_t), value=0)
+
+
 def align_img(
     original_img,
-    resize_tsf,
     affine_tsf,
-    bkg_color=(255,60,0),
-    only_translate=True
+    bkg_color=(255, 60, 0),
+    only_translate=True,
+    out_size=None
 ):
     """
-    Apply inverse transformation to align original image with cluster prototype.
+    Align image by undoing learned affine transformation at original scale.
 
     Args:
-        original_img: PIL Image (original size)
-        resize_tsf: transformation from original size to model image size
-        affine_tsf: predicted affine transformation to fit image to cluster prototype
-        bkg_color: Background color for empty pixel after transform
-        only_translate: Extract only the translation component from the affine tran
+        original_img: PIL Image at original size
+        affine_tsf: Learned affine transformation matrix [2, 3]
+        bkg_color: Background color tuple (R, G, B)
+        only_translate: If True, only undo translation; if False, undo full affine
+        out_size: Output image size (w, h). If None, uses original image size
 
     Returns:
-        PIL Image aligned at the same size as original_img
+        PIL Image: Aligned image with alpha channel, size = out_size
     """
-    # if only_translate, extract translation from affine matrix
-    # then combine resize and affine transformations
-    # apply inverse transformation to original image
-    # pixels outside the original image are filled with bkg_color
-    # then a mask (binarized) is added as alpha channel to hide bkg_color
+    img_tensor = ToTensor()(original_img).unsqueeze(0)
+
+    if out_size is None:
+        out_w, out_h = original_img.size
+    else:
+        out_w, out_h = out_size
+
+    padded_img = pad_center(img_tensor, out_h, out_w)
+    if only_translate:
+        inverse_affine = torch.tensor([
+            [1., 0., -affine_tsf[0, 2]],
+            [0., 1., -affine_tsf[1, 2]]
+        ], dtype=torch.float32)
+    else:
+        inverse_affine = invert_tsf(affine_tsf)
+
+    grid = F.affine_grid(inverse_affine.unsqueeze(0), padded_img.shape, align_corners=False)
+    aligned_tensor = F.grid_sample(padded_img, grid, mode='bilinear', padding_mode='zeros', align_corners=False)
+
+    mask = (aligned_tensor.sum(dim=1, keepdim=True) > 1e-6).float()
+    bkg_tensor = torch.tensor(bkg_color, dtype=torch.float32).view(1, 3, 1, 1) / 255.0
+    result_tensor = aligned_tensor * mask + bkg_tensor * (1 - mask)
+
+    result_with_alpha = torch.cat([result_tensor, mask], dim=1).squeeze(0).clamp(0, 1)
+    return Image.fromarray((result_with_alpha.permute(1, 2, 0).numpy() * 255).astype(np.uint8), 'RGBA')
+
+
+def combine_tsf(tsf1, tsf2):
+    """Combine two affine transformations: result = tsf2 @ tsf1"""
+    t1_homo = torch.cat([tsf1, torch.tensor([[0., 0., 1.]])], dim=0)
+    t2_homo = torch.cat([tsf2, torch.tensor([[0., 0., 1.]])], dim=0)
+
+    combined_homo = torch.matmul(t2_homo, t1_homo)
+    return combined_homo[:2, :]
+
+
+def invert_tsf(transform):
+    """Invert an affine transformation matrix."""
+    l = transform[:, :2]  # Linear part [2, 2]
+    t = transform[:, 2:]  # Translation part [2, 1]
+
+    l_inv = torch.inverse(l)
+    return torch.cat([l_inv, -torch.matmul(l_inv, t)], dim=1)
 
 
 class ImageResizer:

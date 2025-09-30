@@ -26,6 +26,10 @@ class AbstractDTI(nn.Module, ABC):
         """
         pass
 
+    @torch.no_grad()
+    def get_tsf_matrix(self, tsf_name, x):
+        return self.transformer.get_tsf_matrix(tsf_name, x)
+
     @staticmethod
     def match_dist_shape(dist, w):
         if w.shape != dist.shape:

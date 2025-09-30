@@ -434,7 +434,7 @@ class AbstractTrainer(ABC):
 
     @torch.no_grad()
     def get_cluster_assignments(self, images):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     ######################
     #   SAVING METHODS   #
@@ -493,90 +493,53 @@ class AbstractTrainer(ABC):
         raise NotImplementedError
 
     @torch.no_grad()
-    def save_aligned_images(self, path="aligned", prefix="aligned", bkg="#FF3C00", only_translate=True):
+    def save_aligned_images(self, loader=None, path="aligned", prefix="aligned", bkg=(255,60,0), only_translate=True):
         """
-        # get original images (without initial resizing) from a cluster
-        # get the transformation that was applied to the image inside Dataset class to fit to model img_size
-        # extract from all transformations the affine one
-        # if only_translate, extract only translation from affine matrix
-        # call align_img to apply inverse transformation to original image
-
         Args:
+            loader: DataLoader to use (defaults to train_loader)
             path: Save path (defaults to run_dir/aligned_clusters)
             prefix: Filename prefix
             bkg: Background color for empty regions (hex color)
             only_translate: If True, extract only translation from spatial transformations
         """
-        # tsf_seq = self.cfg.model.get("transformation_sequence", "[]")
-        # if "aff" not in tsf_seq:
-        #     self.print_and_log_info("No spatial transformation in model, skipping aligned image saving")
-        #     return
-        #
-        # path = coerce_to_path_and_create_dir(self.run_dir / path)
-        # for k in range(self.n_prototypes):
-        #     coerce_to_path_and_create_dir(path / f"cluster{k}")
-        #
-        # dataset = self.train_dataset
-        # train_loader = DataLoader(
-        #     dataset,
-        #     batch_size=self.batch_size,
-        #     num_workers=self.n_workers,
-        #     shuffle=False,
-        # )
-        #
-        # cluster_data = {k: [] for k in range(self.n_prototypes)}
-        # img_idx = 0
-        #
-        # for images, _, _, paths in train_loader:
-        #     images = images.to(self.device)
-        #     batch_distances, batch_argmin_idx = self.get_cluster_assignments(images)
-        #
-        #     # Extract affine parameters for each image and cluster
-        #     features = self.model.transformer.encoder(images) if hasattr(self.model, 'transformer') else None
-        #     affine_params = self._extract_affine_parameters(images, features)
-        #
-        #     for b, (img, idx, d, p) in enumerate(zip(images, batch_argmin_idx, batch_distances, paths)):
-        #         # Get original image and dataset transform info
-        #         ori_img = dataset.get_original(img_idx)
-        #         resize_transform = self._get_dataset_resize_transform(ori_img.size, dataset.img_size)
-        #
-        #         # Get affine transformation for this specific cluster assignment
-        #         if affine_params is not None:
-        #             if self.model.shared_t:
-        #                 affine_matrix = affine_params[b].view(2, 3)
-        #             else:
-        #                 affine_matrix = affine_params[idx][b].view(2, 3)
-        #         else:
-        #             affine_matrix = torch.eye(2, 3)  # Identity if no affine transform
-        #
-        #         cluster_data[idx].append({
-        #             'img_idx': img_idx,
-        #             'path': p,
-        #             'distance': d,
-        #             'ori_img': ori_img,
-        #             'resize_tsf': resize_transform,
-        #             'affine_matrix': affine_matrix.cpu().numpy()
-        #         })
-        #         img_idx += 1
-        #
-        # # Save aligned images for each cluster
-        # for cluster_id, data_list in cluster_data.items():
-        #     self.print_and_log_info(f"Processing cluster {cluster_id} with {len(data_list)} images")
-        #
-        #     for i, data in enumerate(data_list):
-        #         aligned_img = align_img(
-        #             data['ori_img'],
-        #             data['resize_tsf'],
-        #             data['affine_matrix'],
-        #             bkg_color=bkg,
-        #             only_translate=only_translate
-        #         )
-        #
-        #         # Save aligned image
-        #         save_path = path / f"cluster{cluster_id}" / f"{prefix}_{i:04d}.png"
-        #         aligned_img.save(save_path)
-        #
-        # self.print_and_log_info(f"Saved aligned cluster images to {path}")
+        tsf_seq = self.cfg.model.get("transformation_sequence", "")
+        if "aff" not in tsf_seq:
+            self.print_and_log_info("No spatial transformation in model, skipping aligned image saving")
+            return
+
+        save_dir = coerce_to_path_and_create_dir(self.run_dir / path)
+        for k in range(self.n_prototypes):
+            coerce_to_path_and_create_dir(save_dir / f"cluster{k}")
+
+        self.model.eval()
+        dataset = self.train_dataset
+        if loader is None:
+            loader = DataLoader(dataset, batch_size=self.batch_size, shuffle=False, num_workers=4)
+
+        max_dim = dataset.max_dim  # (width, height)
+
+        img_idx = 0
+        for batch_idx, (images, labels, masks, paths) in enumerate(loader):
+            images = images.to(self.device)
+            cluster_assignments = self.get_cluster_assignments(images)[1]  # argmin_idx
+            affine_matrices = self.model.get_tsf_matrix('affine', images)  # [B, 2, 4]
+
+            for i, (cl_idx, affine_matrix, img_path) in enumerate(zip(cluster_assignments, affine_matrices, paths)):
+                try:
+                    aligned_img = align_img(
+                        original_img=dataset.get_original(batch_idx * loader.batch_size + i),
+                        affine_tsf=affine_matrix[:2, :].cpu(),
+                        bkg_color=bkg,
+                        only_translate=only_translate,
+                        out_size=max_dim,
+                    )
+                    filename = f"{prefix}_cluster{cl_idx}_{img_idx:03d}.png"
+                    aligned_img.save(save_dir / f"cluster{cl_idx}" / filename)
+
+                except Exception as e:
+                    self.print_and_log_info(f"Failed to align image {img_path}: {e}")
+                    continue
+                img_idx += 1
 
     def save_training_metrics(self):
         """Save training metrics, plots, and visualizations"""
