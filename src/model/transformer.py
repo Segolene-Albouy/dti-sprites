@@ -180,21 +180,20 @@ class PrototypeTransformationNetwork(nn.Module):
                 ):
                     if param_i in opt.state:
                         opt.state[param_i]["exp_avg"] = opt.state[param_j]["exp_avg"]
-                        opt.state[param_i]["exp_avg_sq"] = opt.state[param_j][
-                            "exp_avg_sq"
-                        ]
+                        opt.state[param_i]["exp_avg_sq"] = opt.state[param_j]["exp_avg_sq"]
             elif isinstance(opt, (RMSprop,)):
                 for param_i, param_j in zip(
                     self.tsf_sequences[i].parameters(),
                     self.tsf_sequences[j].parameters(),
                 ):
                     if param_i in opt.state:
-                        opt.state[param_i]["square_avg"] = opt.state[param_j][
-                            "square_avg"
-                        ]
-        raise NotImplementedError(
-            "unknown optimizer: you should define how to reinstanciate statistics if any"
-        )
+                        opt.state[param_i]["square_avg"] = opt.state[param_j]["square_avg"]
+            else:
+                raise NotImplementedError(
+                    "unknown optimizer: you should define how to reinstanciate statistics if any"
+                )
+        return None
+
 
     def add_noise(self, noise_scale=0.001):
         for i in range(len(self.tsf_sequences)):

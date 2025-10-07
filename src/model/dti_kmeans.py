@@ -193,7 +193,10 @@ class DTIKmeans(AbstractDTI):
         """
         dist = super().criterion(inp, target, alpha_masks, reduction=reduction)
         if dist.dim() > 2:
-            raise ValueError(f"Distance shape ({dist.shape}) does not match expected [B, n_prototypes]")
+            if dist.dim() == 3 and dist.shape[2] in [1, 3, 4]:
+                dist = dist.mean(dim=2)
+            else:
+                raise ValueError(f"Distance shape ({dist.shape}) does not match expected [B, n_prototypes]")
 
         if dist.dim() == 2 and dist.shape[0] == self.n_prototypes:
             dist = dist.transpose(0, 1)  # [n_prototypes, B] -> [B, n_prototypes]

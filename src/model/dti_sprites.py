@@ -54,29 +54,51 @@ def init_linear(hidden, out, init, n_channels=3, std=5, value=0.9, dataset=None,
 
     elif init == "gaussian":
         print_warning("Last layer initialized with gaussian weights.")
-        h = int(math.sqrt(out / (n_channels + 1 if freeze else 1)))
-        size = [h, h]
-        mask = create_gaussian_weights(size, 1, std)
 
-        sample = mask.flatten()
-        if not freeze:
-            sample = torch.cat(
-                (
-                    torch.full(size=(n_channels * h * h,), fill_value=value),
-                    sample,
-                ),
-            )
-        nn.init.constant_(linear.weight, 1e-10)  # small value to avoid vanishing grads
+        if n_channels == 1:
+            h = int(math.sqrt(out))
+            size = [h, h]
+            mask = create_gaussian_weights(size, 1, std)
+            sample = mask.flatten()
+        else:
+            h = int(math.sqrt(out / (n_channels + 1 if not freeze else n_channels)))
+            size = [h, h]
+            mask = create_gaussian_weights(size, 1, std)
+            sample = mask.flatten()
+            if not freeze:
+                sample = torch.cat(
+                    (
+                        torch.full(size=(n_channels * h * h,), fill_value=value),
+                        sample,
+                    ),
+                )
+
+        nn.init.constant_(linear.weight, 1e-10)
         sample = torch.log(sample / (1 - sample))
         linear.bias.data.copy_(sample)
 
-    elif init == "mean":
+    elif init == "mean" or init == "sample":
         assert dataset is not None
-        images = next(iter(DataLoader(dataset, batch_size=100, shuffle=True, num_workers=4)))[0]
-        sample = images.mean(0)
+        images = next(iter(DataLoader(dataset, batch_size=100 if init == "mean" else 1, shuffle=True, num_workers=4)))[0]
+        sample = images.mean(0) if init == "mean" else images[0]
         nn.init.constant_(linear.weight, 0.0001)
-        sample = torch.log(sample / (1 - sample))
-        linear.bias.data.copy_(sample.flatten())
+        sample = torch.clamp(sample, 1e-7, 1 - 1e-7)
+
+        if n_channels == 1 and sample.size(0) > 1:
+            sample = sample.mean(0, keepdim=True)
+
+        sample_flat = sample.flatten()
+        if sample_flat.size(0) != out:
+            target_h = int(math.sqrt(out / n_channels))
+            sample_flat = F.interpolate(
+                sample.unsqueeze(0),
+                size=(target_h, target_h),
+                mode='bilinear',
+                align_corners=False
+            )[0].flatten()
+
+        sample = torch.log(sample_flat / (1 - sample_flat))
+        linear.bias.data.copy_(sample)
 
     else:
         raise NotImplementedError(f"Init '{init}' is not implemented.")
@@ -259,7 +281,6 @@ class DTISprites(AbstractDTI):
                     self.color_channels * self.img_size[0] * self.img_size[1],
                     kwargs.get("init_bkg_linear", "random"),
                     std=None,
-                    dataset=dataset,
                     value=self.value[BKG_IDX],
                 )
                 self.latent_bkg_params = nn.Parameter(
@@ -381,25 +402,24 @@ class DTISprites(AbstractDTI):
         param.requires_grad = not self.freeze[layer_idx]
         return param
 
-    @staticmethod
     def init_generator(
+        self,
         name,
         color_channel,
         out_channel,
         init="random",
         value=0.9,
         std=5,
-        dataset=None,
         latent_dim=LATENT_SIZE
     ):
         if name == "unet":
             return UNet(1, color_channel)
         elif name == "mlp":
             # Ensure out_channel accounts for both color and mask channels
-            if hasattr(dataset, 'n_channels'):
-                # For sprites: RGB + alpha channel
-                size = (dataset.img_size[0] * dataset.img_size[1])
-                out_channel = color_channel * size + size
+            # if hasattr(self.dataset, 'n_channels'):
+            #     # For sprites: RGB + alpha channel
+            #     size = (self.dataset.img_size[0] * self.dataset.img_size[1])
+            #     out_channel = color_channel * size + size
 
             linear = init_linear(
                 8 * latent_dim,
@@ -407,7 +427,7 @@ class DTISprites(AbstractDTI):
                 init,
                 n_channels=color_channel,
                 std=std,
-                dataset=dataset,
+                dataset=self.dataset,
                 value=value,
             )
             return nn.Sequential(
@@ -440,7 +460,6 @@ class DTISprites(AbstractDTI):
                     channels * self.img_size[0] * self.img_size[1],
                     self.kwargs.get("init_bkg_linear", "random"),
                     std=None,
-                    dataset=self.dataset,
                     value=self.value[BKG_IDX],
                 )
                 self.latent_bkg_params = nn.Parameter(
