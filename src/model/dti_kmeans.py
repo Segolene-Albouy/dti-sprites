@@ -38,8 +38,11 @@ class DTIKmeans(AbstractDTI):
             data_args = proto_args.get("data")
             init_type = data_args.get("init", "sample")
             std = data_args.get("gaussian_weights_std", 25)
+            value = data_args.get("value")
             self.prototype_params = nn.Parameter(
-                torch.stack(generate_data(dataset, n_prototypes, init_type, std=std))
+                torch.stack(
+                    generate_data(dataset, n_prototypes, init_type, std=std, value=value)
+                )
             )
         else:
             gen_name = proto_args.get("generator", "mlp")

@@ -108,14 +108,11 @@ def generate_data(
                     )[0]
                 sample = adjust_channels(sample, channels)
             elif init_type == "constant":
-                if value is not None:
-                    sample = torch.full(
-                        (channels, *(size or dataset.img_size)),
-                        value,
-                        dtype=torch.float,
-                    )
-                else:
-                    raise ValueError("value arg is mandatory with init_type=='constant'")
+                sample = torch.full(
+                    (channels, *(size or dataset.img_size)),
+                    value if value is not None else 0.5,
+                    dtype=torch.float,
+                )
             elif init_type == "random_color":
                 if channels == 1:
                     sample = torch.rand(1, *(size or dataset.img_size))
