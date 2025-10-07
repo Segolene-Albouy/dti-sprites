@@ -39,78 +39,6 @@ FRG_IDX, BKG_IDX, MSK_IDX = 0, 1, 2
 def softmax(logits, tau=1., dim=-1):
     return F.softmax(logits/tau, dim=dim)
 
-
-def init_linear(hidden, out, init, n_channels=3, std=5, value=0.9, dataset=None, freeze=False):
-    linear = nn.Linear(hidden, out)
-    if init == "random":
-        return linear
-
-    elif init == "constant":
-        h = int(math.sqrt(out / n_channels))
-        nn.init.constant_(linear.weight, 1e-10)
-        sample = torch.full(size=(n_channels * h * h,), fill_value=0.5)
-        sample = torch.log(sample / (1 - sample))
-
-    elif init == "gaussian":
-        print_warning("Last layer initialized with gaussian weights.")
-        h = int(math.sqrt(out / n_channels))
-        size = [h, h]
-        mask = create_gaussian_weights(size, 1, std)
-        sample = mask.flatten()
-
-        # if not freeze and n_channels > 1: # not for mask generation
-        #     sample = torch.cat(
-        #         (
-        #             torch.full(size=(n_channels * h * h,), fill_value=value),
-        #             sample,
-        #         ),
-        #     )
-
-        if n_channels > 1:
-            sample = torch.full(size=(n_channels * h * h,), fill_value=value)
-
-        nn.init.constant_(linear.weight, 1e-10)
-        sample = torch.log(sample / (1 - sample))
-
-    elif init == "mean" or init == "sample":
-        assert dataset is not None
-        images = next(iter(DataLoader(dataset, batch_size=100 if init == "mean" else 1, shuffle=True, num_workers=4)))[0]
-        sample = images.mean(0) if init == "mean" else images[0]
-        nn.init.constant_(linear.weight, 0.0001)
-        sample = torch.clamp(sample, 1e-7, 1 - 1e-7)
-
-        if n_channels == 1 and sample.size(0) > 1:
-            sample = sample.mean(0, keepdim=True)
-
-        # Handle channel count mismatch: keep only needed channels
-        if sample.size(0) > n_channels:
-            sample = sample[:n_channels]  # Drop extra channels (e.g., alpha)
-        elif sample.size(0) < n_channels:
-            # Replicate if needed (e.g., grayscale -> RGB)
-            sample = sample.expand(n_channels, -1, -1)
-
-        sample_flat = sample.flatten()
-        if sample_flat.size(0) != out:
-            target_h = int(math.sqrt(out / n_channels))
-            sample_flat = F.interpolate(
-                sample.unsqueeze(0),
-                size=(target_h, target_h),
-                mode='bilinear',
-                align_corners=False
-            )[0].flatten()
-
-        sample = torch.log(sample_flat / (1 - sample_flat))
-
-    else:
-        raise NotImplementedError(f"Init '{init}' is not implemented.")
-
-    try:
-        linear.bias.data.copy_(sample)
-    except Exception as e:
-        raise ValueError(f"Error while copying init sample with '{init}' method: {e}")
-    return linear
-
-
 def layered_composition(layers, masks, occ_grid, proba=False):
     # LBCHW size of layers and masks and LLB size for occ_grid
     occ_masks = masks.sum(dim=1) if proba else masks
@@ -425,13 +353,12 @@ class DTISprites(AbstractDTI):
             #     # For sprites: RGB + alpha channel
             #     color_channel += 1
 
-            linear = init_linear(
+            linear = self.init_linear(
                 8 * latent_dim,
                 color_channel * size[0] * size[1],
                 init=init if init is not None else self.init[layer_idx],
                 n_channels=color_channel,
                 std=std,
-                dataset=self.dataset,
                 value=value if value is not None else self.value[layer_idx],
             )
             return nn.Sequential(
@@ -442,6 +369,73 @@ class DTISprites(AbstractDTI):
                 nn.Sigmoid(),
             )
         raise NotImplementedError("Generator not implemented.")
+
+    def init_linear(self, hidden, out, init, n_channels=3, std=5, value=0.9, weight_init=1e-10):
+        linear = nn.Linear(hidden, out)
+        if init == "random":
+            return linear
+
+        elif init == "constant":
+            h = int(math.sqrt(out / n_channels))
+            sample = torch.full(size=(n_channels * h * h,), fill_value=0.5)
+            sample = torch.log(sample / (1 - sample))
+
+        elif init == "gaussian":
+            print_warning("Last layer initialized with gaussian weights.")
+            h = int(math.sqrt(out / n_channels))
+            size = [h, h]
+            mask = create_gaussian_weights(size, 1, std)
+            sample = mask.flatten()
+
+            # if not freeze and n_channels > 1: # not for mask generation
+            #     sample = torch.cat(
+            #         (
+            #             torch.full(size=(n_channels * h * h,), fill_value=value),
+            #             sample,
+            #         ),
+            #     )
+
+            if n_channels > 1:
+                sample = torch.full(size=(n_channels * h * h,), fill_value=value)
+
+            sample = torch.log(sample / (1 - sample))
+
+        elif init == "mean" or init == "sample":
+            assert self.dataset is not None
+            images = next(iter(DataLoader(
+                self.dataset, batch_size=100 if init == "mean" else 1, shuffle=True, num_workers=4
+            )))[0]
+
+            sample = images.mean(0) if init == "mean" else images[0]
+            sample = torch.clamp(sample, 1e-7, 1 - 1e-7)
+
+            c = sample.size(0)
+            if n_channels == 1 and c > 1:
+                sample = sample.mean(0, keepdim=True)
+            elif c > n_channels:
+                sample = sample[:n_channels]
+            elif c < n_channels:
+                sample = sample.expand(n_channels, -1, -1)
+
+            sample_flat = sample.flatten()
+            if sample_flat.size(0) != out:
+                target_h = int(math.sqrt(out / n_channels))
+                sample_flat = F.interpolate(
+                    sample.unsqueeze(0),
+                    size=(target_h, target_h),
+                    mode='bilinear',
+                    align_corners=False
+                )[0].flatten()
+
+            sample = torch.log(sample_flat / (1 - sample_flat))
+            weight_init = 0.0001
+
+        else:
+            raise NotImplementedError(f"Init '{init}' is not implemented.")
+
+        nn.init.constant_(linear.weight, weight_init)
+        linear.bias.data.copy_(sample)
+        return linear
 
     @property
     def n_prototypes(self):
