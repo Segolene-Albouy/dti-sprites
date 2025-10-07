@@ -43,39 +43,34 @@ def softmax(logits, tau=1., dim=-1):
 def init_linear(hidden, out, init, n_channels=3, std=5, value=0.9, dataset=None, freeze=False):
     linear = nn.Linear(hidden, out)
     if init == "random":
-        pass
+        return linear
 
     elif init == "constant":
         h = int(math.sqrt(out / n_channels))
         nn.init.constant_(linear.weight, 1e-10)
         sample = torch.full(size=(n_channels * h * h,), fill_value=0.5)
         sample = torch.log(sample / (1 - sample))
-        linear.bias.data.copy_(sample)
 
     elif init == "gaussian":
         print_warning("Last layer initialized with gaussian weights.")
+        h = int(math.sqrt(out / n_channels))
+        size = [h, h]
+        mask = create_gaussian_weights(size, 1, std)
+        sample = mask.flatten()
 
-        if n_channels == 1:
-            h = int(math.sqrt(out))
-            size = [h, h]
-            mask = create_gaussian_weights(size, 1, std)
-            sample = mask.flatten()
-        else:
-            h = int(math.sqrt(out / (n_channels + 1 if not freeze else n_channels)))
-            size = [h, h]
-            mask = create_gaussian_weights(size, 1, std)
-            sample = mask.flatten()
-            if not freeze:
-                sample = torch.cat(
-                    (
-                        torch.full(size=(n_channels * h * h,), fill_value=value),
-                        sample,
-                    ),
-                )
+        # if not freeze and n_channels > 1: # not for mask generation
+        #     sample = torch.cat(
+        #         (
+        #             torch.full(size=(n_channels * h * h,), fill_value=value),
+        #             sample,
+        #         ),
+        #     )
+
+        if n_channels > 1:
+            sample = torch.full(size=(n_channels * h * h,), fill_value=value)
 
         nn.init.constant_(linear.weight, 1e-10)
         sample = torch.log(sample / (1 - sample))
-        linear.bias.data.copy_(sample)
 
     elif init == "mean" or init == "sample":
         assert dataset is not None
@@ -86,6 +81,13 @@ def init_linear(hidden, out, init, n_channels=3, std=5, value=0.9, dataset=None,
 
         if n_channels == 1 and sample.size(0) > 1:
             sample = sample.mean(0, keepdim=True)
+
+        # Handle channel count mismatch: keep only needed channels
+        if sample.size(0) > n_channels:
+            sample = sample[:n_channels]  # Drop extra channels (e.g., alpha)
+        elif sample.size(0) < n_channels:
+            # Replicate if needed (e.g., grayscale -> RGB)
+            sample = sample.expand(n_channels, -1, -1)
 
         sample_flat = sample.flatten()
         if sample_flat.size(0) != out:
@@ -98,10 +100,14 @@ def init_linear(hidden, out, init, n_channels=3, std=5, value=0.9, dataset=None,
             )[0].flatten()
 
         sample = torch.log(sample_flat / (1 - sample_flat))
-        linear.bias.data.copy_(sample)
 
     else:
         raise NotImplementedError(f"Init '{init}' is not implemented.")
+
+    try:
+        linear.bias.data.copy_(sample)
+    except Exception as e:
+        raise ValueError(f"Error while copying init sample with '{init}' method: {e}")
     return linear
 
 
@@ -166,15 +172,19 @@ class DTISprites(AbstractDTI):
         gen_name = proto_args.get("generator", "mlp")
         latent_dims = (LATENT_SIZE,) if gen_name == "mlp" else (1, self.sprite_size[0], self.sprite_size[1])
 
-        if proto_source == "data" or self.freeze[FRG_IDX]:
-            self.prototype_params = self.set_param(
-                layer="frg", n_channels=self.n_channels
+        if self.proto_source == "data" or self.freeze[FRG_IDX]:
+            self.prototype_params = self.set_param(layer="frg", n_channels=self.n_channels)
+        else:
+            self.prototype_params = nn.Parameter(
+                torch.randn(self.n_prototypes, self.color_channels, *self.sprite_size), requires_grad=False,
             )
 
-        if proto_source == "data":
-            self.mask_params = nn.Parameter(self.init_masks())
+        if self.proto_source == "data":
+            self.mask_params = nn.Parameter(self.init_masks())  # TODO why not use set_param?
         else:
-            print_warning("Sprites will be generated from latent variables.")
+            self.mask_params = nn.Parameter(
+                torch.ones(1, 1, *self.sprite_size), requires_grad=not self.freeze[MSK_IDX]
+            )
             assert gen_name in ["mlp", "unet"]
 
             self.latent_params = nn.Parameter(
@@ -410,11 +420,10 @@ class DTISprites(AbstractDTI):
             return UNet(1, color_channel)
         elif name == "mlp":
             size = self.img_size if layer_idx == BKG_IDX else self.sprite_size
-            # Ensure out_channel accounts for both color and mask channels
-            # if hasattr(self.dataset, 'n_channels'):
+            # # Ensure out_channel accounts for both color and mask channels
+            # if layer_idx == FRG_IDX: # and self.learn_masks
             #     # For sprites: RGB + alpha channel
-            #     size = (self.dataset.img_size[0] * self.dataset.img_size[1])
-            #     out_channel = color_channel * size + size
+            #     color_channel += 1
 
             linear = init_linear(
                 8 * latent_dim,
@@ -471,10 +480,16 @@ class DTISprites(AbstractDTI):
         elif layer == "sprite":
             if self.proto_source == "data" or self.freeze[FRG_IDX]:
                 self.prototype_params = self.set_param(layer="frg", n_channels=channels)
+            else:
+                self.prototype_params = nn.Parameter(
+                    torch.randn(self.n_prototypes, self.color_channels, *self.sprite_size),
+                    requires_grad=not self.freeze[FRG_IDX],
+                )
 
             if self.proto_source == "data":
-                self.mask_params = nn.Parameter(self.init_masks())
+                self.mask_params = nn.Parameter(self.init_masks()) # TODO why not use set_param?
             else:
+                self.mask_params = nn.Parameter(1, 1, *self.sprite_size, requires_grad=not self.freeze[MSK_IDX])
                 print_warning("Sprites will be generated from latent variables.")
                 assert gen_name in ["mlp", "unet"]
 
