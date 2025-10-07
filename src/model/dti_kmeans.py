@@ -5,6 +5,7 @@ import torch.nn.functional as F
 import numpy as np
 from itertools import chain
 
+from .abstract_dti import AbstractDTI
 from .transformer import PrototypeTransformationNetwork
 from .tools import copy_with_noise, create_gaussian_weights, generate_data
 from ..utils.logger import print_warning
@@ -17,7 +18,7 @@ LATENT_SIZE = 128
 EPSILON = 1e-6
 
 
-class DTIKmeans(nn.Module):
+class DTIKmeans(AbstractDTI):
     name = "dtikmeans"
 
     def __init__(self, dataset=None, n_prototypes=10, **kwargs):
@@ -37,8 +38,11 @@ class DTIKmeans(nn.Module):
             data_args = proto_args.get("data")
             init_type = data_args.get("init", "sample")
             std = data_args.get("gaussian_weights_std", 25)
+            value = data_args.get("value")
             self.prototype_params = nn.Parameter(
-                torch.stack(generate_data(dataset, n_prototypes, init_type, std=std))
+                torch.stack(
+                    generate_data(dataset, n_prototypes, init_type, std=std, value=value)
+                )
             )
         else:
             gen_name = proto_args.get("generator", "mlp")
@@ -60,7 +64,6 @@ class DTIKmeans(nn.Module):
             )
             self.generator = self.init_generator(
                 gen_name,
-                LATENT_SIZE,
                 self.color_channels,
                 self.color_channels * self.img_size[0] * self.img_size[1],
             )
@@ -134,7 +137,7 @@ class DTIKmeans(nn.Module):
         return self.transformer.parameters()
 
     @staticmethod
-    def init_generator(name, latent_dim, color_channel, out_channel):
+    def init_generator(name, color_channel, out_channel, latent_dim=LATENT_SIZE):
         if name == "unet":
             return UNet(1, color_channel)
         elif name == "mlp":
@@ -187,10 +190,26 @@ class DTIKmeans(nn.Module):
         else:
             raise ValueError(f"undefined regularizer: {type}")
 
-    def forward(self, x):
-        # is_nan_t = torch.stack([torch.isnan(p).any() for p in self.transformer.parameters()]).any()
-        # is_nan_c = torch.stack([torch.isnan(p).any() for p in self.cluster_parameters()]).any()
+    def criterion(self, inp, target, alpha_masks=None, weights=None, reduction="mean"):
+        """
+        make sur criterion returns [B, n_prototypes]
+        """
+        dist = super().criterion(inp, target, alpha_masks, reduction=reduction)
+        if dist.dim() > 2:
+            if dist.dim() == 3 and dist.shape[2] in [1, 3, 4]:
+                dist = dist.mean(dim=2)
+            else:
+                raise ValueError(f"Distance shape ({dist.shape}) does not match expected [B, n_prototypes]")
 
+        if dist.dim() == 2 and dist.shape[0] == self.n_prototypes:
+            dist = dist.transpose(0, 1)  # [n_prototypes, B] -> [B, n_prototypes]
+        elif dist.dim() == 1:
+            # reshape to [B, 1]
+            dist = dist.unsqueeze(1)
+
+        return dist
+
+    def forward(self, x, img_masks=None):
         if self.proto_source == "generator":
             params = self.generator(self.latent_params)
             if len(params.size()) != 4:
@@ -199,45 +218,41 @@ class DTIKmeans(nn.Module):
                 )
         else:
             params = self.prototype_params
+
         prototypes = params.unsqueeze(1).expand(-1, x.size(0), x.size(1), -1, -1)
 
         if hasattr(self, "proba"):
             inp, target, features = self.transformer(x, prototypes)
             logits = self.estimate_logits(features)
+
             if self.training:
                 probas = F.gumbel_softmax(logits, dim=-1)
             else:
                 probas = F.softmax(logits, dim=-1)
+
             freq_loss = self.reg_func(probas, type="freq")
 
-            # Weight transformed sprites and sum
             if self.weighting == "tr_sprite":
+                # Weight transformed sprites and sum
                 weighted_target = (probas[..., None, None, None] * target).sum(1)
-                distances = (inp[:, 0, ...] - weighted_target) ** 2
-                if self.loss_weights is not None:
-                    distances = distances * self.loss_weights
-                distances = distances.flatten(1).mean(1)
+                distances = self.criterion(inp[:, 0, ...], weighted_target, alpha_masks=img_masks, weights=self.loss_weights)
 
-                # distances of input from transformed sprites
-                samplewise_distances = (inp - target) ** 2
-                samplewise_distances = samplewise_distances.flatten(2).mean(2)
+                # Distances of input from transformed sprites
+                samplewise_distances = self.criterion(inp, target, alpha_masks=img_masks)
+
                 bin_loss = self.reg_func(probas, type="bin")
                 a = distances.mean()
                 b = self.freq_weight * (1 - freq_loss.sum())
                 c = self.bin_weight * (bin_loss.mean())
+
                 return (
-                    a + b + c, #distances.mean()
-                    #+ self.freq_weight * (1 - freq_loss.sum())
-                    #+ self.bin_weight * (bin_loss.mean()),
+                    a + b + c,
                     samplewise_distances,
                     probas,
                 )
-            # Weight differences
+
             elif self.weighting == "diff":
-                distances = (inp - target) ** 2
-                if self.loss_weights is not None:
-                    distances = distances * self.loss_weights
-                distances = distances.flatten(2).mean(2)
+                distances = self.criterion(inp, target, alpha_masks=img_masks, weights=self.loss_weights)
                 dist_min = (distances * probas).sum(1)
 
                 return (
@@ -245,17 +260,13 @@ class DTIKmeans(nn.Module):
                     distances,
                     probas,
                 )
-            else:
-                raise ValueError(f"Probability weighting is not implemented: {self.weighting}")
+            raise ValueError(f"Probability weighting is not implemented: {self.weighting}")
 
-        else:
-            inp, target, features = self.transformer(x, prototypes)
-            distances = (inp - target) ** 2
-            if self.loss_weights is not None:
-                distances = distances * self.loss_weights
-            distances = distances.flatten(2).mean(2)
-            dist_min = distances.min(1)[0]
-            return dist_min.mean(), distances, None
+        # no proba
+        inp, target, features = self.transformer(x, prototypes)
+        distances = self.criterion(inp, target, alpha_masks=img_masks, weights=self.loss_weights)
+        dist_min = distances.min(1)[0]
+        return dist_min.mean(), distances, None
 
     @torch.no_grad()
     def transform(self, x, inverse=False):
@@ -285,20 +296,6 @@ class DTIKmeans(nn.Module):
                 unloaded_params.append(name)
         if len(unloaded_params) > 0:
             print_warning(f"load_state_dict: {unloaded_params} not found")
-
-    def reassign_empty_clusters(self, proportions):
-        if not self._reassign_cluster:
-            return [], 0
-        idx = np.argmax(proportions)
-        reassigned = []
-        for i in range(self.n_prototypes):
-            if proportions[i] < self.empty_cluster_threshold:
-                self.restart_branch_from(i, idx)
-                reassigned.append(i)
-        # to add noise to reassigned class with max number of samples
-        if len(reassigned) > 0:
-            self.restart_branch_from(idx, idx)
-        return reassigned, idx
 
     def restart_branch_from(self, i, j):
         if hasattr(self, "generator"):

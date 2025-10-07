@@ -1,12 +1,14 @@
+import gc
 from abc import ABCMeta
 from functools import lru_cache
 from PIL import Image
+import torch
 
 from torch.utils.data.dataset import Dataset as TorchDataset
 from torchvision.transforms import CenterCrop, Compose, Resize, ToTensor
 
 from ..utils import coerce_to_path_and_check_exist, get_files_from_dir
-from ..utils.image import IMG_EXTENSIONS
+from ..utils.image import IMG_EXTENSIONS, invert_tsf
 from ..utils.path import DATASETS_PATH
 from pathlib import Path
 
@@ -44,6 +46,8 @@ class _AbstractCollectionDataset(TorchDataset):
         self.n_classes = 0
         self.size = len(self.input_files)
         self.n_channels = self.get_n_channels()
+        self._max_dim = (0, 0) # width, height (PIL size)
+        self._max_dim_ok = False
 
         if isinstance(img_size, int):
             self.img_size = (img_size, img_size)
@@ -60,21 +64,46 @@ class _AbstractCollectionDataset(TorchDataset):
         return self.size
 
     def __getitem__(self, idx):
+        img_name = self.input_files[idx]
         if self.cache_images and idx in self._image_cache:
-            print(f"🏞️ Using cached image for index {idx}!")
+            print(f"🏞️ Using cached image {img_name}!")
             return self._image_cache[idx]
 
-        img = Image.open(self.input_files[idx])
+        img = Image.open(img_name)
+        self._max_dim = (max(self._max_dim[0], img.size[0]), max(self._max_dim[1], img.size[1]))
         alpha = img.split()[-1] if img.mode == "RGBA" else Image.new("L", img.size, (255))
 
         # keep grayscale images as is
         inp = self.transform(img.convert("RGB") if self.n_channels >= 3 else img)
         alpha = self.transform(alpha)
 
-        item = (inp, self.labels[idx], alpha, str(self.input_files[idx]))
+        item = (inp, self.labels[idx], alpha, str(img_name))
         if self.cache_images:
             self._image_cache[idx] = item
         return item
+
+    @property
+    def max_dim(self):
+        if len(self._image_cache) == self.size or self._max_dim_ok:
+            return self._max_dim
+        for i in range(self.size):
+            img = Image.open(self.input_files[i])
+            self._max_dim = (max(self._max_dim[0], img.size[0]), max(self._max_dim[1], img.size[1]))
+        self._max_dim_ok = True
+        return self._max_dim
+
+    def clear_cache(self):
+        del self._image_cache
+        self._image_cache = {}
+        self.cache_images = False
+        gc.collect()
+        print("🗑️ Image cache cleared!")
+
+    def get_original(self, idx):
+        img = Image.open(self.input_files[idx])
+        # keep grayscale images as is
+        return img.convert("RGB") if self.n_channels >= 3 else img
+
 
     @property
     @lru_cache()
@@ -85,6 +114,24 @@ class _AbstractCollectionDataset(TorchDataset):
         else:
             transform = [Resize(self.img_size), ToTensor()]
         return Compose(transform)
+
+    def inverse_transform(self, idx):
+        orig_size = self.get_original(idx).size
+        return Compose([Resize(orig_size)])
+
+    def get_resize_tsf(self, idx, inverse=False):
+        """
+        inverse: from model size to original size
+        """
+        orig_w, orig_h = self.get_original(idx).size  # (W, H)
+        target_h, target_w = self.img_size  # (H, W)
+
+        tsf = torch.tensor([
+            [(target_w / orig_w), 0.0, 0.0],
+            [0.0, (target_h / orig_h), 0.0]
+        ], dtype=torch.float32)
+        return invert_tsf(tsf) if inverse else tsf
+
 
     def get_n_channels(self):
         # try:

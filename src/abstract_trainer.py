@@ -26,7 +26,7 @@ try:
 except ModuleNotFoundError:
     pass
 
-from .utils.image import convert_to_img, save_gif
+from .utils.image import convert_to_img, save_gif, normalize_values, align_img
 from .utils.logger import print_info, get_logger
 from .utils.consts import *
 
@@ -39,6 +39,7 @@ class AbstractTrainer(ABC):
     run_dir = None
     logger = None
     save_img = False
+    save_iter = True
     device = None
     cfg = None
 
@@ -98,6 +99,7 @@ class AbstractTrainer(ABC):
     # Image transformation
     images_to_tsf = None
     prototypes_path = None
+    cluster_path = None
     transformation_path = None
 
     # Evaluation modes
@@ -158,8 +160,9 @@ class AbstractTrainer(ABC):
         self.dataset_kwargs = self.cfg["dataset"].copy()
         self.dataset_name = self.dataset_kwargs["name"]
 
-        self.train_dataset = get_dataset(self.dataset_name)("train", **self.dataset_kwargs)
-        self.val_dataset = get_dataset(self.dataset_name)("val", **self.dataset_kwargs)
+        dataset = get_dataset(self.dataset_name)
+        self.train_dataset = dataset("train", **self.dataset_kwargs)
+        self.val_dataset = dataset("val", **self.dataset_kwargs)
 
         self.n_classes = self.train_dataset.n_classes
         self.is_val_empty = len(self.val_dataset) == 0
@@ -237,11 +240,13 @@ class AbstractTrainer(ABC):
             return
 
         self.prototypes_path = coerce_to_path_and_create_dir(self.run_dir / "prototypes")
+        self.cluster_path = coerce_to_path_and_create_dir(self.run_dir / "clusters")
         for k in range(self.n_prototypes):
             coerce_to_path_and_create_dir(self.prototypes_path / f"proto{k}")
+            coerce_to_path_and_create_dir(self.cluster_path / f"cluster{k}")
 
         self.transformation_path = coerce_to_path_and_create_dir(self.run_dir / "transformations")
-        self.images_to_tsf = next(iter(self.train_loader))[0][:N_TRANSFORMATION_PREDICTIONS].to(self.device)
+        self.setup_images_to_tsf()
 
         for k in range(self.images_to_tsf.size(0)):
             out = coerce_to_path_and_create_dir(self.transformation_path / f"img{k}")
@@ -299,7 +304,6 @@ class AbstractTrainer(ABC):
         else:
             self.start_epoch, self.start_batch = 1, 1
 
-
     def setup_metrics(self):
         """Initialize metrics for training and evaluation"""
         self.setup_train_metrics()
@@ -338,8 +342,10 @@ class AbstractTrainer(ABC):
         self.val_scores_path = self.run_dir / VAL_SCORES_FILE
         self.save_metrics_file(self.val_scores_path, self.val_scores.names)
 
+    def setup_images_to_tsf(self):
+        self.images_to_tsf = next(iter(self.train_loader))[0][:N_TRANSFORMATION_PREDICTIONS].to(self.device)
+
     def setup_prototypes(self):
-        # self.images_to_tsf = next(iter(self.train_loader))[0][:N_TRANSFORMATION_PREDICTIONS].to(self.device)
         pass
 
     @abstractmethod
@@ -363,56 +369,6 @@ class AbstractTrainer(ABC):
     ######################
     #    MAIN METHODS    #
     ######################
-
-    @abstractmethod
-    def run(self):
-        # """Main training loop with defined sequence of operations"""
-        # self._setup()
-        #
-        # for epoch in range(self.start_epoch, self.n_epochs + 1):
-        #     self._run_epoch(epoch)
-        #
-        # self._finalize()
-        # return self.results
-        pass
-
-    def _run_epoch(self, epoch):
-        """Run a single epoch"""
-        # self._before_epoch(epoch)
-        #
-        # for batch_idx, batch_data in enumerate(self.train_loader):
-        #     self._process_batch(batch_idx, batch_data, is_training=True)
-        #
-        #     if self._should_validate(batch_idx):
-        #         self._validate()
-        #
-        # self._after_epoch(epoch)
-        pass
-
-    def _before_epoch(self, epoch):
-        """Hook called before each epoch"""
-        # self.model.train()
-        # self._log_info(f"Starting epoch {epoch}/{self.n_epochs}")
-        pass
-
-    def _process_batch(self, batch_idx, batch_data, is_training):
-        # raise NotImplementedError
-        pass
-
-    def _after_epoch(self, epoch):
-        # """Hook called after each epoch"""
-        # if self.scheduler and self.scheduler_update_range == "epoch":
-        #     self.scheduler.step()
-        #
-        # # Default implementation can be overridden
-        # self._save_checkpoint(epoch)
-        pass
-
-    def _finalize(self):
-        # """Finalize training and save model"""
-        # self._save_checkpoint(self.n_epochs)
-        # self.logger.info("Training finished.")
-        pass
 
     @abstractmethod
     def load_from_tag(self, tag, resume=False):
@@ -439,6 +395,47 @@ class AbstractTrainer(ABC):
         """Run validation process"""
         raise NotImplementedError
 
+    @torch.no_grad()
+    def compute_cluster_assignments(self, dist, proba, batch_size):
+        """
+        Generate cluster mask from model output.
+
+        Args:
+            dist: distances
+            proba: probas/class_prob
+            batch_size: Batch size (B)
+
+        Returns:
+            mask: Tensor of shape (B, n_proto) with one-hot cluster assignments
+            argmin_idx: Tensor of shape (B,) with cluster indices
+            props: Tensor of shape (n_proto,) with cluster props
+        """
+
+        if self.n_prototypes == 1:
+            # all samples assigned to cluster 0
+            mask = torch.ones(batch_size, 1, device=self.device)
+            argmin_idx = torch.zeros(batch_size, dtype=torch.long, device=self.device)
+            props = torch.ones(1, device=self.device)
+            return mask, argmin_idx, props
+
+        if hasattr(self.model, "proba") and proba is not None:
+            argmin_idx = proba.argmax(1)  # Shape: (B,)
+        else:
+            argmin_idx = dist.min(1)[1]  # Shape: (B,)
+
+        mask_size = dist.size(1) if dist is not None else self.n_prototypes
+        mask = torch.zeros(batch_size, mask_size, device=self.device)
+        mask.scatter_(1, argmin_idx.unsqueeze(1), 1)
+
+        # compute prop of samples that belong to each cluster
+        props = mask.sum(0) / batch_size
+
+        return mask, argmin_idx, props
+
+    @torch.no_grad()
+    def get_cluster_assignments(self, images):
+        raise NotImplementedError
+
     ######################
     #   SAVING METHODS   #
     ######################
@@ -463,36 +460,86 @@ class AbstractTrainer(ABC):
         self.print_and_log_info(f"Model saved at {save_path}")
 
     @torch.no_grad()
-    def save_pred(self, cur_iter=None, pred_name="prototype", prefix=None, transform_fn=None, n_preds=None):
+    def save_pred(self, cur_iter=None, pred_name="prototype", prefix=None, transform_fn=None, n_preds=None, pred_path=None):
         prefix = prefix or pred_name
         pred_names = f"{pred_name}s"
 
         try:
             preds = getattr(self.model, pred_names)
             n_preds = n_preds or getattr(self, f"n_{pred_names}", None) or self.n_prototypes
-            pred_path = getattr(self, f"{pred_names}_path")
+            pred_path = getattr(self, f"{pred_names}_path") if pred_path is None else self.run_dir / pred_path
 
             for k in range(n_preds):
                 data = preds[k]
                 if transform_fn:
                     data = transform_fn(data, k)
-                img = convert_to_img(data)
 
-                if cur_iter is not None:
-                    img.save(pred_path / f"{prefix}{k}" / f"{cur_iter}.jpg")
-                else:
+                img = convert_to_img(data)
+                if cur_iter is None:
                     img.save(pred_path / f"{prefix}{k}.png")
+                elif self.save_iter:
+                    img.save(pred_path / f"{prefix}{k}" / f"{cur_iter}.png")
 
         except AttributeError as e:
             self.print_and_log_info(f"Warning: Could not save {pred_names}: {e}")
 
-    def save_prototypes(self, cur_iter=None):
-        self.save_pred(cur_iter, pred_name="prototype", prefix="proto")
+    def save_prototypes(self, cur_iter=None, normalize_contrast=False, path=None):
+        tsf = (lambda proto, k: normalize_values(proto)) if normalize_contrast else None
+        self.save_pred(cur_iter, pred_name="prototype", prefix="proto", transform_fn=tsf, pred_path=path)
 
     @abstractmethod
     def save_transformed_images(self, cur_iter=None):
         """Save transformed images"""
         raise NotImplementedError
+
+    @torch.no_grad()
+    def save_aligned_images(self, loader=None, path="aligned", prefix="aligned", bkg=(255,60,0), only_translate=True):
+        """
+        Args:
+            loader: DataLoader to use (defaults to train_loader)
+            path: Save path (defaults to run_dir/aligned_clusters)
+            prefix: Filename prefix
+            bkg: Background color for empty regions (hex color)
+            only_translate: If True, extract only translation from spatial transformations
+        """
+        tsf_seq = self.cfg.model.get("transformation_sequence", "")
+        if "aff" not in tsf_seq:
+            self.print_and_log_info("No spatial transformation in model, skipping aligned image saving")
+            return
+
+        save_dir = coerce_to_path_and_create_dir(self.run_dir / path)
+        for k in range(self.n_prototypes):
+            coerce_to_path_and_create_dir(save_dir / f"cluster{k}")
+
+        self.model.eval()
+        dataset = self.train_dataset
+        if loader is None:
+            loader = DataLoader(dataset, batch_size=self.batch_size, shuffle=False, num_workers=4)
+
+        max_dim = dataset.max_dim  # (width, height)
+
+        img_idx = 0
+        for batch_idx, (images, labels, masks, paths) in enumerate(loader):
+            images = images.to(self.device)
+            cluster_assignments = self.get_cluster_assignments(images)[1]  # argmin_idx
+            affine_matrices = self.model.get_tsf_matrix('affine', images)  # [B, 2, 4]
+
+            for i, (cl_idx, affine_matrix, img_path) in enumerate(zip(cluster_assignments, affine_matrices, paths)):
+                try:
+                    aligned_img = align_img(
+                        original_img=dataset.get_original(batch_idx * loader.batch_size + i),
+                        affine_tsf=affine_matrix[:2, :].cpu(),
+                        bkg_color=bkg,
+                        only_translate=only_translate,
+                        out_size=max_dim,
+                    )
+                    filename = f"{prefix}_cluster{cl_idx}_{img_idx:03d}.png"
+                    aligned_img.save(save_dir / f"cluster{cl_idx}" / filename)
+
+                except Exception as e:
+                    self.print_and_log_info(f"Failed to align image {img_path}: {e}")
+                    continue
+                img_idx += 1
 
     def save_training_metrics(self):
         """Save training metrics, plots, and visualizations"""
