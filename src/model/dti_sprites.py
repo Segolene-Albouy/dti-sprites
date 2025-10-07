@@ -154,7 +154,7 @@ class DTISprites(AbstractDTI):
         # freeze, value and init contains values for
         # [foreground/prototype, background, mask] / Sprites = prototype (RBG) + mask (A)
         self.freeze = data_args.get("freeze", [False, False, False]) # NOTE put -1 instead of False?
-        self.value = data_args.get("value", [0.5, 0.5, 0.5])
+        self.value = data_args.get("value", [0.1, 0.9, 0.0])
         self.init = data_args.get("init", ["constant", "constant", "constant"])
         # n_obj contains = [layers, backgrounds, sprites]
         self.n_obj = [self.n_objects, self.n_bkg, self.n_sprites]
@@ -186,21 +186,15 @@ class DTISprites(AbstractDTI):
 
             if not self.freeze[FRG_IDX]:
                 self.frg_generator = self.init_generator(
-                    gen_name,
-                    self.color_channels,
-                    self.color_channels * self.sprite_size[0] * self.sprite_size[1],
-                    self.init[FRG_IDX],
+                    name=gen_name,
+                    layer_idx=FRG_IDX,
                     std=self.std,
-                    value=self.value[FRG_IDX],
                 )
 
             self.mask_generator = self.init_generator(
-                gen_name,
-                1,
-                self.sprite_size[0] * self.sprite_size[1],
-                self.init[MSK_IDX],
+                name=gen_name,
+                layer_idx=MSK_IDX,
                 std=self.std,
-                value=0.0,
             )
         # end MARKER
 
@@ -276,13 +270,12 @@ class DTISprites(AbstractDTI):
             else:
                 print_warning("Background will be generated from latent variables.")
                 self.bkg_generator = self.init_generator(
-                    gen_name,
-                    self.color_channels,
-                    self.color_channels * self.img_size[0] * self.img_size[1],
-                    kwargs.get("init_bkg_linear", "random"),
+                    name=gen_name,
+                    layer_idx=BKG_IDX,
                     std=None,
-                    value=self.value[BKG_IDX],
+                    init=kwargs.get("init_bkg_linear", "random")
                 )
+
                 self.latent_bkg_params = nn.Parameter(
                     torch.stack(
                         [torch.normal(mean=0.0, std=1.0, size=latent_dims) for _ in range(self.n_backgrounds)]
@@ -405,16 +398,18 @@ class DTISprites(AbstractDTI):
     def init_generator(
         self,
         name,
-        color_channel,
-        out_channel,
-        init="random",
-        value=0.9,
+        layer_idx,
         std=5,
-        latent_dim=LATENT_SIZE
+        latent_dim=LATENT_SIZE,
+        init=None,
+        value=None
     ):
+        color_channel = 1 if layer_idx == MSK_IDX else self.color_channels
+
         if name == "unet":
             return UNet(1, color_channel)
         elif name == "mlp":
+            size = self.img_size if layer_idx == BKG_IDX else self.sprite_size
             # Ensure out_channel accounts for both color and mask channels
             # if hasattr(self.dataset, 'n_channels'):
             #     # For sprites: RGB + alpha channel
@@ -423,12 +418,12 @@ class DTISprites(AbstractDTI):
 
             linear = init_linear(
                 8 * latent_dim,
-                out_channel,
-                init,
+                color_channel * size[0] * size[1],
+                init=init if init is not None else self.init[layer_idx],
                 n_channels=color_channel,
                 std=std,
                 dataset=self.dataset,
-                value=value,
+                value=value if value is not None else self.value[layer_idx],
             )
             return nn.Sequential(
                 nn.Linear(latent_dim, 8 * latent_dim),
@@ -455,12 +450,10 @@ class DTISprites(AbstractDTI):
             else:
                 print_warning("Background will be generated from latent variables.")
                 self.bkg_generator = self.init_generator(
-                    gen_name,
-                    channels,
-                    channels * self.img_size[0] * self.img_size[1],
-                    self.kwargs.get("init_bkg_linear", "random"),
+                    name=gen_name,
+                    layer_idx=BKG_IDX,
+                    init=self.kwargs.get("init_bkg_linear", "random"),
                     std=None,
-                    value=self.value[BKG_IDX],
                 )
                 self.latent_bkg_params = nn.Parameter(
                     torch.stack(
@@ -477,9 +470,6 @@ class DTISprites(AbstractDTI):
             )
         elif layer == "sprite":
             if self.proto_source == "data" or self.freeze[FRG_IDX]:
-                # self.prototype_params = self.set_param(
-                #     self.dataset, self.n_sprites, self.init[FRG_IDX], self.value[FRG_IDX], self.sprite_size, self.std, freeze=self.freeze[FRG_IDX]
-                # )
                 self.prototype_params = self.set_param(layer="frg", n_channels=channels)
 
             if self.proto_source == "data":
@@ -497,21 +487,15 @@ class DTISprites(AbstractDTI):
 
                 if not self.freeze[FRG_IDX]:
                     self.frg_generator = self.init_generator(
-                        gen_name,
-                        channels,
-                        channels * self.sprite_size[0] * self.sprite_size[1],
-                        self.init[FRG_IDX],
-                        std=self.std,
-                        value=self.value[FRG_IDX],
+                        name=gen_name,
+                        layer_idx=FRG_IDX,
+                        std=None,
                     )
 
                 self.mask_generator = self.init_generator(
-                    gen_name,
-                    1,
-                    self.sprite_size[0] * self.sprite_size[1],
-                    self.init[MSK_IDX],
+                    name=gen_name,
+                    layer_idx=MSK_IDX,
                     std=self.std,
-                    value=0.0,
                 )
 
     @property
