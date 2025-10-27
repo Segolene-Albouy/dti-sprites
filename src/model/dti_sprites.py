@@ -615,12 +615,22 @@ class DTISprites(AbstractDTI):
         return iter(params)
 
     @torch.no_grad()
-    def get_tsf_matrix(self, tsf_name, x, sprite_idx=0, background=False):
+    def get_tsf_matrix(self, tsf_name, x, argmin_idx=0, layer_idx=0, background=False, **kwargs):
         if background and hasattr(self, 'bkg_transformer'):
-            return self.bkg_transformer.get_tsf_matrix(tsf_name, x)
+            # TODO handle multiple backgrounds
+            return self.bkg_transformer.get_tsf_matrix(tsf_name, x, argmin_idx=0, **kwargs)
         elif hasattr(self, 'sprite_transformers'):
-            return self.sprite_transformers[sprite_idx].get_tsf_matrix(tsf_name, x)
-        return self.transformer.get_tsf_matrix(tsf_name, x)
+            return self.sprite_transformers[layer_idx].get_tsf_matrix(tsf_name, x, argmin_idx=argmin_idx, **kwargs)
+        return self.transformer.get_tsf_matrix(tsf_name, x, argmin_idx=argmin_idx, **kwargs)
+
+    @torch.no_grad()
+    def get_batch_tsf_matrices(self, x, argmin_idx=None, tsf_names=None, layer_idx=0, background=False, **kwargs):
+        if background and hasattr(self, 'bkg_transformer'):
+            # TODO handle multiple backgrounds
+            return self.bkg_transformer.get_batch_tsf_matrices(x, argmin_idx=0, tsf_names=tsf_names, **kwargs)
+        elif hasattr(self, 'sprite_transformers'):
+            return self.sprite_transformers[layer_idx].get_batch_tsf_matrices(x, argmin_idx=argmin_idx, tsf_names=tsf_names, **kwargs)
+        return self.transformer.get_batch_tsf_matrices(x, argmin_idx=argmin_idx, tsf_names=tsf_names, **kwargs)
 
     def transformer_parameters(self):
         params = [t.get_parameters() for t in self.sprite_transformers]

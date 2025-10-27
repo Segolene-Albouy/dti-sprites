@@ -27,8 +27,12 @@ class AbstractDTI(nn.Module, ABC):
         pass
 
     @torch.no_grad()
-    def get_tsf_matrix(self, tsf_name, x):
-        return self.transformer.get_tsf_matrix(tsf_name, x)
+    def get_tsf_matrix(self, tsf_name, x, argmin_idx=None, **kwargs):
+        return self.transformer.get_tsf_matrix(tsf_name, x, argmin_idx=argmin_idx, **kwargs)
+
+    @torch.no_grad()
+    def get_batch_tsf_matrices(self, x, argmin_idx=None, tsf_names=None, **kwargs):
+        return self.transformer.get_batch_tsf_matrices(x, argmin_idx=argmin_idx, tsf_names=tsf_names, **kwargs)
 
     @staticmethod
     def match_dist_shape(dist, w):

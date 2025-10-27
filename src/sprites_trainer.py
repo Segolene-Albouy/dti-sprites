@@ -87,7 +87,7 @@ class Trainer(AbstractTrainer):
     def setup_model(self):
         """Initialize model architecture"""
         super().setup_model()
-        self.n_backgrounds = getattr(self.model, "n_backgrounds", 0)
+        self.n_backgrounds = getattr(self.model, "n_backgrounds", 1)
         self.n_objects = max(self.model.n_objects, 1)
         self.pred_class = getattr(self.model, "pred_class", False) or getattr(
             self.model, "estimate_minimum", False
@@ -328,14 +328,6 @@ class Trainer(AbstractTrainer):
         self.train_metrics.update(
             {f"prop_clus{i}": p.item() for i, p in enumerate(proportions)}
         )
-
-    @torch.no_grad()
-    def get_cluster_assignments(self, images):
-        dist = self.model(images)[1]
-        if self.n_backgrounds > 1:
-            dist = dist.view(images.size(0), self.n_prototypes, self.n_backgrounds).min(2)[0]
-        dist_min_by_sample, argmin_idx = map(lambda t: t.cpu().numpy(), dist.min(1))
-        return dist_min_by_sample, argmin_idx
 
     ######################
     #   SAVING METHODS   #

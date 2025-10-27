@@ -35,6 +35,16 @@ def normalize_tsf_name(name):
     }.get(name.lower(), name.lower())
 
 
+def normalize_argmin_idx(argmin_idx, batch_size):
+    if isinstance(argmin_idx, (int, np.integer)):
+        return [argmin_idx] * batch_size
+    elif isinstance(argmin_idx, torch.Tensor):
+        return argmin_idx.cpu().tolist()
+    elif isinstance(argmin_idx, np.ndarray):
+        return argmin_idx.tolist()
+    return argmin_idx
+
+
 class PrototypeTransformationNetwork(nn.Module):
     def __init__(
         self, in_channels, img_size, n_prototypes, transformation_sequence, **kwargs
@@ -231,14 +241,15 @@ class PrototypeTransformationNetwork(nn.Module):
         return tsf_name in seq_tsf
 
     @torch.no_grad()
-    def get_tsf_matrix(self, tsf_name, x, prototype_idx=0):
+    def get_tsf_matrix(self, tsf_name, x, argmin_idx=0, feats=None):
         """
         Get transformation matrix for a specific transformation by name.
 
         Args:
-            tsf_name: Name of transformation ('affine', 'color', 'linearcolor', 'tps', 'morpho', etc.)
+            tsf_name: Name of transformation ('affine', 'color', etc.)
             x: Input images [B, C, H, W]
-            prototype_idx: Which prototype's transformations to use (default: 0)
+            argmin_idx: Prototype index - scalar (same for all batch) OR tensor/list [B] (per-image)
+            feats: Precomputed encoder features [B, enc_out_channels] (optional)
 
         Returns:
             torch.Tensor: Transformation matrix or identity if not active/present
@@ -247,24 +258,66 @@ class PrototypeTransformationNetwork(nn.Module):
                 TPS: [B, grid_size^2, 2] control points
                 Morphological: [B, kernel_size, kernel_size] structuring element
         """
-        tsf_name = normalize_tsf_name(tsf_name)
         batch_size = x.size(0)
-        params, module = None, None
 
+        tsf_name = normalize_tsf_name(tsf_name)
+        argmin_idx = normalize_argmin_idx(argmin_idx, batch_size)
+
+        if len(argmin_idx) != batch_size:
+            raise ValueError(
+                f"argmin_idx length ({len(argmin_idx)}) must match batch size ({batch_size})"
+            )
         if self.is_identity or not self.is_tsf_in_seq(tsf_name):
             module = TransformationSequence.get_module(tsf_name)(self.enc_out_channels, **self.tsf_kwargs)
-        else:
-            tsf_sequence = self.tsf_sequences if self.shared_t else self.tsf_sequences[prototype_idx]
-            for module, name, activated in zip(tsf_sequence.tsf_modules, tsf_sequence.tsf_names, tsf_sequence.activations):
+            return module.get_matrix_representation(params=None, batch_size=batch_size, device=x.device)
+
+        feats = self.encoder(x) if feats is None else feats
+
+        # Process each image with its corresponding prototype
+        all_matrices = []
+        for b, idx in enumerate(argmin_idx):
+            seq = self.tsf_sequences if self.shared_t else self.tsf_sequences[int(idx)]
+            params = None
+            for module, name, activated in zip(seq.tsf_modules, seq.tsf_names, seq.activations):
                 if name == tsf_name and activated:
-                    params = module.regressor(self.encoder(x))
+                    params = module.regressor(feats[b:b + 1])
                     break
 
-        return module.get_matrix_representation(
-            params=params,
-            batch_size=batch_size,
-            device=x.device
-        )
+            matrix = module.get_matrix_representation(params=params, batch_size=1, device=x.device)
+            all_matrices.append(matrix[0])
+
+        return torch.stack(all_matrices)
+
+    @torch.no_grad()
+    def get_batch_tsf_matrices(self, x, argmin_idx, tsf_names=None):
+        """
+        Get all transformation matrices for a batch efficiently.
+
+        Args:
+            x: Input images [B, C, H, W]
+            argmin_idx: Cluster index for each image [B] (array-like)
+            tsf_names: List of transformation names. If None, extracts all non-identity.
+
+        Returns:
+            List[List[Tensor]]: tsf_matrices[b][t] for image b and transform t
+        """
+        if tsf_names is None:
+            tsf_names = [name for name in self.sequence_name.split('_') if name not in ['id', 'identity']]
+
+        batch_size = x.size(0)
+        if self.is_identity or len(tsf_names) == 0:
+            return [[torch.tensor([]) for _ in tsf_names] for _ in range(batch_size)]
+
+        feats = self.encoder(x)
+        all_tsf_matrices = [
+            self.get_tsf_matrix(tsf_name, x, argmin_idx=argmin_idx, feats=feats)
+            for tsf_name in tsf_names
+        ]
+
+        return [
+            [matrices[b] for matrices in all_tsf_matrices]
+            for b in range(batch_size)
+        ]
 
 
 class Encoder(nn.Module):
@@ -368,7 +421,7 @@ class TransformationSequence(nn.Module):
 
     @staticmethod
     def get_module(name):
-        return {
+        tsf_modules = {
             # standard
             "id": IdentityModule,
             "identity": IdentityModule,
@@ -392,7 +445,10 @@ class TransformationSequence(nn.Module):
             # morphological
             "morpho": MorphologicalModule,
             "morphological": MorphologicalModule,
-        }[name]
+        }
+        if name not in tsf_modules:
+            raise ValueError(f"Unknown transformation '{name}'. Available: {sorted(set(tsf_modules.keys()))}")
+        return tsf_modules[name]
 
     def forward(self, x, features, inverse=False):
         for module, activated in zip(self.tsf_modules, self.activations):
@@ -517,6 +573,14 @@ class _AbstractTransformationModule(nn.Module):
         """Converts parameters to matrix representation."""
         pass
 
+    @abstractmethod
+    def add_bottom_row(self, matrix, batch_size):
+        """Adds bottom row [0 ... 0 1] to make homogeneous matrix."""
+        # matrix = torch.cat([matrix, t], dim=2) + self.identity.unsqueeze(0)
+        bottom_row = torch.zeros(batch_size, 1, matrix.size(2), device=matrix.device)
+        bottom_row[:, 0, -1] = 1.0
+        return torch.cat([matrix, bottom_row], dim=1)
+
 
 ########################
 #   Standard Modules   #
@@ -585,18 +649,6 @@ class ColorModule(_AbstractTransformationModule):
             output = torch.cat([output, mask], dim=1)
         return output
 
-    # def get_id_matrix(self, batch_size, device):
-    #     """Returns identity color matrix [B, 3, 4] as [weight | bias]."""
-    #     weight = super().get_id_matrix(batch_size, device)
-    #     bias = torch.zeros(batch_size, self.color_ch, 1, device=device)
-    #     return torch.cat([weight, bias], dim=2)
-    #
-    # def param_2_matrix(self, params, batch_size):
-    #     """Converts color parameters to weight matrix [B, 3, 3] and bias [B, 3]."""
-    #     weight, bias = torch.split(params.view(batch_size, self.color_ch, 2), [1, 1], dim=2)
-    #     weight_matrix = (weight.expand(-1, -1, self.color_ch) * self.identity + self.identity)
-    #     return torch.cat([weight_matrix, bias], dim=2)
-
     def get_id_matrix(self, batch_size, device):
         """Returns [B, 4, 4] homogeneous color matrix: [[I_3x3 | 0], [0 0 0 1]]."""
         identity = torch.eye(4, device=device).unsqueeze(0).expand(batch_size, -1, -1)
@@ -606,11 +658,11 @@ class ColorModule(_AbstractTransformationModule):
         """Converts to [B, 4, 4]: [[weight | bias], [0 0 0 1]]."""
         weight, bias = torch.split(params.view(batch_size, self.color_ch, 2), [1, 1], dim=2)
         weight_matrix = weight.expand(-1, -1, self.color_ch) * self.identity + self.identity
-
         top = torch.cat([weight_matrix, bias], dim=2)
-        bottom = torch.zeros(batch_size, 1, 4, device=params.device)
-        bottom[:, 0, 3] = 1.0
-        return torch.cat([top, bottom], dim=1)
+        # bottom = torch.zeros(batch_size, 1, 4, device=params.device)
+        # bottom[:, 0, 3] = 1.0
+        # return torch.cat([top, bottom], dim=1)
+        return self.add_bottom_row(top, batch_size)
 
 class LinearColorModule(_AbstractTransformationModule):
     def __init__(self, in_channels, **kwargs):
@@ -659,11 +711,11 @@ class LinearColorModule(_AbstractTransformationModule):
         """Converts to [B, 4, 4]: [[diag(w) | 0], [0 0 0 1]]."""
         weights = params.view(batch_size, self.color_ch)
         diag = torch.diag_embed(weights) + self.identity
-
         top = torch.cat([diag, torch.zeros(batch_size, 3, 1, device=params.device)], dim=2)
-        bottom = torch.zeros(batch_size, 1, 4, device=params.device)
-        bottom[:, 0, 3] = 1.0
-        return torch.cat([top, bottom], dim=1)
+        # bottom = torch.zeros(batch_size, 1, 4, device=params.device)
+        # bottom[:, 0, 3] = 1.0
+        # return torch.cat([top, bottom], dim=1)
+        return self.add_bottom_row(top, batch_size)
 
 ########################
 #    Spatial Modules   #
@@ -740,9 +792,10 @@ class AffineModule(_AbstractTransformationModule):
     def param_2_matrix(self, params, batch_size):
         """Converts to [B, 3, 3]: [[A | t], [0 0 1]]."""
         matrix_2x3 = params.view(batch_size, 2, 3) + self.identity
-        bottom_row = torch.zeros(batch_size, 1, 3, device=params.device)
-        bottom_row[:, 0, 2] = 1.0
-        return torch.cat([matrix_2x3, bottom_row], dim=1)
+        # bottom_row = torch.zeros(batch_size, 1, 3, device=params.device)
+        # bottom_row[:, 0, 2] = 1.0
+        # return torch.cat([matrix_2x3, bottom_row], dim=1)
+        return self.add_bottom_row(matrix_2x3, batch_size)
 
 
 class TranslationModule(_AbstractTransformationModule):
@@ -786,9 +839,10 @@ class TranslationModule(_AbstractTransformationModule):
         t = params.view(batch_size, 2, 1)
         scale = torch.eye(2, 2, device=params.device).unsqueeze(0).expand(batch_size, -1, -1)
         matrix_2x3 = torch.cat([scale, t], dim=2) + self.identity.unsqueeze(0)
-        bottom_row = torch.zeros(batch_size, 1, 3, device=params.device)
-        bottom_row[:, 0, 2] = 1.0
-        return torch.cat([matrix_2x3, bottom_row], dim=1)
+        # bottom_row = torch.zeros(batch_size, 1, 3, device=params.device)
+        # bottom_row[:, 0, 2] = 1.0
+        # return torch.cat([matrix_2x3, bottom_row], dim=1)
+        return self.add_bottom_row(matrix_2x3, batch_size)
 
 class PositionModule(_AbstractTransformationModule):
     def __init__(self, in_channels, img_size, **kwargs):
@@ -832,9 +886,10 @@ class PositionModule(_AbstractTransformationModule):
         s = torch.exp(s)
         scale = s.unsqueeze(-1) * torch.eye(2, 2, device=params.device).unsqueeze(0)
         matrix_2x3 = torch.cat([scale, t.unsqueeze(2)], dim=2) + self.identity.unsqueeze(0)
-        bottom_row = torch.zeros(batch_size, 1, 3, device=params.device)
-        bottom_row[:, 0, 2] = 1.0
-        return torch.cat([matrix_2x3, bottom_row], dim=1)
+        # bottom_row = torch.zeros(batch_size, 1, 3, device=params.device)
+        # bottom_row[:, 0, 2] = 1.0
+        # return torch.cat([matrix_2x3, bottom_row], dim=1)
+        return self.add_bottom_row(matrix_2x3, batch_size)
 
 class RotationModule(_AbstractTransformationModule):
     def __init__(self, in_channels, img_size, **kwargs):
@@ -880,9 +935,10 @@ class RotationModule(_AbstractTransformationModule):
         rot_matrix = theta.unsqueeze(-1) * b_eye.unsqueeze(0)
         t = torch.zeros(batch_size, 2, 1, device=params.device)
         matrix_2x3 = torch.cat([rot_matrix, t], dim=2) + self.identity.unsqueeze(0)
-        bottom_row = torch.zeros(batch_size, 1, 3, device=params.device)
-        bottom_row[:, 0, 2] = 1.0
-        return torch.cat([matrix_2x3, bottom_row], dim=1)
+        # bottom_row = torch.zeros(batch_size, 1, 3, device=params.device)
+        # bottom_row[:, 0, 2] = 1.0
+        # return torch.cat([matrix_2x3, bottom_row], dim=1)
+        return self.add_bottom_row(matrix_2x3, batch_size)
 
 class SimilarityModule(_AbstractTransformationModule):
     def __init__(self, in_channels, img_size, **kwargs):
@@ -912,9 +968,10 @@ class SimilarityModule(_AbstractTransformationModule):
         b_eye = torch.tensor([[0, -1], [1, 0]], device=params.device, dtype=params.dtype)
         scaled_rot = a.unsqueeze(-1) * a_eye + b.unsqueeze(-1) * b_eye
         matrix_2x3 = torch.cat([scaled_rot, t.unsqueeze(2)], dim=2) + self.identity.unsqueeze(0)
-        bottom_row = torch.zeros(batch_size, 1, 3, device=params.device)
-        bottom_row[:, 0, 2] = 1.0
-        return torch.cat([matrix_2x3, bottom_row], dim=1)
+        # bottom_row = torch.zeros(batch_size, 1, 3, device=params.device)
+        # bottom_row[:, 0, 2] = 1.0
+        # return torch.cat([matrix_2x3, bottom_row], dim=1)
+        return self.add_bottom_row(matrix_2x3, batch_size)
 
 class ProjectiveModule(_AbstractTransformationModule):
     def __init__(self, in_channels, **kwargs):

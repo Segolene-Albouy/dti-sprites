@@ -71,6 +71,7 @@ class AbstractTrainer(ABC):
     is_gmm = None
     model = None
     n_prototypes = None
+    n_backgrounds = 1
 
     # Optimizer and scheduler
     optimizer = None
@@ -434,7 +435,13 @@ class AbstractTrainer(ABC):
 
     @torch.no_grad()
     def get_cluster_assignments(self, images):
-        raise NotImplementedError
+        dist = self.model(images)[1]
+        if self.n_backgrounds > 1:
+            dist = dist.view(images.size(0), self.n_prototypes, self.n_backgrounds).min(2)[0]
+        dist_min_by_sample, argmin_idx = map(
+            lambda t: t.cpu().numpy(), dist.min(1)
+        )
+        return dist_min_by_sample, argmin_idx
 
     ######################
     #   SAVING METHODS   #
@@ -493,11 +500,11 @@ class AbstractTrainer(ABC):
         raise NotImplementedError
 
     @torch.no_grad()
-    def save_aligned_images(self, loader=None, path="aligned", prefix="aligned", bkg=(255,60,0), only_translate=True):
+    def save_aligned_images(self, loader=None, path="aligned_translation", prefix="aligned", bkg=(255,60,0), only_translate=True):
         """
         Args:
             loader: DataLoader to use (defaults to train_loader)
-            path: Save path (defaults to run_dir/aligned_clusters)
+            path: Save path (defaults to run_dir/aligned_translation)
             prefix: Filename prefix
             bkg: Background color for empty regions (hex color)
             only_translate: If True, extract only translation from spatial transformations
@@ -522,7 +529,7 @@ class AbstractTrainer(ABC):
         for batch_idx, (images, labels, masks, paths) in enumerate(loader):
             images = images.to(self.device)
             cluster_assignments = self.get_cluster_assignments(images)[1]  # argmin_idx
-            affine_matrices = self.model.get_tsf_matrix('affine', images)  # [B, 2, 4]
+            affine_matrices = self.model.get_tsf_matrix('affine', images, argmin_idx=cluster_assignments)  # [B, 3, 3]
 
             for i, (cl_idx, affine_matrix, img_path) in enumerate(zip(cluster_assignments, affine_matrices, paths)):
                 try:
