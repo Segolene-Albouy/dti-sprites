@@ -66,7 +66,7 @@ class _AbstractCollectionDataset(TorchDataset):
     def __getitem__(self, idx):
         img_name = self.input_files[idx]
         if self.cache_images and idx in self._image_cache:
-            print(f"🏞️ Using cached image {img_name}!")
+            print(f"🏞️ Using cached image {Path(img_name).stem}!")
             return self._image_cache[idx]
 
         img = Image.open(img_name)

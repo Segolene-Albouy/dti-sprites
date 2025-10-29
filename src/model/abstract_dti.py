@@ -7,6 +7,7 @@ class AbstractDTI(nn.Module, ABC):
     """
     Abstract base class for DTI models
     """
+    n_objects = 1
 
     def __init__(self):
         super().__init__()
