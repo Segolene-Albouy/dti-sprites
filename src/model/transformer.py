@@ -1,4 +1,4 @@
-from abc import ABCMeta, abstractmethod
+from abc import ABCMeta, abstractmethod, ABC
 from copy import deepcopy
 
 from kornia.geometry import homography_warp
@@ -26,12 +26,16 @@ def normalize_tsf_name(name):
         'id': 'identity', 'identity': 'identity',
         'col': 'color', 'color': 'color', 'linearcolor': 'linearcolor',
         'aff': 'affine', 'affine': 'affine',
-        'pos': 'position', 'position': 'position',
+        'pos': 'isotropictranslation', 'position': 'isotropictranslation',
         'proj': 'projective', 'projective': 'projective', 'homography': 'projective',
         'sim': 'similarity', 'similarity': 'similarity',
         'rotation': 'rotation', 'translation': 'translation',
         'tps': 'tps', 'thinplatespline': 'tps',
-        'morpho': 'morphological', 'morphological': 'morphological'
+        'morpho': 'morphological', 'morphological': 'morphological',
+        'isoscaling': 'isotropicscaling', 'isotropicscaling': 'isotropicscaling',
+        'anisoscaling': 'anisotropicscaling', 'anisotropicscaling': 'anisotropicscaling',
+        'isotranslation': 'isotropictranslation', 'isotropictranslation': 'isotropictranslation',
+        'anisotranslation': 'anisotropictranslation', 'anisotropictranslation': 'anisotropictranslation',
     }.get(name.lower(), name.lower())
 
 
@@ -415,7 +419,7 @@ class TransformationSequence(nn.Module):
             self.act_milestones = [-1] * self.n_tsf
             self.next_act_idx = self.n_tsf
             self.register_buffer(
-                "activations", torch.Tensor([True] * (self.n_tsf)).bool()
+                "activations", torch.Tensor([True] * self.n_tsf).bool()
             )
         self.cur_milestone = 0
 
@@ -431,8 +435,6 @@ class TransformationSequence(nn.Module):
             # spatial
             "aff": AffineModule,
             "affine": AffineModule,
-            "pos": PositionModule,
-            "position": PositionModule,
             "proj": ProjectiveModule,
             "projective": ProjectiveModule,
             "homography": ProjectiveModule,
@@ -442,6 +444,16 @@ class TransformationSequence(nn.Module):
             "tps": TPSModule,
             "thinplatespline": TPSModule,
             "translation": TranslationModule,
+            "isoscaling": IsotropicScalingModule,
+            "isotropicscaling": IsotropicScalingModule,
+            "anisoscaling": AnisotropicScalingModule,
+            "anisotropicscaling": AnisotropicScalingModule,
+            "pos": IsotropicTranslationModule,
+            "position": IsotropicTranslationModule,
+            "isotranslation": IsotropicTranslationModule, # PositionModule
+            "isotropictranslation": IsotropicTranslationModule, # PositionModule
+            "anisotranslation": AnisotropicTranslationModule,
+            "anisotropictranslation": AnisotropicTranslationModule,
             # morphological
             "morpho": MorphologicalModule,
             "morphological": MorphologicalModule,
@@ -474,10 +486,7 @@ class TransformationSequence(nn.Module):
             dim=1,
         )
         for module, activated, beta in zip(self.tsf_modules, self.activations, betas):
-            if activated and (
-                not is_var
-                or isinstance(module, (AffineModule, ProjectiveModule, TPSModule))
-            ):
+            if activated and (not is_var or isinstance(module, (AffineModule, ProjectiveModule, TPSModule))):
                 x = module.transform(x, beta)
         return x
 
@@ -509,6 +518,34 @@ class TransformationSequence(nn.Module):
 
 class _AbstractTransformationModule(nn.Module):
     __metaclass__ = ABCMeta
+
+    def __init__(self):
+        super().__init__()
+        self.out_channels = 1
+        self.tensor = None
+        self.img_size = None
+        self.color_ch = 3
+        self.n_layers = N_LAYERS
+        self.padding_mode = "border"
+        self.regressor = None
+
+    def init(self, in_channels, **kwargs):
+        self.img_size = kwargs.get("img_size", None)
+        self.color_ch = kwargs.get("color_channels", 3)
+        self.n_layers = kwargs.get("n_hidden_layers", N_LAYERS)
+        self.padding_mode = kwargs.get("padding_mode", "border")
+
+        if self.tensor is None:
+            self.tensor = torch.cat([torch.eye(2, 2), torch.zeros(2, 1)], dim=1)
+
+        self.regressor = create_mlp(in_channels, self.out_channels, N_HIDDEN_UNITS, self.n_layers)
+        self.register_buffer("identity", self.tensor)
+        self.regressor[-1].weight.data.zero_()
+        self.regressor[-1].bias.data.zero_()
+
+    @staticmethod
+    def get_out_channels(**kwargs):
+        return 1
 
     def forward(self, x, features, inverse=False):
         beta = self.regressor(features)
@@ -573,13 +610,42 @@ class _AbstractTransformationModule(nn.Module):
         """Converts parameters to matrix representation."""
         pass
 
-    @abstractmethod
-    def add_bottom_row(self, matrix, batch_size):
+    @staticmethod
+    def add_bottom_row(matrix, batch_size):
         """Adds bottom row [0 ... 0 1] to make homogeneous matrix."""
         # matrix = torch.cat([matrix, t], dim=2) + self.identity.unsqueeze(0)
         bottom_row = torch.zeros(batch_size, 1, matrix.size(2), device=matrix.device)
         bottom_row[:, 0, -1] = 1.0
         return torch.cat([matrix, bottom_row], dim=1)
+
+    def _compose_into(self, params, scale_matrix, translation_vector):
+        """Compose this transformation into existing matrix components.
+        called during composition to update the cumulative transformation matrix.
+        Each module can implement its own composition logic.
+        Args:
+            params: Parameters for this transformation [B, n_params]
+            scale_matrix: Current scale matrix [B, 2, 2]
+            translation_vector: Current translation vector [B, 2, 1]
+        Returns:
+            tuple: (new_scale_matrix [B, 2, 2], new_translation_vector [B, 2, 1])
+        """
+        this_scale, this_translation = self._to_matrix_components(params)
+        # Default: matrix multiplication
+        new_scale = torch.bmm(scale_matrix, this_scale)
+        new_translation = torch.bmm(scale_matrix, this_translation) + translation_vector
+        return new_scale, new_translation
+
+    def _to_matrix_components(self, params):
+        """Convert parameters to matrix components (scale and translation).
+        Args:
+            params: Transformation parameters [B, n_params]
+        Returns:
+            tuple: (scale_matrix [B, 2, 2], translation_vector [B, 2, 1])
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__} must implement _to_matrix_components() "
+            "or override _compose_into()"
+        )
 
 
 ########################
@@ -611,29 +677,22 @@ class IdentityModule(_AbstractTransformationModule):
 class ColorModule(_AbstractTransformationModule):
     def __init__(self, in_channels, **kwargs):
         super().__init__()
-        self.color_ch = kwargs.get("color_channels", 3)
-        clamp_name = kwargs.get("use_clamp", False)
-        self.clamp_func = get_clamp_func(clamp_name)
-        n_layers = kwargs.get("n_hidden_layers", N_LAYERS)
-        self.regressor = create_mlp(
-            in_channels, self.color_ch * 2, N_HIDDEN_UNITS, n_layers
-        )
-
-        # Identity transformation parameters and regressor initialization
-        self.register_buffer("identity", torch.eye(self.color_ch, self.color_ch))
-        self.regressor[-1].weight.data.zero_()
-        self.regressor[-1].bias.data.zero_()
+        color_ch = kwargs.get("color_channels", 3)
+        self.clamp_func = get_clamp_func(kwargs.get("use_clamp", False))
+        self.tensor = torch.eye(color_ch, color_ch)
+        self.out_channels = color_ch * 2
+        self.init(in_channels, **kwargs)
 
     def _transform(self, x, beta, inverse=False):
         if inverse:
             return x
 
+        mask = None
         if x.size(1) == 2 or x.size(1) > 3:
             x, mask = torch.split(
                 x, [self.color_ch, x.size(1) - self.color_ch], dim=1
             )
-        else:
-            mask = None
+
         if x.size(1) == 1:
             x = x.expand(-1, 3, -1, -1)
 
@@ -659,26 +718,17 @@ class ColorModule(_AbstractTransformationModule):
         weight, bias = torch.split(params.view(batch_size, self.color_ch, 2), [1, 1], dim=2)
         weight_matrix = weight.expand(-1, -1, self.color_ch) * self.identity + self.identity
         top = torch.cat([weight_matrix, bias], dim=2)
-        # bottom = torch.zeros(batch_size, 1, 4, device=params.device)
-        # bottom[:, 0, 3] = 1.0
-        # return torch.cat([top, bottom], dim=1)
         return self.add_bottom_row(top, batch_size)
 
 class LinearColorModule(_AbstractTransformationModule):
     def __init__(self, in_channels, **kwargs):
         super().__init__()
-        self.color_ch = 3 #kwargs.get("color_channels", 3)
-        clamp_name = kwargs.get("use_clamp", False)
-        self.clamp_func = get_clamp_func(clamp_name)
-        n_layers = kwargs.get("n_hidden_layers", N_LAYERS)
-        self.regressor = create_mlp(
-            in_channels, self.color_ch, N_HIDDEN_UNITS, n_layers
-        )
-
-        # Identity transformation parameters and regressor initialization
-        self.register_buffer("identity", torch.eye(self.color_ch, self.color_ch))
-        self.regressor[-1].weight.data.zero_()
-        self.regressor[-1].bias.data.zero_()
+        color_ch = 3
+        kwargs["color_channels"] = color_ch
+        self.tensor = torch.eye(color_ch, color_ch)
+        self.out_channels = color_ch
+        self.clamp_func = get_clamp_func(kwargs.get("use_clamp", False))
+        self.init(in_channels, **kwargs)
 
     def _transform(self, x, beta, inverse=False):
         if inverse:
@@ -712,9 +762,6 @@ class LinearColorModule(_AbstractTransformationModule):
         weights = params.view(batch_size, self.color_ch)
         diag = torch.diag_embed(weights) + self.identity
         top = torch.cat([diag, torch.zeros(batch_size, 3, 1, device=params.device)], dim=2)
-        # bottom = torch.zeros(batch_size, 1, 4, device=params.device)
-        # bottom[:, 0, 3] = 1.0
-        # return torch.cat([top, bottom], dim=1)
         return self.add_bottom_row(top, batch_size)
 
 ########################
@@ -722,23 +769,20 @@ class LinearColorModule(_AbstractTransformationModule):
 ########################
 
 class AffineModule(_AbstractTransformationModule):
-    def __init__(self, in_channels, img_size, **kwargs):
+    def __init__(self, in_channels, **kwargs):
         super().__init__()
-        self.img_size = img_size
-        self.padding_mode = kwargs.get("padding_mode", "border")
         self.freeze_frg = kwargs.get("freeze_frg", False)
-        n_layers = kwargs.get("n_hidden_layers", N_LAYERS)
-        self.regressor = create_mlp(in_channels, 6, N_HIDDEN_UNITS, n_layers)
+        self.out_channels = self.get_out_channels()
+        self.init(in_channels, **kwargs)
 
-        # Identity transformation parameters and regressor initialization
-        self.register_buffer(
-            "identity", torch.cat([torch.eye(2, 2), torch.zeros(2, 1)], dim=1)
-        )
-        self.regressor[-1].weight.data.zero_()
-        self.regressor[-1].bias.data.zero_()
+    @staticmethod
+    def get_out_channels(**kwargs):
+        return 6
 
     def _transform(self, x, beta, inverse=False):
         beta = beta.view(-1, 2, 3) + self.identity
+        size_1 = 1 if (self.freeze_frg or (inverse and x.shape[1] == 4)) else x.size(1)
+
         if inverse:
             row = torch.tensor(
                 [[[0, 0, 1]]] * x.size(0), dtype=torch.float, device=beta.device
@@ -746,27 +790,23 @@ class AffineModule(_AbstractTransformationModule):
             beta = torch.cat([beta, row], dim=1)
             beta = torch.inverse(beta)[:, :2, :]
 
-            if x.shape[1] == 4:
-                grid = F.affine_grid(
-                    beta,
-                    (x.size(0), 1, self.img_size[0], self.img_size[1]),
-                    align_corners=False,
-                )
-                out = F.grid_sample(
-                    x[:, -1, :, :].unsqueeze(1),
-                    grid,
-                    mode="bilinear",
-                    padding_mode=self.padding_mode,
-                    align_corners=False,
-                )
-                return torch.cat([x[:, :3, ...], out], dim=1)
+        grid = F.affine_grid(
+            beta,
+            (x.size(0), size_1, self.img_size[0], self.img_size[1]),
+            align_corners=False,
+        )
 
-        if self.freeze_frg:
-            grid = F.affine_grid(
-                beta,
-                (x.size(0), 1, self.img_size[0], self.img_size[1]),
+        if inverse and x.shape[1] == 4:
+            out = F.grid_sample(
+                x[:, -1, :, :].unsqueeze(1),
+                grid,
+                mode="bilinear",
+                padding_mode=self.padding_mode,
                 align_corners=False,
             )
+            return torch.cat([x[:, :3, ...], out], dim=1)
+
+        if self.freeze_frg:
             out = F.grid_sample(
                 x[:, -1, ...].unsqueeze(1),
                 grid,
@@ -775,183 +815,243 @@ class AffineModule(_AbstractTransformationModule):
                 align_corners=False,
             )
             return torch.cat([x[:, : x.size(1) - 1, ...], out], dim=1)
-        else:
-            grid = F.affine_grid(
-                beta,
-                (x.size(0), x.size(1), self.img_size[0], self.img_size[1]),
-                align_corners=False,
-            )
-            return F.grid_sample(
-                x,
-                grid,
-                mode="bilinear",
-                padding_mode=self.padding_mode,
-                align_corners=False,
-            )
 
-    def param_2_matrix(self, params, batch_size):
-        """Converts to [B, 3, 3]: [[A | t], [0 0 1]]."""
-        matrix_2x3 = params.view(batch_size, 2, 3) + self.identity
-        # bottom_row = torch.zeros(batch_size, 1, 3, device=params.device)
-        # bottom_row[:, 0, 2] = 1.0
-        # return torch.cat([matrix_2x3, bottom_row], dim=1)
-        return self.add_bottom_row(matrix_2x3, batch_size)
-
-
-class TranslationModule(_AbstractTransformationModule):
-    def __init__(self, in_channels, img_size, **kwargs):
-        super().__init__()
-        self.img_size = img_size
-        self.padding_mode = kwargs.get("padding_mode", "border")
-        n_layers = kwargs.get("n_hidden_layers", N_LAYERS)
-        self.regressor = create_mlp(in_channels, 2, N_HIDDEN_UNITS, n_layers)
-
-        # Identity transformation parameters and regressor initialization
-        self.register_buffer(
-            "identity", torch.cat([torch.eye(2, 2), torch.zeros(2, 1)], dim=1)
-        )
-        self.regressor[-1].weight.data.zero_()
-        self.regressor[-1].bias.data.zero_()
-
-    def _transform(self, x, beta, inverse=False):
-        if inverse:
-            print_warning("Inverse transform for PositionModule is not implemented.")
-            return x
-        t = beta
-        scale = torch.ones(t.shape[0]).to(t.device)
-        scale = scale[..., None, None].expand(-1, 2, 2) * torch.eye(2, 2).to(t.device)
-        beta = torch.cat([scale, t.unsqueeze(2)], dim=2) + self.identity
-        grid = F.affine_grid(
-            beta,
-            (x.size(0), x.size(1), self.img_size[0], self.img_size[1]),
-            align_corners=False,
-        )
-        out = F.grid_sample(
-            x,
-            grid,
-            mode="bilinear",
-            padding_mode="zeros",
-            align_corners=False,
-        )   
-        return out
-
-    def param_2_matrix(self, params, batch_size):
-        t = params.view(batch_size, 2, 1)
-        scale = torch.eye(2, 2, device=params.device).unsqueeze(0).expand(batch_size, -1, -1)
-        matrix_2x3 = torch.cat([scale, t], dim=2) + self.identity.unsqueeze(0)
-        # bottom_row = torch.zeros(batch_size, 1, 3, device=params.device)
-        # bottom_row[:, 0, 2] = 1.0
-        # return torch.cat([matrix_2x3, bottom_row], dim=1)
-        return self.add_bottom_row(matrix_2x3, batch_size)
-
-class PositionModule(_AbstractTransformationModule):
-    def __init__(self, in_channels, img_size, **kwargs):
-        super().__init__()
-        self.img_size = img_size
-        self.padding_mode = kwargs.get("padding_mode", "border")
-        n_layers = kwargs.get("n_hidden_layers", N_LAYERS)
-        self.regressor = create_mlp(in_channels, 3, N_HIDDEN_UNITS, n_layers)
-
-        # Identity transformation parameters and regressor initialization
-        self.register_buffer(
-            "identity", torch.cat([torch.eye(2, 2), torch.zeros(2, 1)], dim=1)
-        )
-        self.regressor[-1].weight.data.zero_()
-        self.regressor[-1].bias.data.zero_()
-
-    def _transform(self, x, beta, inverse=False):
-        if inverse:
-            print_warning("Inverse transform for PositionModule is not implemented.")
-            return x
-        s, t = beta.split([1, 2], dim=1)
-        s = torch.exp(s)
-        scale = s[..., None].expand(-1, 2, 2) * torch.eye(2, 2).to(s.device)
-        beta = torch.cat([scale, t.unsqueeze(2)], dim=2) + self.identity
-        grid = F.affine_grid(
-            beta,
-            (x.size(0), x.size(1), self.img_size[0], self.img_size[1]),
-            align_corners=False,
-        )
-        out = F.grid_sample(
-            x,
-            grid,
-            mode="bilinear",
-            padding_mode="zeros",
-            align_corners=False,
-        )   
-        return out
-
-    def param_2_matrix(self, params, batch_size):
-        s, t = params.split([1, 2], dim=1)
-        s = torch.exp(s)
-        scale = s.unsqueeze(-1) * torch.eye(2, 2, device=params.device).unsqueeze(0)
-        matrix_2x3 = torch.cat([scale, t.unsqueeze(2)], dim=2) + self.identity.unsqueeze(0)
-        # bottom_row = torch.zeros(batch_size, 1, 3, device=params.device)
-        # bottom_row[:, 0, 2] = 1.0
-        # return torch.cat([matrix_2x3, bottom_row], dim=1)
-        return self.add_bottom_row(matrix_2x3, batch_size)
-
-class RotationModule(_AbstractTransformationModule):
-    def __init__(self, in_channels, img_size, **kwargs):
-        super().__init__()
-        self.img_size = img_size
-        self.padding_mode = kwargs.get("padding_mode", "border")
-        n_layers = kwargs.get("n_hidden_layers", N_LAYERS)
-        self.regressor = create_mlp(in_channels, 1, N_HIDDEN_UNITS, n_layers)
-        self.layer_size = kwargs.get("layer_size")
-        # Identity transformation parameters and regressor initialization
-        self.register_buffer(
-            "identity", torch.cat([torch.eye(2, 2), torch.zeros(2, 1)], dim=1)
-        )
-        self.regressor[-1].weight.data.zero_()
-        self.regressor[-1].bias.data.zero_()
-
-    def _transform(self, x, beta, inverse=False):
-        if inverse:
-            print_warning("Inverse transform for RotationModule is not implemented.")
-            return x
-        b = beta
-        t = torch.zeros(b.shape[0], 2).to(b.device)
-        b_eye = torch.Tensor([[0, -1], [1, 0]]).to(b.device)
-        scaled_rot = b[..., None].expand(-1, 2, 2) * b_eye 
-        beta = torch.cat([scaled_rot, t.unsqueeze(2)], dim=2) + self.identity
-        grid = F.affine_grid(
-            beta,
-            (x.size(0), x.size(1), self.layer_size[0], self.layer_size[1]),
-            align_corners=False,
-        )
-        out = F.grid_sample(
+        return F.grid_sample(
             x,
             grid,
             mode="bilinear",
             padding_mode=self.padding_mode,
             align_corners=False,
         )
-        return out
 
     def param_2_matrix(self, params, batch_size):
-        theta = params.view(batch_size, 1)
-        b_eye = torch.tensor([[0, -1], [1, 0]], device=params.device, dtype=params.dtype)
-        rot_matrix = theta.unsqueeze(-1) * b_eye.unsqueeze(0)
-        t = torch.zeros(batch_size, 2, 1, device=params.device)
-        matrix_2x3 = torch.cat([rot_matrix, t], dim=2) + self.identity.unsqueeze(0)
-        # bottom_row = torch.zeros(batch_size, 1, 3, device=params.device)
-        # bottom_row[:, 0, 2] = 1.0
-        # return torch.cat([matrix_2x3, bottom_row], dim=1)
+        """Converts to [B, 3, 3]: [[A | t], [0 0 1]]."""
+        matrix_2x3 = params.view(batch_size, 2, 3) + self.identity
         return self.add_bottom_row(matrix_2x3, batch_size)
 
-class SimilarityModule(_AbstractTransformationModule):
-    def __init__(self, in_channels, img_size, **kwargs):
-        super().__init__()
-        self.img_size = img_size
-        self.padding_mode = kwargs.get('padding_mode', 'border')
-        n_layers = kwargs.get('n_hidden_layers', N_LAYERS)
-        self.regressor = create_mlp(in_channels, 4, N_HIDDEN_UNITS, n_layers)
 
-        # Identity transformation parameters and regressor initialization
-        self.register_buffer('identity', torch.cat([torch.eye(2, 2), torch.zeros(2, 1)], dim=1))
-        self.regressor[-1].weight.data.zero_()
-        self.regressor[-1].bias.data.zero_()
+class TranslationModule(_AbstractTransformationModule):
+    def __init__(self, in_channels, **kwargs):
+        super().__init__()
+        self.out_channels = self.get_out_channels()
+        self.init(in_channels, **kwargs)
+
+    @staticmethod
+    def get_out_channels(**kwargs):
+        return 2
+
+    def _to_matrix_components(self, params):
+        """Convert translation parameters to matrix components."""
+        batch_size = params.shape[0]
+        scale = torch.eye(2, 2, device=params.device).unsqueeze(0).expand(batch_size, -1, -1).clone()
+        translation = params.unsqueeze(2)
+        return scale, translation
+
+    def _compose_into(self, params, scale_matrix, translation_vector):
+        """Compose translation by adding to translation vector."""
+        this_translation = params.unsqueeze(2)
+        new_translation = translation_vector + this_translation
+        return scale_matrix, new_translation
+
+    def _transform(self, x, beta, inverse=False):
+        if inverse:
+            print_warning("Inverse transform for TranslationModule is not implemented.")
+            return x
+
+        scale, translation = self._to_matrix_components(beta)
+        beta_matrix = torch.cat([scale, translation], dim=2) + self.identity
+
+        grid = F.affine_grid(
+            beta_matrix,
+            (x.size(0), x.size(1), self.img_size[0], self.img_size[1]),
+            align_corners=False,
+        )
+        return F.grid_sample(
+            x, grid, mode="bilinear",
+            padding_mode=self.padding_mode, align_corners=False
+        )
+
+    def param_2_matrix(self, params, batch_size):
+        scale, translation = self._to_matrix_components(params)
+        matrix_2x3 = torch.cat([scale, translation], dim=2) + self.identity.unsqueeze(0)
+        return self.add_bottom_row(matrix_2x3, batch_size)
+
+
+class ScalingModule(_AbstractTransformationModule):
+    def __init__(self, in_channels, isotropic=True, **kwargs):
+        super().__init__()
+        self.isotropic = isotropic
+        self.out_channels = self.get_out_channels(isotropic)
+        self.init(in_channels, **kwargs)
+
+    @staticmethod
+    def get_out_channels(isotropic=True):
+        return 1 if isotropic else 2
+
+    def _compute_scale_matrix(self, params):
+        """Compute scale matrix from parameters."""
+        if self.isotropic:
+            s = torch.exp(params)
+            return s.unsqueeze(-1) * torch.eye(2, 2, device=params.device).unsqueeze(0)
+        sx, sy = params.split([1, 1], dim=1)
+        sx, sy = torch.exp(sx), torch.exp(sy)
+        batch_size = params.shape[0]
+        scale = torch.zeros(batch_size, 2, 2, device=params.device)
+        scale[:, 0, 0] = sx.squeeze(1)
+        scale[:, 1, 1] = sy.squeeze(1)
+        return scale
+
+    def _to_matrix_components(self, params):
+        """Convert scale parameters to matrix components."""
+        scale = self._compute_scale_matrix(params)
+        translation = torch.zeros(params.shape[0], 2, 1, device=params.device)
+        return scale, translation
+
+    def _compose_into(self, params, scale_matrix, translation_vector):
+        """Compose scaling by multiplying scale matrices."""
+        this_scale = self._compute_scale_matrix(params)
+        new_scale = torch.bmm(scale_matrix, this_scale)
+        return new_scale, translation_vector
+
+    def _transform(self, x, beta, inverse=False):
+        scale, translation = self._to_matrix_components(beta)
+        beta_matrix = torch.cat([scale, translation], dim=2) + self.identity
+
+        grid = F.affine_grid(
+            beta_matrix,
+            (x.size(0), x.size(1), self.img_size[0], self.img_size[1]),
+            align_corners=False,
+        )
+        return F.grid_sample(
+            x, grid, mode="bilinear",
+            padding_mode=self.padding_mode, align_corners=False
+        )
+
+    def param_2_matrix(self, params, batch_size):
+        scale, translation = self._to_matrix_components(params)
+        matrix_2x3 = torch.cat([scale, translation], dim=2) + self.identity.unsqueeze(0)
+        return self.add_bottom_row(matrix_2x3, batch_size)
+
+
+class IsotropicScalingModule(ScalingModule):
+    isotropic = True
+    def __init__(self, in_channels, **kwargs):
+        super().__init__(in_channels, isotropic=True, **kwargs)
+
+
+class AnisotropicScalingModule(ScalingModule):
+    isotropic = False
+    def __init__(self, in_channels, **kwargs):
+        super().__init__(in_channels, isotropic=False, **kwargs)
+
+
+# class PositionModule(_AbstractTransformationModule):
+#     # NOTE same as IsotropicTranslationModule, to delete?
+#     def __init__(self, in_channels, **kwargs):
+#         super().__init__()
+#         self.out_channels = self.get_out_channels()
+#         self.init(in_channels, **kwargs)
+#
+#     @staticmethod
+#     def get_out_channels(**kwargs):
+#         return 3
+#
+#     def _transform(self, x, beta, inverse=False):
+#         if inverse:
+#             print_warning("Inverse transform for PositionModule is not implemented.")
+#             return x
+#         s, t = beta.split([1, 2], dim=1)
+#         s = torch.exp(s)
+#         scale = s[..., None].expand(-1, 2, 2) * torch.eye(2, 2).to(s.device)
+#         beta = torch.cat([scale, t.unsqueeze(2)], dim=2) + self.identity
+#         grid = F.affine_grid(
+#             beta,
+#             (x.size(0), x.size(1), self.img_size[0], self.img_size[1]),
+#             align_corners=False,
+#         )
+#         out = F.grid_sample(
+#             x,
+#             grid,
+#             mode="bilinear",
+#             padding_mode="zeros",
+#             align_corners=False,
+#         )
+#         return out
+#
+#     def param_2_matrix(self, params, batch_size):
+#         s, t = params.split([1, 2], dim=1)
+#         s = torch.exp(s)
+#         scale = s.unsqueeze(-1) * torch.eye(2, 2, device=params.device).unsqueeze(0)
+#         matrix_2x3 = torch.cat([scale, t.unsqueeze(2)], dim=2) + self.identity.unsqueeze(0)
+#         return self.add_bottom_row(matrix_2x3, batch_size)
+
+class RotationModule(_AbstractTransformationModule):
+    def __init__(self, in_channels, exact_rotation=True, **kwargs):
+        super().__init__()
+        self.exact_rotation = exact_rotation
+        self.layer_size = kwargs.get("layer_size")
+        self.init(in_channels, **kwargs)
+
+    def _compute_rotation_matrix(self, params):
+        if self.exact_rotation:
+            theta = params.squeeze(1)
+            cos_theta, sin_theta = torch.cos(theta), torch.sin(theta)
+            row1 = torch.stack([cos_theta, -sin_theta], dim=1)
+            row2 = torch.stack([sin_theta, cos_theta], dim=1)
+            return torch.stack([row1, row2], dim=1)
+
+        # First-order approximation (legacy)
+        b_eye = torch.tensor([[0, -1], [1, 0]], device=params.device, dtype=params.dtype)
+        return params.squeeze(1).unsqueeze(-1).unsqueeze(-1) * b_eye.unsqueeze(0)
+
+    def _to_matrix_components(self, params):
+        rotation = self._compute_rotation_matrix(params)
+        translation = torch.zeros(params.shape[0], 2, 1, device=params.device)
+        return rotation, translation
+
+    def _compose_into(self, params, scale_matrix, translation_vector):
+        rotation = self._compute_rotation_matrix(params)
+        new_scale = torch.bmm(scale_matrix, rotation)
+        return new_scale, translation_vector
+
+    def _transform(self, x, beta, inverse=False):
+        if inverse:
+            print_warning("Inverse transform for RotationModule is not implemented.")
+            return x
+
+        rotation, translation = self._to_matrix_components(beta)
+        if self.exact_rotation:
+            beta_matrix = torch.cat([rotation, translation], dim=2) + self.identity
+        else:
+            beta_matrix = torch.cat([rotation, translation], dim=2) + torch.eye(2, 3, device=beta.device).unsqueeze(0)
+
+        grid_size = self.img_size if hasattr(self, 'img_size') and self.img_size is not None else self.layer_size
+        grid = F.affine_grid(
+            beta_matrix,
+            (x.size(0), x.size(1), grid_size[0], grid_size[1]),
+            align_corners=False,
+        )
+        return F.grid_sample(
+            x, grid, mode="bilinear",
+            padding_mode=self.padding_mode, align_corners=False
+        )
+
+    def param_2_matrix(self, params, batch_size):
+        rotation, translation = self._to_matrix_components(params)
+        id_tensor = self.identity.unsqueeze(0) if self.use_exact_rotation else torch.eye(2, 3, device=params.device).unsqueeze(0)
+        matrix_2x3 = torch.cat([rotation, translation], dim=2) + id_tensor
+        return self.add_bottom_row(matrix_2x3, batch_size)
+
+
+class SimilarityModule(_AbstractTransformationModule):
+    def __init__(self, in_channels, **kwargs):
+        super().__init__()
+        self.out_channels = self.get_out_channels()
+        self.init(in_channels, **kwargs)
+
+    @staticmethod
+    def get_out_channels(**kwargs):
+        return 4
 
     def _transform(self, x, beta, inverse=False):
         a, b, t = beta.split([1, 1, 2], dim=1)
@@ -968,22 +1068,18 @@ class SimilarityModule(_AbstractTransformationModule):
         b_eye = torch.tensor([[0, -1], [1, 0]], device=params.device, dtype=params.dtype)
         scaled_rot = a.unsqueeze(-1) * a_eye + b.unsqueeze(-1) * b_eye
         matrix_2x3 = torch.cat([scaled_rot, t.unsqueeze(2)], dim=2) + self.identity.unsqueeze(0)
-        # bottom_row = torch.zeros(batch_size, 1, 3, device=params.device)
-        # bottom_row[:, 0, 2] = 1.0
-        # return torch.cat([matrix_2x3, bottom_row], dim=1)
         return self.add_bottom_row(matrix_2x3, batch_size)
 
 class ProjectiveModule(_AbstractTransformationModule):
     def __init__(self, in_channels, **kwargs):
         super().__init__()
-        self.padding_mode = kwargs.get("padding_mode", "border")
-        n_layers = kwargs.get("n_hidden_layers", N_LAYERS)
-        self.regressor = create_mlp(in_channels, 9, N_HIDDEN_UNITS, n_layers)
+        self.out_channels = self.get_out_channels()
+        self.tensor = torch.eye(3, 3)
+        self.init(in_channels, **kwargs)
 
-        # Identity transformation parameters and regressor initialization
-        self.register_buffer("identity", torch.eye(3, 3))
-        self.regressor[-1].weight.data.zero_()
-        self.regressor[-1].bias.data.zero_()
+    @staticmethod
+    def get_out_channels(**kwargs):
+        return 9
 
     def _transform(self, x, beta, inverse=False):
         beta = beta.view(-1, 3, 3) + self.identity
@@ -1003,26 +1099,17 @@ class ProjectiveModule(_AbstractTransformationModule):
 
 
 class TPSModule(_AbstractTransformationModule):
-    def __init__(self, in_channels, img_size, **kwargs):
+    def __init__(self, in_channels, **kwargs):
         super().__init__()
-        self.img_size = img_size
-        self.padding_mode = kwargs.get("padding_mode", "border")
         self.freeze_frg = kwargs.get("freeze_frg", False)
         self.grid_size = kwargs.get("grid_size", 4)
-        n_layers = kwargs.get("n_hidden_layers", N_LAYERS)
-        self.regressor = create_mlp(
-            in_channels, self.grid_size**2 * 2, N_HIDDEN_UNITS, n_layers
-        )
+        self.out_channels = self.grid_size ** 2 * 2
         y, x = torch.meshgrid(
             torch.linspace(-1, 1, self.grid_size), torch.linspace(-1, 1, self.grid_size)
         )
-        target_control_points = torch.stack([x.flatten(), y.flatten()], dim=1)
-        self.tps_grid = TPSGrid(img_size, target_control_points)
-
-        # Identity transformation parameters and regressor initialization
-        self.register_buffer("identity", target_control_points)
-        self.regressor[-1].weight.data.zero_()
-        self.regressor[-1].bias.data.zero_()
+        self.tensor = torch.stack([x.flatten(), y.flatten()], dim=1)
+        self.init(in_channels, **kwargs)
+        self.tps_grid = TPSGrid(self.img_size, self.tensor)
 
     def _transform(self, x, beta, inverse=False):
         if inverse:
@@ -1030,22 +1117,18 @@ class TPSModule(_AbstractTransformationModule):
             return x
         source_control_points = self.identity + beta.view(x.size(0), -1, 2)
         grid = self.tps_grid(source_control_points).view(x.size(0), *self.img_size, 2)
-        if self.freeze_frg:
-            out = F.grid_sample(
-                x[:, -1, ...].unsqueeze(1),
-                grid,
-                mode="bilinear",
-                padding_mode=self.padding_mode,
-                align_corners=False,
-            )
-            return torch.cat([x[:, : x.size(1) - 1, ...], out], dim=1)
-        return F.grid_sample(
-            x,
+        grid_x = x[:, -1, ...].unsqueeze(1) if self.freeze_frg else x
+
+        out = F.grid_sample(
+            grid_x,
             grid,
             mode="bilinear",
             padding_mode=self.padding_mode,
             align_corners=False,
         )
+        if self.freeze_frg:
+            return torch.cat([x[:, : x.size(1) - 1, ...], out], dim=1)
+        return out
 
     def param_2_matrix(self, params, batch_size):
         """Get control points from parameters for a specific module instance."""
@@ -1057,28 +1140,19 @@ class TPSModule(_AbstractTransformationModule):
 #  Morphological Modules  #
 ###########################
 
-
 class MorphologicalModule(_AbstractTransformationModule):
     def __init__(self, in_channels, **kwargs):
         super().__init__()
-        self.kernel_size = kwargs.get("kernel_size", 3)
         self.freeze_frg = kwargs.get("freeze_frg", False)
+        self.kernel_size = kwargs.get("kernel_size", 3)
         assert isinstance(self.kernel_size, (int, float))
         self.padding = self.kernel_size // 2
-        n_layers = kwargs.get("n_hidden_layers", N_LAYERS)
-        self.regressor = create_mlp(
-            in_channels, self.kernel_size**2 + 1, N_HIDDEN_UNITS, n_layers
-        )
-
-        # Identity transformation parameters and regressor initialization
-        weights = torch.full(
-            (self.kernel_size, self.kernel_size), fill_value=-5, dtype=torch.float
-        )
+        self.out_channels = self.kernel_size ** 2 + 1
+        weights = torch.full((self.kernel_size, self.kernel_size), fill_value=-5, dtype=torch.float)
         center = self.kernel_size // 2
         weights[center, center] = 5
-        self.register_buffer("identity", torch.cat([torch.zeros(1), weights.flatten()]))
-        self.regressor[-1].weight.data.zero_()
-        self.regressor[-1].bias.data.zero_()
+        self.tensor = torch.cat([torch.zeros(1), weights.flatten()])
+        self.init(in_channels, **kwargs)
 
     def _transform(self, x, beta, inverse=False):
         if inverse:
@@ -1090,16 +1164,14 @@ class MorphologicalModule(_AbstractTransformationModule):
         if self.freeze_frg:
             out = self.smoothmax_kernel(x[:, -1, ...].unsqueeze(1), alpha, torch.sigmoid(weights))
             return torch.cat([x[:, : x.size(1) - 1, ...], out], dim=1)
-        else:
-            # print(f"MorphologicalModule input shape: {x.shape} / channels: {x.shape[1]}")
 
-            if x.shape[1] > 1:
-                # Multi-channel input
-                morph_channel = x[:, 0:1, ...]  # Use first channel
-                transformed = self.smoothmax_kernel(morph_channel, alpha, torch.sigmoid(weights))
-                return torch.cat([transformed, x[:, 1:, ...]], dim=1)
-            else:
-                return self.smoothmax_kernel(x, alpha, torch.sigmoid(weights))
+        if x.shape[1] > 1:
+            # Multi-channel input
+            morph_channel = x[:, 0:1, ...]  # Use first channel
+            transformed = self.smoothmax_kernel(morph_channel, alpha, torch.sigmoid(weights))
+            return torch.cat([transformed, x[:, 1:, ...]], dim=1)
+
+        return self.smoothmax_kernel(x, alpha, torch.sigmoid(weights))
 
     def smoothmax_kernel(self, x, alpha, kernel):
         if isinstance(alpha, torch.Tensor):
@@ -1120,3 +1192,124 @@ class MorphologicalModule(_AbstractTransformationModule):
         # Return morphological kernel [B, kernel_size, kernel_size]
         kernel_params = params[:, 1:] + self.identity[1:]
         return kernel_params.view(batch_size, self.kernel_size, self.kernel_size)
+
+
+###############################
+#      Composite Modules      #
+###############################
+
+class ComposedTransformModule(_AbstractTransformationModule, ABC):
+    """Generic module that composes multiple transformations.
+    This module can compose Affine modules that implement the _compose_into() protocol.
+    """
+
+    def __init__(self, in_channels, component_modules, **kwargs):
+        """
+        in_channels: Number of input feature channels
+        component_modules: List of (ModuleClass, kwargs_dict) tuples
+            Example: [
+                (IsotropicScalingModule, {}),
+                (RotationModule, {}),
+                (TranslationModule, {})
+            ]
+        """
+        super().__init__()
+
+        self.components = []
+        for module_class, module_kwargs in component_modules:
+            if not hasattr(module_class, '_compose_into'):
+                raise TypeError(f"{module_class.__name__} must implement _compose_into()")
+
+            component = module_class.__new__(module_class)
+            component.__dict__.update(module_kwargs)
+            component.out_channels = module_class.get_out_channels(**module_kwargs)
+            self.components.append(component)
+
+        self.out_channels = sum(comp.out_channels for comp in self.components)
+        self.init(in_channels, **kwargs)
+
+    def _build_matrix(self, params):
+        """Build composed transformation matrix from parameters.
+
+        This method splits parameters and calls each component's
+        _compose_into() method to build the final transformation.
+        """
+        param_splits = [comp.out_channels for comp in self.components]
+        param_list = torch.split(params, param_splits, dim=1)
+
+        # initialize to identity
+        batch_size = params.shape[0]
+        scale = torch.eye(2, 2, device=params.device).unsqueeze(0).expand(batch_size, -1, -1).clone()
+        translation = torch.zeros(batch_size, 2, 1, device=params.device)
+
+        for component, param in zip(self.components, param_list):
+            scale, translation = component._compose_into(param, scale, translation)
+
+        return torch.cat([scale, translation], dim=2)
+
+    def _transform(self, x, beta, inverse=False):
+        """Apply composed transformation."""
+        beta_matrix = self._build_matrix(beta) + self.identity.unsqueeze(0)
+
+        grid = F.affine_grid(
+            beta_matrix,
+            (x.size(0), x.size(1), self.img_size[0], self.img_size[1]),
+            align_corners=False,
+        )
+        return F.grid_sample(
+            x, grid, mode="bilinear",
+            padding_mode=self.padding_mode, align_corners=False
+        )
+
+    def param_2_matrix(self, params, batch_size):
+        """Convert parameters to transformation matrix."""
+        matrix_2x3 = self._build_matrix(params) + self.identity.unsqueeze(0)
+        return self.add_bottom_row(matrix_2x3, batch_size)
+
+
+class IsotropicTranslationModule(ComposedTransformModule):
+    """Isotropic scaling + translation."""
+
+    def __init__(self, in_channels, **kwargs):
+        component_modules = [
+            # (ScalingModule, {'isotropic': True}),
+            (IsotropicScalingModule, {}),
+            (TranslationModule, {})
+        ]
+        super().__init__(in_channels, component_modules, **kwargs)
+
+
+class AnisotropicTranslationModule(ComposedTransformModule):
+    """Anisotropic scaling + translation."""
+
+    def __init__(self, in_channels, **kwargs):
+        component_modules = [
+            # (ScalingModule, {'isotropic': False}),
+            (AnisotropicScalingModule, {}),
+            (TranslationModule, {})
+        ]
+        super().__init__(in_channels, component_modules, **kwargs)
+
+
+class SimilarityTransformModule(ComposedTransformModule):
+    """Isotropic scaling + rotation + translation."""
+
+    def __init__(self, in_channels, **kwargs):
+        component_modules = [
+            # (ScalingModule, {'isotropic': True}),
+            (IsotropicScalingModule, {}),
+            (RotationModule, {}),
+            (TranslationModule, {})
+        ]
+        super().__init__(in_channels, component_modules, **kwargs)
+
+
+class RotationTranslationModule(ComposedTransformModule):
+    """Rotation + translation."""
+
+    def __init__(self, in_channels, **kwargs):
+        component_modules = [
+            (RotationModule, {}),
+            (TranslationModule, {})
+        ]
+        super().__init__(in_channels, component_modules, **kwargs)
