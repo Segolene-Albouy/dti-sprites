@@ -56,28 +56,25 @@ class PrototypeTransformationNetwork(nn.Module):
         super().__init__()
         self.n_prototypes = n_prototypes
         self.sequence_name = transformation_sequence
-        # if self.sequence_name in ["id", "identity"]:
-        #    return None
 
         encoder = kwargs.get("encoder", None)
-        if encoder is not None:
-            self.shared_enc = True
+        self.shared_enc = encoder is not None
+
+        if self.shared_enc:
             self.encoder = encoder
             self.enc_out_channels = self.encoder.out_ch
         else:
-            self.shared_enc = False
-            encoder_kwargs = {
+            self.encoder = Encoder(**{
                 "in_channels": in_channels,
                 "encoder_name": kwargs.get("encoder_name", "resnet20"),
                 "img_size": img_size,
                 "with_pool": kwargs.get("with_pool", True),
-            }
-            encoder_name = encoder_kwargs["encoder_name"]
-            self.encoder = Encoder(**encoder_kwargs)
+            })
             self.enc_out_channels = get_output_size(
-                in_channels, img_size, self.encoder, encoder_name
+                in_channels, img_size, self.encoder, kwargs.get("encoder_name", "resnet20")
             )
-        tsf_kwargs = {
+
+        self.tsf_kwargs = {
             "freeze_frg": kwargs.get("freeze_frg", False),
             "in_channels": self.enc_out_channels,
             "img_size": img_size,
@@ -92,15 +89,14 @@ class PrototypeTransformationNetwork(nn.Module):
             "use_clamp": kwargs.get("use_clamp", "soft"),
             "n_hidden_layers": kwargs.get("n_hidden_layers", N_LAYERS),
         }
-        self.tsf_kwargs = tsf_kwargs
-        self.shared_t = tsf_kwargs["shared_t"]
+        self.shared_t = self.tsf_kwargs["shared_t"]
         if self.shared_t:
-            self.tsf_sequences = TransformationSequence(**deepcopy(tsf_kwargs))
+            self.tsf_sequences = TransformationSequence(**deepcopy(self.tsf_kwargs))
         else:
             self.tsf_sequences = nn.ModuleList(
                 [
-                    TransformationSequence(**deepcopy(tsf_kwargs))
-                    for i in range(n_prototypes)
+                    TransformationSequence(**deepcopy(self.tsf_kwargs))
+                    for _ in range(n_prototypes)
                 ]
             )
 
@@ -171,9 +167,7 @@ class PrototypeTransformationNetwork(nn.Module):
                 if self.shared_t
                 else [
                     tsf_seq.apply_parameters(proto, beta, is_var=is_var)
-                    for tsf_seq, proto, beta in zip(
-                        self.tsf_sequences, prototypes, betas
-                    )
+                    for tsf_seq, proto, beta in zip(self.tsf_sequences, prototypes, betas)
                 ]
             )
             return torch.stack(target, dim=1)

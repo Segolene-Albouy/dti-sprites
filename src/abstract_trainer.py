@@ -318,14 +318,13 @@ class AbstractTrainer(ABC):
 
     def setup_val_metrics(self):
         self.val_stat_interval = self.cfg["training"]["val_stat_interval"]
+        if self.is_val_empty:
+            return
 
         self.val_metrics = Metrics("loss_val")
-
         self.val_metrics_path = self.run_dir / VAL_METRICS_FILE
         self.save_metrics_file(self.val_metrics_path, self.val_metrics.names)
-
         self.setup_val_scores()
-
         self.val_scores_path = self.run_dir / VAL_SCORES_FILE
         self.save_metrics_file(self.val_scores_path, self.val_scores.names)
 
@@ -754,6 +753,9 @@ class AbstractTrainer(ABC):
         self.print_and_log_info(f"{prefix}:\t{stats_text}")
 
     def log_val_metrics(self, cur_iter, epoch, batch, precision=5):
+        if self.val_metrics_path is None:
+            return
+
         stat = f"{self.progress_str(epoch, batch)}: val_metrics: {self.val_metrics}"
         fmt = f"{{:.{precision}f}}".format
         self.print_and_log_info(stat)
