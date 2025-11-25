@@ -131,7 +131,7 @@ class Trainer(AbstractTrainer):
         path = coerce_to_path_and_check_exist(
             RUNS_PATH / self.dataset_name / tag / MODEL_FILE
         )
-        checkpoint = torch.load(path, map_location=self.device)
+        checkpoint = torch.load(path, map_location=self.device, weights_only=False)
         try:
             self.model.load_state_dict(checkpoint["model_state"])
         except RuntimeError:
