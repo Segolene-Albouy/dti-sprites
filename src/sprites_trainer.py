@@ -87,7 +87,7 @@ class Trainer(AbstractTrainer):
     def setup_model(self):
         """Initialize model architecture"""
         super().setup_model()
-        self.n_backgrounds = getattr(self.model, "n_backgrounds", 0)
+        self.n_backgrounds = getattr(self.model, "n_backgrounds", 1)
         self.n_objects = max(self.model.n_objects, 1)
         self.pred_class = getattr(self.model, "pred_class", False) or getattr(
             self.model, "estimate_minimum", False
@@ -204,7 +204,7 @@ class Trainer(AbstractTrainer):
         path = coerce_to_path_and_check_exist(
             RUNS_PATH / self.dataset_name / tag / MODEL_FILE
         )
-        checkpoint = torch.load(path, map_location=self.device)
+        checkpoint = torch.load(path, map_location=self.device, weights_only=False)
         try:
             self.model.load_state_dict(checkpoint["model_state"])
         except RuntimeError:
@@ -221,10 +221,8 @@ class Trainer(AbstractTrainer):
             self.cur_lr = self.scheduler.get_last_lr()[0]
         if hasattr(self.model, "cur_epoch"):
             self.model.cur_epoch = checkpoint["epoch"]
-        self.print_and_log_info(
-            f"Checkpoint loaded at epoch {self.start_epoch}, batch {self.start_batch - 1}"
-        )
-        self.print_and_log_info("LR = {}".format(self.cur_lr))
+        self.print_and_log_info(f"Checkpoint loaded at epoch {self.start_epoch}, batch {self.start_batch - 1}")
+        self.print_and_log_info(f"LR = {self.cur_lr}")
 
     def compute_cluster_assignments(self, dist, class_prob, batch_size):
         """
@@ -328,14 +326,6 @@ class Trainer(AbstractTrainer):
         self.train_metrics.update(
             {f"prop_clus{i}": p.item() for i, p in enumerate(proportions)}
         )
-
-    @torch.no_grad()
-    def get_cluster_assignments(self, images):
-        dist = self.model(images)[1]
-        if self.n_backgrounds > 1:
-            dist = dist.view(images.size(0), self.n_prototypes, self.n_backgrounds).min(2)[0]
-        dist_min_by_sample, argmin_idx = map(lambda t: t.cpu().numpy(), dist.min(1))
-        return dist_min_by_sample, argmin_idx
 
     ######################
     #   SAVING METHODS   #
@@ -523,11 +513,7 @@ class Trainer(AbstractTrainer):
                     if is_bkg:
                         msg += " for backgrounds"
                     self.print_and_log_info(msg)
-                self.print_and_log_info(
-                    ", ".join(
-                        [f"prop_{k}={prop[k]:.4f}" for k in range(len(prop))]
-                    )
-                )
+                self.print_and_log_info(", ".join([f"prop_{k}={prop[k]:.4f}" for k in range(len(prop))]))
         elif self.n_objects > 1:
             k = np.random.randint(0, self.n_objects)
             if self.n_clusters == self.n_prototypes ** self.n_objects:
@@ -544,9 +530,7 @@ class Trainer(AbstractTrainer):
                 msg = f"{self.progress_str(epoch, batch)}: Reassigned clusters {reassigned} from cluster {idx} for object layer {k}"
                 self.print_and_log_info(msg)
             self.print_and_log_info(
-                ", ".join(
-                    ["prop_{}={:.4f}".format(k, prop[k]) for k in range(len(prop))]
-                )
+                ", ".join([f"prop_{k}={prop[k]:.4f}" for k in range(len(prop))])
             )
         else:
             reassigned, idx = self.model.reassign_empty_clusters(proportions)
@@ -708,6 +692,7 @@ class Trainer(AbstractTrainer):
     @torch.no_grad()
     def qualitative_eval(self):
         """Routine to save qualitative results"""
+        self.model.eval()
         loss = AverageMeter()
         scores_path = self.run_dir / FINAL_SCORES_FILE
         with open(scores_path, mode="w") as f:
@@ -767,8 +752,8 @@ class Trainer(AbstractTrainer):
             ).set_index("path")
             cluster_by_path.to_csv(self.run_dir / "cluster_by_path.csv")
 
-        self.print_and_log_info("bin_counts: " + str(self.bin_counts))
-        self.print_and_log_info("final_loss: {:.5}".format(float(loss.avg)))
+        self.print_and_log_info(f"bin_counts: {self.bin_counts}")
+        self.print_and_log_info(f"final_loss: {float(loss.avg):.5}")
 
         # Save results
         with open(self.cluster_path / "cluster_counts.tsv", mode="w") as f:
@@ -884,6 +869,7 @@ class Trainer(AbstractTrainer):
     @torch.no_grad()
     def segmentation_qualitative_eval(self):
         """Run and save qualitative evaluation for semantic segmentation"""
+        self.model.eval()
         out = coerce_to_path_and_create_dir(self.run_dir / "semantic_seg")
         K = self.n_prototypes if self.model.add_empty_sprite else self.n_prototypes + 1
         colors = sns.color_palette("hls", K)
@@ -1081,6 +1067,7 @@ class Trainer(AbstractTrainer):
     @torch.no_grad()
     def instance_seg_qualitative_eval(self):
         """Run and save qualitative evaluation for instance segmentation"""
+        self.model.eval()
         out = coerce_to_path_and_create_dir(self.run_dir / "instance_seg")
         colors = sns.color_palette("tab10", self.n_objects + 1)
         dataset = self.train_loader.dataset
@@ -1166,9 +1153,6 @@ class Trainer(AbstractTrainer):
         loss = AverageMeter()
         scores_path = self.run_dir / FINAL_SCORES_FILE
         scores = Scores(self.n_classes, self.n_prototypes)
-        with open(scores_path, mode="w") as f:
-            f.write("loss\t" + "\t".join(scores.names) + "\n")
-
         dataset = get_dataset(self.dataset_name)(
             "train", eval_mode=True, **self.dataset_kwargs
         )
@@ -1181,9 +1165,8 @@ class Trainer(AbstractTrainer):
             _, distances, class_prob = self.model(images)
             if self.n_backgrounds > 1:
                 assert class_prob is None
-                distances, bkg_idx = distances.view(
-                    B, self.n_prototypes, self.n_backgrounds
-                ).min(2)
+                distances, bkg_idx = distances.view(B, self.n_prototypes, self.n_backgrounds).min(2)
+
             if self.n_objects > 1:
                 distances = distances.view(B, *(self.n_prototypes,) * self.n_objects)
                 other_idxs = []
@@ -1201,17 +1184,8 @@ class Trainer(AbstractTrainer):
             scores.update(labels.long().numpy(), argmin_idx.cpu().numpy())
 
         scores = scores.compute()
-        self.print_and_log_info("final_loss: {:.4f}".format(float(loss.avg)))
-        self.print_and_log_info(
-            "final_scores: "
-            + ", ".join(["{}={:.4f}".format(k, v) for k, v in scores.items()])
-        )
-        with open(scores_path, mode="a") as f:
-            f.write(
-                "{:.6}\t".format(float(loss.avg))
-                + "\t".join(map("{:.6f}".format, scores.values()))
-                + "\n"
-            )
+        self.log_final_scores(loss, scores, scores_path)
+
 
     ######################
     #  VISUALIZE METHODS #

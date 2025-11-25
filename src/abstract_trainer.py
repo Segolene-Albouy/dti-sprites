@@ -71,6 +71,7 @@ class AbstractTrainer(ABC):
     is_gmm = None
     model = None
     n_prototypes = None
+    n_backgrounds = 1
 
     # Optimizer and scheduler
     optimizer = None
@@ -145,9 +146,7 @@ class AbstractTrainer(ABC):
 
     def setup_logging(self):
         self.logger = get_logger(self.run_dir, name="trainer")
-        self.print_and_log_info(
-            f"Trainer initialisation: run directory is {self.run_dir}"
-        )
+        self.print_and_log_info(f"Trainer initialisation: run directory is {self.run_dir}")
 
     def setup_config(self, cfg):
         """Load and process configuration"""
@@ -168,12 +167,8 @@ class AbstractTrainer(ABC):
         self.is_val_empty = len(self.val_dataset) == 0
         self.img_size = self.train_dataset.img_size
 
-        self.print_and_log_info(
-            f"Dataset {self.dataset_name} instantiated with img_size={self.train_dataset}, n_channels={self.train_dataset.n_channels}, "
-        )
-        self.print_and_log_info(
-            f"Found {len(self.train_dataset)} train samples / {len(self.val_dataset)} val samples"
-        )
+        self.print_and_log_info(f"Dataset {self.dataset_name} instantiated with img_size={self.train_dataset}, n_channels={self.train_dataset.n_channels}, ")
+        self.print_and_log_info(f"Found {len(self.train_dataset)} train samples / {len(self.val_dataset)} val samples")
 
     def setup_dataloaders(self):
         """Create data loaders from datasets"""
@@ -197,9 +192,7 @@ class AbstractTrainer(ABC):
             self.val_dataset, batch_size=self.batch_size, num_workers=self.n_workers
         )
 
-        self.print_and_log_info(
-            f"Dataloaders instantiated with batch_size={self.batch_size} and n_workers={self.n_workers}"
-        )
+        self.print_and_log_info(f"Dataloaders instantiated with batch_size={self.batch_size} and n_workers={self.n_workers}")
         self.n_batches = len(self.train_loader)
         self._setup_iteration_counts()
 
@@ -228,12 +221,8 @@ class AbstractTrainer(ABC):
         self.n_prototypes = self.model.n_prototypes
         self.is_gmm = "gmm" in self.model_name
 
-        self.print_and_log_info(
-            f"Using model {self.model_name} with kwargs {self.model_kwargs}"
-        )
-        self.print_and_log_info(
-            f"Number of trainable parameters: {count_parameters(self.model):,}"
-        )
+        self.print_and_log_info(f"Using model {self.model_name} with kwargs {self.model_kwargs}")
+        self.print_and_log_info(f"Number of trainable parameters: {count_parameters(self.model):,}")
 
     def setup_directories(self):
         if not self.save_img:
@@ -280,9 +269,7 @@ class AbstractTrainer(ABC):
         )
         self.cur_lr = self.scheduler.get_last_lr()[0]
 
-        self.print_and_log_info(
-            f"Using scheduler {scheduler_name} with parameters {scheduler_params}"
-        )
+        self.print_and_log_info(f"Using scheduler {scheduler_name} with parameters {scheduler_params}")
 
     def get_scheduler_name(self, scheduler_params):
         """Extract scheduler name from config.
@@ -331,14 +318,13 @@ class AbstractTrainer(ABC):
 
     def setup_val_metrics(self):
         self.val_stat_interval = self.cfg["training"]["val_stat_interval"]
+        if self.is_val_empty:
+            return
 
         self.val_metrics = Metrics("loss_val")
-
         self.val_metrics_path = self.run_dir / VAL_METRICS_FILE
         self.save_metrics_file(self.val_metrics_path, self.val_metrics.names)
-
         self.setup_val_scores()
-
         self.val_scores_path = self.run_dir / VAL_SCORES_FILE
         self.save_metrics_file(self.val_scores_path, self.val_scores.names)
 
@@ -381,9 +367,7 @@ class AbstractTrainer(ABC):
         lr = self.scheduler.get_last_lr()[0]
         if lr != self.cur_lr:
             self.cur_lr = lr
-            self.print_and_log_info(
-                f"{self.progress_str(epoch, batch)} | LR update: lr = {lr}"
-            )
+            self.print_and_log_info(f"{self.progress_str(epoch, batch)} | LR update: lr = {lr}")
 
     @abstractmethod
     def single_train_batch_run(self, *args, **kwargs):
@@ -434,7 +418,17 @@ class AbstractTrainer(ABC):
 
     @torch.no_grad()
     def get_cluster_assignments(self, images):
-        raise NotImplementedError
+        dist = self.model(images)[1]
+        if self.model.n_objects > 1:
+            L, K = self.model.n_objects, self.model.n_prototypes
+            dist = dist.view(images.size(0), L, K).min(dim=1)[0]
+        if self.n_backgrounds > 1:
+            L, K = self.n_prototypes, self.n_backgrounds
+            dist = dist.view(images.size(0), L, K).min(2)[0]
+        dist_min_by_sample, argmin_idx = map(
+            lambda t: t.cpu().numpy(), dist.min(1)
+        )
+        return dist_min_by_sample, argmin_idx
 
     ######################
     #   SAVING METHODS   #
@@ -493,11 +487,11 @@ class AbstractTrainer(ABC):
         raise NotImplementedError
 
     @torch.no_grad()
-    def save_aligned_images(self, loader=None, path="aligned", prefix="aligned", bkg=(255,60,0), only_translate=True):
+    def save_aligned_images(self, loader=None, path="aligned_translation", prefix="aligned", bkg=(255,60,0), only_translate=True):
         """
         Args:
             loader: DataLoader to use (defaults to train_loader)
-            path: Save path (defaults to run_dir/aligned_clusters)
+            path: Save path (defaults to run_dir/aligned_translation)
             prefix: Filename prefix
             bkg: Background color for empty regions (hex color)
             only_translate: If True, extract only translation from spatial transformations
@@ -522,7 +516,7 @@ class AbstractTrainer(ABC):
         for batch_idx, (images, labels, masks, paths) in enumerate(loader):
             images = images.to(self.device)
             cluster_assignments = self.get_cluster_assignments(images)[1]  # argmin_idx
-            affine_matrices = self.model.get_tsf_matrix('affine', images)  # [B, 2, 4]
+            affine_matrices = self.model.get_tsf_matrix('affine', images, argmin_idx=cluster_assignments)  # [B, 3, 3]
 
             for i, (cl_idx, affine_matrix, img_path) in enumerate(zip(cluster_assignments, affine_matrices, paths)):
                 try:
@@ -718,9 +712,7 @@ class AbstractTrainer(ABC):
     def print_device_info(self):
         """Print information about the device configuration"""
         nb_device = torch.cuda.device_count() if self.device.type == "cuda" else None
-        self.print_and_log_info(
-            f"Using {self.device.type} device, nb_device is {nb_device}"
-        )
+        self.print_and_log_info(f"Using {self.device.type} device, nb_device is {nb_device}")
 
     @torch.no_grad()
     def log_images(self, cur_iter):
@@ -761,6 +753,9 @@ class AbstractTrainer(ABC):
         self.print_and_log_info(f"{prefix}:\t{stats_text}")
 
     def log_val_metrics(self, cur_iter, epoch, batch, precision=5):
+        if self.val_metrics_path is None:
+            return
+
         stat = f"{self.progress_str(epoch, batch)}: val_metrics: {self.val_metrics}"
         fmt = f"{{:.{precision}f}}".format
         self.print_and_log_info(stat)
@@ -801,6 +796,21 @@ class AbstractTrainer(ABC):
 
         self.update_visualizer_metrics(cur_iter, train=True)
         self.train_metrics.reset("time/img", "loss", "loss_em", "loss_bin", "loss_rec", "loss_freq")
+
+    def log_final_scores(self, loss, scores, scores_path):
+        self.print_and_log_info(f"final_loss: {float(loss.avg):.4f}")
+
+        with open(scores_path, mode="w") as f:
+            f.write("loss\t" + "\t".join(scores.names) + "\n")
+        self.print_and_log_info(
+            "final_scores: " + ", ".join([f"{k}={v:.4f}" for k, v in scores.items()])
+        )
+        with open(scores_path, mode="a") as f:
+            f.write(
+                f"{loss.avg:.5}\t"
+                + "\t".join(f"{v:.4f}" for v in scores.values())
+                + "\n"
+            )
 
     ######################
     # VALIDATION METHODS #

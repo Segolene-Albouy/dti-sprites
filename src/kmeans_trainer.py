@@ -96,9 +96,7 @@ class Trainer(AbstractTrainer):
             self.model.set_optimizer(self.optimizer)
 
         # Log optimizer configuration
-        self.print_and_log_info(
-            f"Using optimizer {optimizer_name} with kwargs {opt_params}"
-        )
+        self.print_and_log_info(f"Using optimizer {optimizer_name} with kwargs {opt_params}")
         self.print_and_log_info(f"cluster kwargs {cluster_kwargs}")
         self.print_and_log_info(f"transformer kwargs {tsf_kwargs}")
 
@@ -133,7 +131,7 @@ class Trainer(AbstractTrainer):
         path = coerce_to_path_and_check_exist(
             RUNS_PATH / self.dataset_name / tag / MODEL_FILE
         )
-        checkpoint = torch.load(path, map_location=self.device)
+        checkpoint = torch.load(path, map_location=self.device, weights_only=False)
         try:
             self.model.load_state_dict(checkpoint["model_state"])
         except RuntimeError:
@@ -152,11 +150,7 @@ class Trainer(AbstractTrainer):
                 )
             self.scheduler.load_state_dict(checkpoint["scheduler_state"])
             self.cur_lr = self.scheduler.get_last_lr()[0]
-        self.print_and_log_info(
-            "Checkpoint loaded at epoch {}, batch {}".format(
-                self.start_epoch, self.start_batch - 1
-            )
-        )
+        self.print_and_log_info(f"Checkpoint loaded at epoch {self.start_epoch}, batch {self.start_batch - 1}")
 
     @use_seed()
     def run(self):
@@ -248,14 +242,6 @@ class Trainer(AbstractTrainer):
             self.train_metrics.update(
                 {f"prop_clus{i}": p for i, p in enumerate(proportions)}
             )
-
-    @torch.no_grad()
-    def get_cluster_assignments(self, images):
-        distances = self.model(images)[1]
-        dist_min_by_sample, argmin_idx = map(
-            lambda t: t.cpu().numpy(), distances.min(1)
-        )
-        return dist_min_by_sample, argmin_idx
 
     ######################
     #   SAVING METHODS   #
@@ -373,6 +359,7 @@ class Trainer(AbstractTrainer):
     @torch.no_grad()
     def qualitative_eval(self):
         """Routine to save qualitative results"""
+        self.model.eval()
         loss = AverageMeter()
         scores_path = self.run_dir / FINAL_SCORES_FILE
         with open(scores_path, mode="w") as f:
@@ -464,9 +451,6 @@ class Trainer(AbstractTrainer):
         loss = AverageMeter()
         scores_path = self.run_dir / FINAL_SCORES_FILE
         scores = Scores(self.n_classes, self.n_prototypes)
-        with open(scores_path, mode="w") as f:
-            f.write("loss\t" + "\t".join(scores.names) + "\n")
-
         dataset = get_dataset(self.dataset_name)(
             "train", eval_mode=True, **self.dataset_kwargs
         )
@@ -489,18 +473,8 @@ class Trainer(AbstractTrainer):
             scores.update(labels.long().numpy(), argmin_idx.cpu().numpy())
 
         scores = scores.compute()
-        self.print_and_log_info("bin_counts: " + str(self.bin_counts))
-        self.print_and_log_info("final_loss: {:.5}".format(loss.avg))
-        self.print_and_log_info(
-            "final_scores: "
-            + ", ".join(["{}={:.4f}".format(k, v) for k, v in scores.items()])
-        )
-        with open(scores_path, mode="a") as f:
-            f.write(
-                "{:.5}\t".format(loss.avg)
-                + "\t".join(map("{:.4f}".format, scores.values()))
-                + "\n"
-            )
+        self.print_and_log_info(f"bin_counts: {self.bin_counts}")
+        self.log_final_scores(loss, scores, scores_path)
 
 
 @hydra.main(version_base=None, config_path="../conf", config_name="config")

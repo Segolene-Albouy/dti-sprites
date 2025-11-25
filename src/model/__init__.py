@@ -18,7 +18,7 @@ def load_model_from_path(model_path, dataset, device=None, attributes_to_return=
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     checkpoint = torch.load(
-        coerce_to_path_and_check_exist(model_path), map_location=device.type
+        coerce_to_path_and_check_exist(model_path), map_location=device.type, weights_only=False
     )
     model_kwargs = checkpoint["model_kwargs"]
     model = get_model(checkpoint["model_name"])(dataset, **model_kwargs)

@@ -615,12 +615,22 @@ class DTISprites(AbstractDTI):
         return iter(params)
 
     @torch.no_grad()
-    def get_tsf_matrix(self, tsf_name, x, sprite_idx=0, background=False):
+    def get_tsf_matrix(self, tsf_name, x, argmin_idx=0, layer_idx=0, background=False, **kwargs):
         if background and hasattr(self, 'bkg_transformer'):
-            return self.bkg_transformer.get_tsf_matrix(tsf_name, x)
+            # TODO handle multiple backgrounds
+            return self.bkg_transformer.get_tsf_matrix(tsf_name, x, argmin_idx=0, **kwargs)
         elif hasattr(self, 'sprite_transformers'):
-            return self.sprite_transformers[sprite_idx].get_tsf_matrix(tsf_name, x)
-        return self.transformer.get_tsf_matrix(tsf_name, x)
+            return self.sprite_transformers[layer_idx].get_tsf_matrix(tsf_name, x, argmin_idx=argmin_idx, **kwargs)
+        return self.transformer.get_tsf_matrix(tsf_name, x, argmin_idx=argmin_idx, **kwargs)
+
+    @torch.no_grad()
+    def get_batch_tsf_matrices(self, x, argmin_idx=None, tsf_names=None, layer_idx=0, background=False, **kwargs):
+        if background and hasattr(self, 'bkg_transformer'):
+            # TODO handle multiple backgrounds
+            return self.bkg_transformer.get_batch_tsf_matrices(x, argmin_idx=0, tsf_names=tsf_names, **kwargs)
+        elif hasattr(self, 'sprite_transformers'):
+            return self.sprite_transformers[layer_idx].get_batch_tsf_matrices(x, argmin_idx=argmin_idx, tsf_names=tsf_names, **kwargs)
+        return self.transformer.get_batch_tsf_matrices(x, argmin_idx=argmin_idx, tsf_names=tsf_names, **kwargs)
 
     def transformer_parameters(self):
         params = [t.get_parameters() for t in self.sprite_transformers]
@@ -678,41 +688,36 @@ class DTISprites(AbstractDTI):
         loss_freq: frequency loss
         loss_em: empty sprite loss
         """
-        loss_em = torch.Tensor([0.0])
-        # B, C, H, W = x.size()
+        B, C, H, W = x.size()
+        L, K, M = self.n_objects, self.n_sprites, self.n_backgrounds or 1
 
         tsf_layers, tsf_masks, tsf_bkg, occ_grid, class_prob = self.predict(x)
         target = self.compose(tsf_layers, tsf_masks, occ_grid, tsf_bkg, class_prob)
+        loss_bin, loss_freq, loss_em = torch.Tensor([0.0]), torch.Tensor([0.0]), torch.Tensor([0.0])
         if img_masks is not None:
             img_masks = img_masks.unsqueeze(1)
         x = x.unsqueeze(1)
 
         if class_prob is None:
             # target = B(K**L*M)CHW
-            L, K, M = self.n_objects, self.n_sprites, self.n_backgrounds or 1
             x = x.expand(-1, K**L * M, -1, -1, -1)
-            # if img_masks is not None:
-            #     img_masks = img_masks.expand(-1, K ** L * M, -1, -1, -1)
             distances = self.criterion(x, target, alpha_masks=img_masks)
             loss_r = distances.min(1)[0].mean()
-            loss = (loss_r, loss_r, torch.Tensor([0.0]), torch.Tensor([0.0]))
+            loss = (loss_r, loss_r, loss_bin, loss_freq, loss_em)
 
         else:
             # target = BCHW
-            distances = self.criterion(x, target.unsqueeze(1), alpha_masks=img_masks)
-            loss_r = distances.mean()
-            loss_bin, loss_freq = torch.Tensor([0.0]), torch.Tensor([0.0])
+            loss_r = self.criterion(x, target.unsqueeze(1), alpha_masks=img_masks).mean()
             loss_all = loss_r
             class_oh = class_prob
 
             if self.estimate_proba:
-                freq_loss = self.reg_func(class_prob, type="freq")
-                bin_loss = self.reg_func(class_prob, type="bin")
-
                 if self.add_empty_sprite and not self.are_sprite_frozen:
                     loss_em = self.reg_func(class_prob, type="empty_sprite")
                     loss_r += loss_em
 
+                freq_loss = self.reg_func(class_prob, type="freq")
+                bin_loss = self.reg_func(class_prob, type="bin")
                 loss_freq = 1 - freq_loss.sum()
                 loss_bin = bin_loss.mean()
                 reg_loss = self.freq_weight * loss_freq + self.curr_bin_weight * loss_bin
@@ -721,7 +726,19 @@ class DTISprites(AbstractDTI):
                     1, class_prob.argmax(1, keepdim=True), 1
                 )
 
-            distances = 1 - class_oh.permute(2, 0, 1).flatten(1)  # B(L*K)
+            # distances: one-hot during training, real MSE during eval
+            if self.training:
+                distances = 1 - class_oh.permute(2, 0, 1).flatten(1)
+            else:
+                img_distances = []
+                for l in range(L):
+                    for k in range(K):
+                        class_mask = torch.zeros(L, K, B, device=x.device)
+                        class_mask[l, k, :] = 1.0
+                        target_lk = self.compose(tsf_layers, tsf_masks, occ_grid, tsf_bkg, class_mask)
+                        dist_lk = self.criterion(x, target_lk.unsqueeze(1), alpha_masks=img_masks)
+                        img_distances.append(dist_lk.squeeze(1).mean(-1))
+                distances = torch.stack(img_distances, dim=1)
             loss = (loss_all, loss_r, loss_bin, loss_freq, loss_em)
 
         return loss, distances, class_prob
