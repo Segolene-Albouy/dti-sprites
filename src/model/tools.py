@@ -54,8 +54,8 @@ def initialize_weights(*models):
 
 
 def create_gaussian_weights(img_size, n_channels, std):
-    g1d_h = signal.gaussian(img_size[0], std)
-    g1d_w = signal.gaussian(img_size[1], std)
+    g1d_h = signal.windows.gaussian(img_size[0], std)
+    g1d_w = signal.windows.gaussian(img_size[1], std)
     g2d = np.outer(g1d_h, g1d_w)
     return torch.from_numpy(g2d).unsqueeze(0).expand(n_channels, -1, -1).float()
 

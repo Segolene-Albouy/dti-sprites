@@ -2,7 +2,7 @@ pyyaml
 tqdm
 pandas
 Pillow
-scipy<1.13
+scipy
 kornia
 h5py
 scikit-learn
